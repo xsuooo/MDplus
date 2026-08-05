@@ -3,6 +3,7 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use tauri::Manager;
 
 const MAX_TEXT_FILE_BYTES: u64 = 32 * 1024 * 1024;
 
