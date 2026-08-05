@@ -195,7 +195,7 @@ pub fn run() {
             if !md_files.is_empty() {
                 if let Some(window) = app.get_webview_window("main") {
                     let files_json = serde_json::to_string(&md_files).unwrap_or_default();
-                    let _ = window.eval(&format!("window.__TAURI_OPEN_FILES__ = {}", files_json));
+                    let _ = window.eval(format!("window.__TAURI_OPEN_FILES__ = {}", files_json));
                     let _ = window.set_focus();
                 }
             }
@@ -218,7 +218,7 @@ pub fn run() {
                 // 将文件路径发送到前端
                 let window = app.get_webview_window("main").unwrap();
                 let files_json = serde_json::to_string(&md_files).unwrap();
-                let _ = window.eval(&format!("window.__TAURI_STARTUP_FILES__ = {}", files_json));
+                let _ = window.eval(format!("window.__TAURI_STARTUP_FILES__ = {}", files_json));
             }
             Ok(())
         })
