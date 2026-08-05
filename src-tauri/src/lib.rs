@@ -179,10 +179,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
-        .setup(|app| {
-            // 从命令行参数中提取要打开的文件路径
-            let args: Vec<String> = std::env::args().collect();
-            // 跳过第一个参数（程序路径），查找 .md 或 .markdown 文件
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // 当尝试启动第二个实例时，将参数发送给第一个实例
             let md_files: Vec<String> = args
                 .iter()
                 .skip(1)
@@ -195,16 +193,44 @@ pub fn run() {
                 .collect();
 
             if !md_files.is_empty() {
-                // 将文件路径发送到前端
-                let window = app.get_webview_window("main").unwrap();
+                if let Some(window) = app.get_webview_window("main") {
+                    let files_json = serde_json::to_string(&md_files).unwrap_or_default();
+                    let _ = window.eval(&format!("window.__TAURI_OPEN_FILES__ = {}", files_json));
+                    let _ = window.set_focus();
+                }
+            }
+        }))
+        .setup(|app| {
+            // 从命令行参数中提取要打开的文件路径
+            let args: Vec<String> = std::env::args().collect();
+            let md_files: Vec<String> = args
+                .iter()
+                .skip(1)
+                .filter(|arg| {
+                    let lower = arg.to_lowercase();
+                    (lower.ends_with(".md") || lower.ends_with(".markdown"))
+                        && std::path::Path::new(arg).exists()
+                })
+                .map(|s| s.to_string())
+                .collect();
+
+            let window = app.get_webview_window("main").unwrap();
+
+            // 如果有文件要打开，设置标志避免显示欢迎页
+            if !md_files.is_empty() {
                 let files_json = serde_json::to_string(&md_files).unwrap();
                 let _ = window.eval(&format!("window.__TAURI_STARTUP_FILES__ = {}", files_json));
+            } else {
+                // 没有文件时才显示窗口（会显示欢迎页）
+                let _ = window.show();
             }
+
             Ok(())
         })
         .on_page_load(|webview, payload| {
             if payload.event() == tauri::webview::PageLoadEvent::Finished {
-                let _ = webview.window().show();
+                // 检查是否有启动文件，有的话才显示窗口
+                let _ = webview.eval("if (window.__TAURI_STARTUP_FILES__) { window.__TAURI_SHOW_WINDOW__ = true; }");
             }
         })
         .invoke_handler(tauri::generate_handler![read_file, write_file, file_mtime])

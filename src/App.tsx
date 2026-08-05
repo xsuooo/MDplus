@@ -451,7 +451,29 @@ export default function App() {
       }
       // 清理，避免重复打开
       delete (window as any).__TAURI_STARTUP_FILES__;
+
+      // 文件打开后显示窗口
+      void getCurrentWindow().show();
     }
+  }, [openFileFromPath]);
+
+  /* ---------- 监听单实例传递的文件 ---------- */
+  useEffect(() => {
+    if (!isTauri()) return;
+
+    const checkInterval = setInterval(() => {
+      const openFiles = (window as any).__TAURI_OPEN_FILES__;
+      if (openFiles && Array.isArray(openFiles) && openFiles.length > 0) {
+        // 打开新传递的文件
+        for (const filePath of openFiles) {
+          void openFileFromPath(filePath);
+        }
+        // 清理
+        delete (window as any).__TAURI_OPEN_FILES__;
+      }
+    }, 100);
+
+    return () => clearInterval(checkInterval);
   }, [openFileFromPath]);
 
   const handleRemoveRecent = useCallback(async (path: string) => {
