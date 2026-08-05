@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>MDPlus 图标方案对比</title>
+    <link rel="icon" href="https://download.codebuddy.cn/web/workbuddy/dcddbb0e44d67f196107fcd563a4801875bca764/assets/logo.svg" />
+
+    <!-- 社交平台分享卡片 meta -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="WorkBuddy" />
+    <meta property="og:title" content="MDPlus 图标方案对比" />
+    <meta property="og:description" content="Workbuddy - 可人机协作的在线Page" />
+    <meta property="og:image" content="https://docs.gtimg.com/mindx/icon/wb-file-html-solid.png" />
+    <meta property="og:image:secure_url" content="https://docs.gtimg.com/mindx/icon/wb-file-html-solid.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="560" />
+    <meta property="og:image:height" content="560" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="MDPlus 图标方案对比" />
+    <meta name="twitter:description" content="Workbuddy - 可人机协作的在线Page" />
+    <meta name="twitter:image" content="https://docs.gtimg.com/mindx/icon/wb-file-html-solid.png" />
+
+    <script>
+        window.RUN_ENV = '__RUN_ENV__';
+        window.IS_INTERNATIONAL_EDITION = '__IS_INTERNATIONAL_EDITION__';
+        window.PRODUCT_FEATURES = '__PRODUCT_FEATURES__';
+        window.__toCdnUrl = (url) => {
+            const BASE_URL = '__BASE_URL__';
+            return (/__.*?__$/.test(BASE_URL) ? '' : BASE_URL) + '/' + url;
+        };
+    </script>
+
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            background: #ffffff;
+            color: #1a1a1a;
+        }
+        @media (prefers-color-scheme: dark) {
+            html, body {
+                background: #181818;
+                color: #e6e6e6;
+            }
+        }
+        #root {
+            width: 100%;
+            min-height: 100vh;
+            min-height: 100dvh;
+        }
+        .publish-bootstrap-loading {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+        }
+        .publish-bootstrap-loading .spinner {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            border: 2px solid currentColor;
+            border-top-color: transparent;
+            opacity: 0.5;
+            animation: publish-spin 0.8s linear infinite;
+        }
+        @keyframes publish-spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+  <script type="module" crossorigin src="/assets/index-DJlBsE02.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/vendor-react-DFKW9Wv1.js">
+  <link rel="modulepreload" crossorigin href="/assets/vendor-wb-report-Cq2kFz4W.js">
+  <link rel="stylesheet" crossorigin href="/assets/index-t8cg3QYJ.css">
+<script>window.__PUBLISH_BOOTSTRAP__={"nodeId":"F5dmpZHti1pcWvj7xv5xre","artifact":{"artifacts":[{"path":"concept-A.png"},{"path":"concept-B.png"},{"path":"concept-C.png"},{"path":"index.html"},{"path":"janus.data.json"}],"url":"https://workbuddy-space-static.codebuddy.work/page/F5dmpZHti1pcWvj7xv5xre/0/","creator":"dc89ce7b-c5de-4850-8a7b-555c0706f9f5"},"userInfo":{}};</script>
+</head>
+
+<body>
+    <div id="root">
+        <div class="publish-bootstrap-loading">
+            <div class="spinner"></div>
+        </div>
+    </div>
+    <!-- 微信 JSSDK — 小程序 WebView 登录态适配 -->
+    <script src="https://res.wx.qq.com/open/js/jweixin-1.6.0.js"></script>
+</body>
+
+</html>

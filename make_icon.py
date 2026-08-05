@@ -61,11 +61,13 @@ def render_mdplus(theme):
     d = ImageDraw.Draw(base)
 
     # 「MD+」一行居中，字一样大、纯白，最朴素直观
-    max_w = S * 0.84
+    max_w = S * 0.82
     F = 600
     while True:
         f = ImageFont.truetype(FONT, F)
-        w = d.textbbox((0, 0), "MD+", font=f, anchor="mm")[2]
+        # 注意：anchor='mm' 下 textbbox 以原点为中心，需用完整宽高
+        bb = d.textbbox((0, 0), "MD+", font=f, anchor="mm")
+        w = bb[2] - bb[0]
         if w <= max_w:
             break
         F -= 20

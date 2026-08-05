@@ -59,6 +59,7 @@ export default function App() {
   const [pendingCloseTab, setPendingCloseTab] = useState<Tab | null>(null);
   const [sourceText, setSourceText] = useState('');
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [hasStartupFiles, setHasStartupFiles] = useState(false);
 
   // 编辑器实例注册表,避免每次输入都重渲染
   const editorRegistry = useRef<Record<string, Editor | null>>({});
@@ -445,6 +446,7 @@ export default function App() {
     if (!isTauri()) return;
     const startupFiles = (window as any).__TAURI_STARTUP_FILES__;
     if (startupFiles && Array.isArray(startupFiles) && startupFiles.length > 0) {
+      setHasStartupFiles(true);
       // 打开所有通过命令行传递的文件
       for (const filePath of startupFiles) {
         void openFileFromPath(filePath);
@@ -854,7 +856,12 @@ export default function App() {
 
         <main className="editor-area">
           {tabs.length === 0 ? (
-            <div className="welcome">
+            hasStartupFiles ? (
+              <div className="welcome" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <p>正在打开文件...</p>
+              </div>
+            ) : (
+              <div className="welcome">
               <div className="welcome-logo" aria-hidden="true">
                 <IconBrand size={72} />
               </div>
@@ -881,6 +888,7 @@ export default function App() {
               )}
               <p className="welcome-drop-hint">也可以把 Markdown 文件拖进窗口打开</p>
             </div>
+            )
           ) : (
             tabs.map((tab) => (
               <EditorTab

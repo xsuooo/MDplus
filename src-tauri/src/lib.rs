@@ -214,19 +214,16 @@ pub fn run() {
                 .map(|s| s.to_string())
                 .collect();
 
-            let window = app.get_webview_window("main").unwrap();
-
-            // 如果有文件要打开，设置标志
             if !md_files.is_empty() {
+                // 将文件路径发送到前端
+                let window = app.get_webview_window("main").unwrap();
                 let files_json = serde_json::to_string(&md_files).unwrap();
                 let _ = window.eval(&format!("window.__TAURI_STARTUP_FILES__ = {}", files_json));
             }
-
             Ok(())
         })
         .on_page_load(|webview, payload| {
             if payload.event() == tauri::webview::PageLoadEvent::Finished {
-                // 页面加载完成后显示窗口
                 let _ = webview.window().show();
             }
         })
