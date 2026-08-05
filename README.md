@@ -1,40 +1,76 @@
 # MDPlus
 
-MDPlus is a Windows-first desktop Markdown editor built with React, Vite and Tauri. It combines a WYSIWYG editor with a source mode, tabs, automatic saving, Mermaid diagrams, KaTeX math, code highlighting, task lists, search and a document outline.
+一个专为 Windows 设计的 Markdown 桌面编辑器。
 
-## Development
+## 特性
 
-Prerequisites:
+- **所见即所得编辑**：实时预览，边写边看
+- **多标签页**：同时编辑多个文档
+- **源码模式**：需要的时候可以直接编辑 Markdown 源码
+- **自动保存**：写完就保存，不用担心丢失内容
+- **图表支持**：内置 Mermaid 图表和 KaTeX 数学公式
+- **代码高亮**：支持各种编程语言的语法高亮
+- **任务列表**：勾选框直接点击就能切换状态
+- **搜索功能**：快速查找和替换
+- **文档大纲**：长文档也能快速跳转
+- **文件关联**：双击 .md 文件直接打开
 
-- Node.js 20 or newer and npm
-- Rust stable with the Windows WebView2 runtime
-- Tauri prerequisites for the target platform
+## 开发环境
 
-Install the locked JavaScript dependencies and start the frontend:
+需要安装：
 
-```powershell
-npm ci
+- Node.js 20 或更新版本
+- Rust 稳定版本
+- Windows WebView2（一般系统自带）
+
+启动开发服务器：
+
+```bash
+npm install
 npm run dev
 ```
 
-For the desktop shell, run `npm run tauri dev`. Set `TAURI_DEV_HOST` in a local `.env` only when the frontend must bind to a specific host; `.env.example` documents the available variable.
+启动桌面应用：
 
-## Checks
-
-```powershell
-npm run typecheck
-npm test
-npm run build
-cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-cargo test --manifest-path src-tauri/Cargo.toml
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+```bash
+npm run tauri dev
 ```
 
-`npm run check` combines the TypeScript check and frontend unit tests. `npm run tauri:build` creates the platform installer; generated output stays under `dist/` and `src-tauri/target/` and is ignored by Git.
+## 构建
 
-## Project layout
+运行检查：
 
-- `src/`: React UI and editor behavior
-- `src/lib/`: file operations, persistence, editor plugins and templates
-- `src-tauri/`: native file I/O and desktop packaging
-- `.github/workflows/ci.yml`: frontend and Rust verification in CI
+```bash
+npm run typecheck
+npm test
+```
+
+构建安装包：
+
+```bash
+npm run tauri build
+```
+
+构建完成后，安装包在 `src-tauri/target/release/bundle/` 目录下。
+
+## 项目结构
+
+```
+src/              前端界面和编辑器逻辑
+src/lib/          文件操作、编辑器插件、模板
+src-tauri/        后端文件读写和打包配置
+```
+
+## 技术栈
+
+- React + TypeScript - 界面开发
+- Vite - 构建工具
+- Tauri - 桌面应用框架
+- Milkdown - Markdown 编辑器内核
+- Mermaid - 图表渲染
+- KaTeX - 数学公式
+
+## 许可证
+
+MIT
+
