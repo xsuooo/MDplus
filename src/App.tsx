@@ -451,9 +451,6 @@ export default function App() {
       }
       // 清理，避免重复打开
       delete (window as any).__TAURI_STARTUP_FILES__;
-
-      // 文件打开后显示窗口
-      void getCurrentWindow().show();
     }
   }, [openFileFromPath]);
 

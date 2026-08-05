@@ -216,23 +216,18 @@ pub fn run() {
 
             let window = app.get_webview_window("main").unwrap();
 
-            // 如果有文件要打开，设置标志避免显示欢迎页
+            // 如果有文件要打开，设置标志
             if !md_files.is_empty() {
                 let files_json = serde_json::to_string(&md_files).unwrap();
                 let _ = window.eval(&format!("window.__TAURI_STARTUP_FILES__ = {}", files_json));
-            } else {
-                // 没有文件时才显示窗口（会显示欢迎页）
-                let _ = window.show();
             }
 
             Ok(())
         })
         .on_page_load(|webview, payload| {
             if payload.event() == tauri::webview::PageLoadEvent::Finished {
-                // 检查是否有启动文件，有的话才显示窗口
-                let _ = webview.eval(
-                    "if (window.__TAURI_STARTUP_FILES__) { window.__TAURI_SHOW_WINDOW__ = true; }",
-                );
+                // 页面加载完成后显示窗口
+                let _ = webview.window().show();
             }
         })
         .invoke_handler(tauri::generate_handler![read_file, write_file, file_mtime])
