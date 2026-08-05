@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8">
+<title>MDPlus 图标方案对比</title>
+<style>
+ body{font-family:-apple-system,Segoe UI,Roboto,'Microsoft YaHei',sans-serif;margin:0;background:#f1f5f9;color:#0f172a}
+ .wrap{max-width:880px;margin:0 auto;padding:32px 20px}
+ h1{font-size:22px;margin:0 0 4px}
+ .sub{color:#64748b;font-size:14px;margin-bottom:24px}
+ .card{background:#fff;border-radius:16px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,.08);margin-bottom:20px}
+ table{border-collapse:collapse;width:100%}
+ td,th{padding:8px}
+ .old{background:#fff7ed;color:#9a3412;font-weight:600;font-size:13px}
+ .samples{display:flex;gap:18px;flex-wrap:wrap;margin-top:8px}
+ .chip{text-align:center;font-size:12px;color:#64748b}
+ h2{font-size:16px;margin:0 0 12px}
+ .note{font-size:13px;color:#64748b;line-height:1.6}
+</style></head>
+<body><div class="wrap">
+<h1>MDPlus 桌面图标方案</h1>
+<div class="sub">设计：圆角渐变磁贴 + 白色文档(Markdown 文件) + 彩色「+」徽标(Plus)。已写入 <code>src-tauri/icons</code> 的为<b>方案 A</b>。</div>
+
+<div class="card">
+ <h2>三套配色</h2><div style="display:flex;align-items:center;gap:8px;margin:6px 0"><img src="concept-A.png" width="40" height="40" style="border-radius:8px"><div><b>方案 A</b> — Indigo → Cyan</div></div><div style="display:flex;align-items:center;gap:8px;margin:6px 0"><img src="concept-B.png" width="40" height="40" style="border-radius:8px"><div><b>方案 B</b> — Violet → Pink</div></div><div style="display:flex;align-items:center;gap:8px;margin:6px 0"><img src="concept-C.png" width="40" height="40" style="border-radius:8px"><div><b>方案 C</b> — Dark Slate</div></div>
+</div>
+
+<div class="card">
+ <h2>各尺寸清晰度对比（浅色背景）</h2>
+ <table>
+  <tr><th></th><th>A</th><th>B</th><th>C</th><th class="old">旧版</th></tr>
+  <tr><th style='font-weight:600;color:#475569;padding-right:12px'>256px</th><td style="text-align:center"><img src="concept-A.png" width="256" height="256" style="image-rendering:pixelated;border-radius:46.08px"></td><td style="text-align:center"><img src="concept-B.png" width="256" height="256" style="image-rendering:pixelated;border-radius:46.08px"></td><td style="text-align:center"><img src="concept-C.png" width="256" height="256" style="image-rendering:pixelated;border-radius:46.08px"></td><td style="text-align:center"><img src="old.png" width="256" height="256" style="image-rendering:pixelated;border-radius:46.08px"></td></tr><tr><th style='font-weight:600;color:#475569;padding-right:12px'>128px</th><td style="text-align:center"><img src="concept-A.png" width="128" height="128" style="image-rendering:pixelated;border-radius:23.04px"></td><td style="text-align:center"><img src="concept-B.png" width="128" height="128" style="image-rendering:pixelated;border-radius:23.04px"></td><td style="text-align:center"><img src="concept-C.png" width="128" height="128" style="image-rendering:pixelated;border-radius:23.04px"></td><td style="text-align:center"><img src="old.png" width="128" height="128" style="image-rendering:pixelated;border-radius:23.04px"></td></tr><tr><th style='font-weight:600;color:#475569;padding-right:12px'>64px</th><td style="text-align:center"><img src="concept-A.png" width="64" height="64" style="image-rendering:pixelated;border-radius:11.52px"></td><td style="text-align:center"><img src="concept-B.png" width="64" height="64" style="image-rendering:pixelated;border-radius:11.52px"></td><td style="text-align:center"><img src="concept-C.png" width="64" height="64" style="image-rendering:pixelated;border-radius:11.52px"></td><td style="text-align:center"><img src="old.png" width="64" height="64" style="image-rendering:pixelated;border-radius:11.52px"></td></tr><tr><th style='font-weight:600;color:#475569;padding-right:12px'>48px</th><td style="text-align:center"><img src="concept-A.png" width="48" height="48" style="image-rendering:pixelated;border-radius:8.64px"></td><td style="text-align:center"><img src="concept-B.png" width="48" height="48" style="image-rendering:pixelated;border-radius:8.64px"></td><td style="text-align:center"><img src="concept-C.png" width="48" height="48" style="image-rendering:pixelated;border-radius:8.64px"></td><td style="text-align:center"><img src="old.png" width="48" height="48" style="image-rendering:pixelated;border-radius:8.64px"></td></tr><tr><th style='font-weight:600;color:#475569;padding-right:12px'>32px</th><td style="text-align:center"><img src="concept-A.png" width="32" height="32" style="image-rendering:pixelated;border-radius:5.76px"></td><td style="text-align:center"><img src="concept-B.png" width="32" height="32" style="image-rendering:pixelated;border-radius:5.76px"></td><td style="text-align:center"><img src="concept-C.png" width="32" height="32" style="image-rendering:pixelated;border-radius:5.76px"></td><td style="text-align:center"><img src="old.png" width="32" height="32" style="image-rendering:pixelated;border-radius:5.76px"></td></tr><tr><th style='font-weight:600;color:#475569;padding-right:12px'>24px</th><td style="text-align:center"><img src="concept-A.png" width="24" height="24" style="image-rendering:pixelated;border-radius:4.32px"></td><td style="text-align:center"><img src="concept-B.png" width="24" height="24" style="image-rendering:pixelated;border-radius:4.32px"></td><td style="text-align:center"><img src="concept-C.png" width="24" height="24" style="image-rendering:pixelated;border-radius:4.32px"></td><td style="text-align:center"><img src="old.png" width="24" height="24" style="image-rendering:pixelated;border-radius:4.32px"></td></tr><tr><th style='font-weight:600;color:#475569;padding-right:12px'>16px</th><td style="text-align:center"><img src="concept-A.png" width="16" height="16" style="image-rendering:pixelated;border-radius:2.88px"></td><td style="text-align:center"><img src="concept-B.png" width="16" height="16" style="image-rendering:pixelated;border-radius:2.88px"></td><td style="text-align:center"><img src="concept-C.png" width="16" height="16" style="image-rendering:pixelated;border-radius:2.88px"></td><td style="text-align:center"><img src="old.png" width="16" height="16" style="image-rendering:pixelated;border-radius:2.88px"></td></tr>
+ </table>
+</div>
+
+<div class="card">
+ <h2>深色背景下的观感</h2>
+ <div style="background:#0f172a;border-radius:12px;padding:24px">
+  <div class="samples">
+   <div class="chip"><img src="concept-A.png" width="64" height="64" style="border-radius:14px"><div>方案 A</div></div><div class="chip"><img src="concept-B.png" width="64" height="64" style="border-radius:14px"><div>方案 B</div></div><div class="chip"><img src="concept-C.png" width="64" height="64" style="border-radius:14px"><div>方案 C</div></div>
+   <div class="chip"><img src="old.png" width="64" height="64" style="border-radius:14px"><div>旧版</div></div>
+  </div>
+ </div>
+</div>
+
+<div class="card note">
+ 说明：小尺寸(16/24/32px)靠降采样保留主体轮廓——渐变磁贴 + 白文档 + 彩色徽标，辨识度足够。
+ 若想换配色，改 <code>make_icon.py</code> 里 <code>THEMES</code> 后重跑即可；要换主图形（如改成 Markdown 的「M↓」符号）告诉我。
+</div>
+</div></body></html>

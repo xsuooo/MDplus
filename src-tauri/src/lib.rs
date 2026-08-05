@@ -230,7 +230,9 @@ pub fn run() {
         .on_page_load(|webview, payload| {
             if payload.event() == tauri::webview::PageLoadEvent::Finished {
                 // 检查是否有启动文件，有的话才显示窗口
-                let _ = webview.eval("if (window.__TAURI_STARTUP_FILES__) { window.__TAURI_SHOW_WINDOW__ = true; }");
+                let _ = webview.eval(
+                    "if (window.__TAURI_STARTUP_FILES__) { window.__TAURI_SHOW_WINDOW__ = true; }",
+                );
             }
         })
         .invoke_handler(tauri::generate_handler![read_file, write_file, file_mtime])
