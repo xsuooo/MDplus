@@ -1,6 +1,6 @@
 [package]
 name = "mdplus"
-version = "0.1.0"
+version = "0.1.1"
 description = "简洁好用的 Markdown 编辑器"
 authors = ["MDPlus"]
 edition = "2021"
