@@ -440,6 +440,20 @@ export default function App() {
     }
   }, [openFileFromPath]);
 
+  /* ---------- 启动时打开命令行传递的文件 ---------- */
+  useEffect(() => {
+    if (!isTauri()) return;
+    const startupFiles = (window as any).__TAURI_STARTUP_FILES__;
+    if (startupFiles && Array.isArray(startupFiles) && startupFiles.length > 0) {
+      // 打开所有通过命令行传递的文件
+      for (const filePath of startupFiles) {
+        void openFileFromPath(filePath);
+      }
+      // 清理，避免重复打开
+      delete (window as any).__TAURI_STARTUP_FILES__;
+    }
+  }, [openFileFromPath]);
+
   const handleRemoveRecent = useCallback(async (path: string) => {
     await removeRecentFile(path);
     setRecentFiles(await getRecentFiles());

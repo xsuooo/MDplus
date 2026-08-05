@@ -178,6 +178,29 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .setup(|app| {
+            // 从命令行参数中提取要打开的文件路径
+            let args: Vec<String> = std::env::args().collect();
+            // 跳过第一个参数（程序路径），查找 .md 或 .markdown 文件
+            let md_files: Vec<String> = args
+                .iter()
+                .skip(1)
+                .filter(|arg| {
+                    let lower = arg.to_lowercase();
+                    (lower.ends_with(".md") || lower.ends_with(".markdown"))
+                        && std::path::Path::new(arg).exists()
+                })
+                .map(|s| s.to_string())
+                .collect();
+
+            if !md_files.is_empty() {
+                // 将文件路径发送到前端
+                let window = app.get_webview_window("main").unwrap();
+                let files_json = serde_json::to_string(&md_files).unwrap();
+                let _ = window.eval(&format!("window.__TAURI_STARTUP_FILES__ = {}", files_json));
+            }
+            Ok(())
+        })
         .on_page_load(|webview, payload| {
             if payload.event() == tauri::webview::PageLoadEvent::Finished {
                 let _ = webview.window().show();

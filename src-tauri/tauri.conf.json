@@ -37,6 +37,17 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "fileAssociations": [
+        {
+          "ext": ["md", "markdown"],
+          "name": "Markdown Document",
+          "description": "Markdown Document",
+          "role": "Editor",
+          "mimeType": "text/markdown"
+        }
+      ]
+    }
   }
 }
