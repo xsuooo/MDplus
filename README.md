@@ -28,7 +28,7 @@ Windows 上的 Markdown 桌面编辑器，所见即所得。
 
 ## 开发
 
-需要 Node.js 20+、Rust stable、Windows WebView2（系统一般自带）。
+需要 Node.js 20+、Rust stable、Windows WebView2。
 
 ```bash
 npm install
