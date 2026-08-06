@@ -25,6 +25,10 @@ src-tauri/gen/schemas
 *.tmp
 *.mdplus-*.tmp
 
+# AI tool artifacts
+.workbuddy
+.claude
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
