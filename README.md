@@ -1,23 +1,18 @@
 # MDPlus
 
-一个专为 Windows 设计的 Markdown 桌面编辑器。
+Windows 上的 Markdown 桌面编辑器，所见即所得。
 
-## 特性
+## 功能
 
-- **所见即所得编辑**：实时预览，边写边看
-- **多标签页**：同时编辑多个文档
-- **源码模式**：需要的时候可以直接编辑 Markdown 源码
-- **自动保存**：写完就保存，不用担心丢失内容
-- **图表支持**：内置 Mermaid 图表和 KaTeX 数学公式
-- **代码高亮**：支持各种编程语言的语法高亮
-- **任务列表**：勾选框直接点击就能切换状态
-- **搜索功能**：当前文档内快速查找跳转
-- **文档大纲**：长文档也能快速跳转
-- **图片粘贴**：截图直接 Ctrl+V 插入，自动存到文档同级 assets 目录
-- **导出**：导出为 HTML 文件，或经系统打印对话框输出 PDF
-- **窗口记忆**：记住窗口大小位置和大纲栏折叠状态
-- **文件关联**：双击 .md 文件直接打开，单实例复用已有窗口
-- **状态栏统计**：实时显示词数 / 字符数 / 行数
+- 富文本编辑 + 源码模式随时切换
+- 多标签页，自动保存
+- Mermaid 图表、KaTeX 数学公式、代码高亮、任务列表
+- 截图 Ctrl+V 直接插入，图片存到文档同级 `assets/` 目录
+- 文档内搜索、大纲导航
+- 导出 HTML / PDF（经系统打印对话框）
+- 状态栏实时显示词数 / 字符数 / 行数
+- 双击 `.md` 文件直接打开，单实例复用窗口
+- 记住窗口大小、位置和大纲栏状态
 
 ## 快捷键
 
@@ -26,41 +21,24 @@
 | `Ctrl+N` | 新建文档 |
 | `Ctrl+O` | 打开文件 |
 | `Ctrl+S` | 保存 |
-| `Ctrl+F` | 当前文档内查找 |
-| `Ctrl+Z` | 撤销 |
-| `Ctrl+Y` / `Ctrl+Shift+Z` | 重做 |
+| `Ctrl+F` | 查找 |
+| `Ctrl+Z` / `Ctrl+Y` | 撤销 / 重做 |
 | `Ctrl+W` | 关闭当前标签 |
-| `Ctrl+Tab` / `Ctrl+Shift+Tab` | 切换到下一个 / 上一个标签 |
-| `Ctrl+V` | 粘贴，剪贴板里是图片时自动插入 |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | 切换标签 |
 
-## 开发环境
+## 开发
 
-需要安装：
-
-- Node.js 20 或更新版本
-- Rust 稳定版本
-- Windows WebView2（一般系统自带）
-
-启动开发服务器：
+需要 Node.js 20+、Rust stable、Windows WebView2（系统一般自带）。
 
 ```bash
 npm install
-npm run dev
-```
-
-启动桌面应用：
-
-```bash
 npm run tauri dev
 ```
 
-## 构建
-
-运行检查：
+运行检查和测试：
 
 ```bash
-npm run typecheck
-npm test
+npm run check
 ```
 
 构建安装包：
@@ -69,26 +47,12 @@ npm test
 npm run tauri build
 ```
 
-构建完成后，安装包在 `src-tauri/target/release/bundle/` 目录下。
-
-## 项目结构
-
-```
-src/              前端界面和编辑器逻辑
-src/lib/          文件操作、编辑器插件、模板
-src-tauri/        后端文件读写和打包配置
-```
+产物在 `src-tauri/target/release/bundle/`。
 
 ## 技术栈
 
-- React + TypeScript - 界面开发
-- Vite - 构建工具
-- Tauri - 桌面应用框架
-- Milkdown - Markdown 编辑器内核
-- Mermaid - 图表渲染
-- KaTeX - 数学公式
+Tauri · React · TypeScript · Vite · Milkdown · Mermaid · KaTeX
 
 ## 许可证
 
 MIT
-
