@@ -43,32 +43,3 @@ export async function saveImage(blob: Blob, currentFilePath: string | null): Pro
   await invoke('save_binary_file', { path: targetPath, data: Array.from(data) });
   return relativePath;
 }
-
-/** 从粘贴事件提取图片 */
-export function extractImageFromClipboard(e: ClipboardEvent): File | null {
-  const items = e.clipboardData?.items;
-  if (!items) return null;
-
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
-    if (item.type.startsWith('image/')) {
-      const file = item.getAsFile();
-      return file;
-    }
-  }
-  return null;
-}
-
-/** 从拖拽事件提取图片文件 */
-export function extractImageFromDrop(e: DragEvent): File | null {
-  const files = e.dataTransfer?.files;
-  if (!files) return null;
-
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i];
-    if (file.type.startsWith('image/')) {
-      return file;
-    }
-  }
-  return null;
-}

@@ -8,11 +8,7 @@ const KEY_THEME = 'theme-mode';
 const KEY_SOURCE_MODE = 'source-mode';
 const KEY_WINDOW_STATE = 'window-state';
 const KEY_OUTLINE_OPEN = 'outline-open';
-const KEY_FONT_SIZE = 'font-size';
 const MAX_RECENT = 10;
-const DEFAULT_FONT_SIZE = 16;
-const MIN_FONT_SIZE = 12;
-const MAX_FONT_SIZE = 32;
 
 interface WindowState {
   width: number;
@@ -159,30 +155,6 @@ export async function getOutlineOpen(): Promise<boolean> {
 export async function setOutlineOpen(open: boolean): Promise<void> {
   try {
     await enqueueStoreWrite((store) => store.set(KEY_OUTLINE_OPEN, open));
-  } catch {
-    // 忽略
-  }
-}
-
-/** 读取字体大小 */
-export async function getFontSize(): Promise<number> {
-  try {
-    const store = await getStore();
-    const v = await store.get<number>(KEY_FONT_SIZE);
-    if (typeof v === 'number' && v >= MIN_FONT_SIZE && v <= MAX_FONT_SIZE) {
-      return v;
-    }
-    return DEFAULT_FONT_SIZE;
-  } catch {
-    return DEFAULT_FONT_SIZE;
-  }
-}
-
-/** 保存字体大小 */
-export async function setFontSize(size: number): Promise<void> {
-  try {
-    const clamped = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, size));
-    await enqueueStoreWrite((store) => store.set(KEY_FONT_SIZE, clamped));
   } catch {
     // 忽略
   }
