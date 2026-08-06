@@ -3,9 +3,28 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use tauri::Manager;
+use std::sync::Mutex;
+use tauri::{Manager, State};
 
 const MAX_TEXT_FILE_BYTES: u64 = 32 * 1024 * 1024;
+
+#[derive(Default)]
+struct StartupFiles(Mutex<Vec<String>>);
+
+impl StartupFiles {
+    fn new(files: Vec<String>) -> Self {
+        Self(Mutex::new(files))
+    }
+
+    fn take(&self) -> Vec<String> {
+        std::mem::take(&mut *self.0.lock().expect("startup files mutex poisoned"))
+    }
+}
+
+#[tauri::command]
+fn take_startup_files(state: State<'_, StartupFiles>) -> Vec<String> {
+    state.take()
+}
 
 /// 解码文件字节为文本:
 /// 1. 剥离 UTF-8 BOM;
@@ -173,61 +192,89 @@ fn file_mtime(path: String) -> Result<u64, String> {
     Ok(millis)
 }
 
+/// Save binary data (e.g., images) to a file.
+#[tauri::command]
+fn save_binary_file(path: String, data: Vec<u8>) -> Result<(), String> {
+    write_file_atomic(Path::new(&path), &data).map_err(|e| e.to_string())
+}
+
+/// Create a directory (and parent directories if needed).
+#[tauri::command]
+fn create_directory(path: String) -> Result<(), String> {
+    fs::create_dir_all(&path).map_err(|e| e.to_string())
+}
+
+/// Get the system temporary directory.
+#[tauri::command]
+fn get_temp_dir() -> Result<String, String> {
+    std::env::temp_dir()
+        .to_str()
+        .map(|s| s.to_owned())
+        .ok_or_else(|| "Failed to get temp directory".to_owned())
+}
+
+fn markdown_files_from_args<I, F>(args: I, path_exists: F) -> Vec<String>
+where
+    I: IntoIterator<Item = String>,
+    F: Fn(&str) -> bool,
+{
+    args.into_iter()
+        .skip(1)
+        .filter_map(|arg| {
+            let lower = arg.to_lowercase();
+            let is_markdown = lower.ends_with(".md") || lower.ends_with(".markdown");
+            (is_markdown && path_exists(&arg)).then_some(arg)
+        })
+        .collect()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Parse arguments before creating the webview so the hidden-window startup path has
+    // the file list available before React mounts.
+    let args: Vec<String> = std::env::args().collect();
+    let startup_files = markdown_files_from_args(args, |path| Path::new(path).exists());
+
     tauri::Builder::default()
+        .manage(StartupFiles::new(startup_files))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             // 当尝试启动第二个实例时，将参数发送给第一个实例
-            let md_files: Vec<String> = args
-                .iter()
-                .skip(1)
-                .filter(|arg| {
-                    let lower = arg.to_lowercase();
-                    (lower.ends_with(".md") || lower.ends_with(".markdown"))
-                        && std::path::Path::new(arg).exists()
-                })
-                .map(|s| s.to_string())
-                .collect();
+            let md_files = markdown_files_from_args(args, |path| Path::new(path).exists());
 
-            if !md_files.is_empty() {
-                if let Some(window) = app.get_webview_window("main") {
+            if let Some(window) = app.get_webview_window("main") {
+                // 确保窗口可见并获得焦点
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+
+                // 如果有文件，传递给前端
+                if !md_files.is_empty() {
                     let files_json = serde_json::to_string(&md_files).unwrap_or_default();
                     let _ = window.eval(format!("window.__TAURI_OPEN_FILES__ = {}", files_json));
-                    let _ = window.set_focus();
                 }
             }
         }))
-        .setup(|app| {
-            // 从命令行参数中提取要打开的文件路径
-            let args: Vec<String> = std::env::args().collect();
-            let md_files: Vec<String> = args
-                .iter()
-                .skip(1)
-                .filter(|arg| {
-                    let lower = arg.to_lowercase();
-                    (lower.ends_with(".md") || lower.ends_with(".markdown"))
-                        && std::path::Path::new(arg).exists()
-                })
-                .map(|s| s.to_string())
-                .collect();
-
-            if !md_files.is_empty() {
-                // 将文件路径发送到前端
-                let window = app.get_webview_window("main").unwrap();
-                let files_json = serde_json::to_string(&md_files).unwrap();
-                let _ = window.eval(format!("window.__TAURI_STARTUP_FILES__ = {}", files_json));
-            }
-            Ok(())
-        })
         .on_page_load(|webview, payload| {
             if payload.event() == tauri::webview::PageLoadEvent::Finished {
-                let _ = webview.window().show();
+                // The frontend is intentionally hidden from the welcome-page flash path.
+                // Show the real native window after its initial page has loaded.
+                let window = webview.window();
+                let _ = window.show();
+                let _ = window.set_focus();
             }
         })
-        .invoke_handler(tauri::generate_handler![read_file, write_file, file_mtime])
+        .invoke_handler(tauri::generate_handler![
+            read_file,
+            write_file,
+            file_mtime,
+            save_binary_file,
+            create_directory,
+            get_temp_dir,
+            take_startup_files
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -235,6 +282,29 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_files_are_consumed_only_once() {
+        let startup_files = StartupFiles::new(vec!["README.md".to_string()]);
+
+        assert_eq!(startup_files.take(), vec!["README.md"]);
+        assert!(startup_files.take().is_empty());
+    }
+
+    #[test]
+    fn startup_file_arguments_are_detected_before_webview_creation() {
+        let files = markdown_files_from_args(
+            vec![
+                "mdplus.exe".to_string(),
+                "README.md".to_string(),
+                "notes.txt".to_string(),
+                "missing.md".to_string(),
+            ],
+            |path| path == "README.md",
+        );
+
+        assert_eq!(files, vec!["README.md"]);
+    }
 
     #[test]
     fn utf8_passthrough_unchanged() {

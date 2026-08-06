@@ -9,6 +9,7 @@ interface EditorTabProps {
   active: boolean;
   onUpdate: (id: string, update: EditorUpdate, isInitial?: boolean) => void;
   onRegister: (id: string, editor: Editor | null) => void;
+  onImagePaste?: (file: File) => Promise<string>;
 }
 
 /**
@@ -24,11 +25,13 @@ export const EditorTab = memo(function EditorTab(props: EditorTabProps) {
   );
 });
 
-function EditorTabInner({ tab, active, onUpdate, onRegister }: EditorTabProps) {
+function EditorTabInner({ tab, active, onUpdate, onRegister, onImagePaste }: EditorTabProps) {
   const onUpdateRef = useRef(onUpdate);
   onUpdateRef.current = onUpdate;
   const onRegisterRef = useRef(onRegister);
   onRegisterRef.current = onRegister;
+  const onImagePasteRef = useRef(onImagePaste);
+  onImagePasteRef.current = onImagePaste;
   const tabIdRef = useRef(tab.id);
   tabIdRef.current = tab.id;
   const initialContentRef = useRef(tab.initialContent);
@@ -38,6 +41,7 @@ function EditorTabInner({ tab, active, onUpdate, onRegister }: EditorTabProps) {
     (root) =>
       createEditor(root, initialContentRef.current, {
         onUpdate: (u) => onUpdateRef.current(tabIdRef.current, u),
+        onImagePaste: onImagePasteRef.current,
       }),
     [],
   );

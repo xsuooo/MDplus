@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { isTauri } from '@tauri-apps/api/core';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
-import { getCurrentWindow } from '@tauri-apps/api/window';
+import { getCurrentWindow, LogicalSize, LogicalPosition } from '@tauri-apps/api/window';
 import type { Editor } from '@milkdown/kit/core';
 import { editorViewCtx } from '@milkdown/kit/core';
 import { TextSelection } from '@milkdown/prose/state';
@@ -15,6 +15,8 @@ import { NewFileModal } from './components/NewFileModal';
 import { RecentMenu } from './components/RecentMenu';
 import { SourceEditor } from './components/SourceEditor';
 import { readFile, writeFile, fileMtime, pickOpenFile, pickSaveFile, basename } from './lib/fileOps';
+import { saveImage } from './lib/imageOps';
+import { exportHTML, exportPDF } from './lib/export';
 import { IconBrand } from './components/icons';
 import {
   getRecentFiles,
@@ -24,12 +26,18 @@ import {
   setThemeMode,
   getSourceModePref,
   setSourceModePref,
+  getWindowState,
+  setWindowState,
+  getOutlineOpen,
+  setOutlineOpen as saveOutlineOpen,
 } from './lib/store';
 import { getTemplate } from './lib/templates';
 import { setMarkdown, undo, redo } from './lib/editor';
+import { computeStats } from './lib/stats';
 import { showMessage, confirmDialog } from './lib/dialog';
 import { refreshMermaidTheme } from './lib/mermaid';
 import { errorMessage } from './lib/errors';
+import { startupView } from './lib/startup';
 import type { RecentFile, Tab, ThemeMode, EditorUpdate } from './lib/types';
 import './styles/global.css';
 
@@ -58,7 +66,9 @@ export default function App() {
   const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
   const [pendingCloseTab, setPendingCloseTab] = useState<Tab | null>(null);
   const [sourceText, setSourceText] = useState('');
+  const [fileDialogBusy, setFileDialogBusy] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [startupResolved, setStartupResolved] = useState(() => !isTauri());
 
   // 编辑器实例注册表,避免每次输入都重渲染
   const editorRegistry = useRef<Record<string, Editor | null>>({});
@@ -73,6 +83,7 @@ export default function App() {
   const blockedExternalMtime = useRef<Record<string, number>>({});
   const openingPaths = useRef(new Set<string>());
   const externalChecks = useRef(new Set<string>());
+  const startupInitStarted = useRef(false);
   useEffect(() => {
     tabsRef.current = tabs;
   }, [tabs]);
@@ -83,6 +94,7 @@ export default function App() {
   useEffect(() => {
     void getThemeMode().then(setThemeModeState);
     void getSourceModePref().then(setSourceMode);
+    void getOutlineOpen().then((open) => setOutlineOpen(open));
   }, []);
 
   useEffect(() => {
@@ -127,7 +139,7 @@ export default function App() {
         initialContent: init.content,
         savedContent: init.content,
         markdown: init.content,
-        stats: { chars: 0, lines: init.content ? init.content.split('\n').length : 1 },
+        stats: computeStats(init.content),
       };
       setTabs((prev) => {
         const next = [...prev, tab];
@@ -418,8 +430,10 @@ export default function App() {
         } else {
           addTab({ title: basename(path), path, isNew: false, content, mtime });
         }
-        await pushRecentFile(path, basename(path));
-        setRecentFiles(await getRecentFiles());
+        // 最近文件持久化不应阻塞文档标签创建或启动窗口显示。
+        void pushRecentFile(path, basename(path)).then(async () => {
+          setRecentFiles(await getRecentFiles());
+        });
       } catch (err) {
         console.error('打开文件失败', err);
         await showMessage(`无法打开文件:${errorMessage(err)}`, 'error');
@@ -431,27 +445,54 @@ export default function App() {
   );
 
   const handleOpen = useCallback(async () => {
+    if (fileDialogBusy) return; // 防止重复打开
+    setFileDialogBusy(true);
     try {
       const path = await pickOpenFile();
       if (path) await openFileFromPath(path);
     } catch (err) {
       console.error('文件选择器打开失败', err);
       await showMessage(`无法打开文件选择器:${errorMessage(err)}`, 'error');
+    } finally {
+      setFileDialogBusy(false);
     }
-  }, [openFileFromPath]);
+  }, [openFileFromPath, fileDialogBusy]);
 
   /* ---------- 启动时打开命令行传递的文件 ---------- */
   useEffect(() => {
-    if (!isTauri()) return;
-    const startupFiles = (window as any).__TAURI_STARTUP_FILES__;
-    if (startupFiles && Array.isArray(startupFiles) && startupFiles.length > 0) {
-      // 打开所有通过命令行传递的文件
-      for (const filePath of startupFiles) {
-        void openFileFromPath(filePath);
+    if (!isTauri() || startupInitStarted.current) return;
+    startupInitStarted.current = true;
+
+    // 恢复窗口状态
+    void getWindowState().then((state) => {
+      if (state) {
+        const win = getCurrentWindow();
+        void win.setSize(new LogicalSize(state.width, state.height)).catch(() => {});
+        void win.setPosition(new LogicalPosition(state.x, state.y)).catch(() => {});
       }
-      // 清理，避免重复打开
-      delete (window as any).__TAURI_STARTUP_FILES__;
-    }
+    });
+
+    void invoke<string[]>('take_startup_files')
+      .then((startupFiles) => {
+        if (!Array.isArray(startupFiles) || startupFiles.length === 0) {
+          setStartupResolved(true);
+          return;
+        }
+
+        // 确保窗口可见
+        const win = getCurrentWindow();
+        void win.show();
+        void win.setFocus();
+
+        // 打开所有通过命令行传递的文件
+        const openPromises = startupFiles.map(filePath => openFileFromPath(filePath));
+        void Promise.all(openPromises).then(() => setStartupResolved(true));
+      })
+      .catch((err) => {
+        console.error('读取启动文件失败', err);
+        // 命令调用失败时仍结束启动占位,避免应用保持空白。
+        setStartupResolved(true);
+      });
   }, [openFileFromPath]);
 
   /* ---------- 监听单实例传递的文件 ---------- */
@@ -461,6 +502,12 @@ export default function App() {
     const checkInterval = setInterval(() => {
       const openFiles = (window as any).__TAURI_OPEN_FILES__;
       if (openFiles && Array.isArray(openFiles) && openFiles.length > 0) {
+        // 窗口置顶并获得焦点
+        const win = getCurrentWindow();
+        void win.show();
+        void win.setFocus();
+        void win.unminimize();
+
         // 打开新传递的文件
         for (const filePath of openFiles) {
           void openFileFromPath(filePath);
@@ -503,6 +550,29 @@ export default function App() {
     }
   }, [activeTab, handleSaveAsFor]);
 
+  /* ---------- 导出功能 ---------- */
+  const handleExportHTML = useCallback(async () => {
+    if (!activeTab) return;
+    try {
+      const title = activeTab.title || '未命名';
+      await exportHTML(title);
+      await showMessage('HTML 导出成功', 'info');
+    } catch (err) {
+      console.error('导出 HTML 失败', err);
+      await showMessage(`导出 HTML 失败: ${errorMessage(err)}`, 'error');
+    }
+  }, [activeTab]);
+
+  const handleExportPDF = useCallback(async () => {
+    if (!activeTab) return;
+    try {
+      await exportPDF();
+    } catch (err) {
+      console.error('导出 PDF 失败', err);
+      await showMessage(`导出 PDF 失败: ${errorMessage(err)}`, 'error');
+    }
+  }, [activeTab]);
+
   /* ---------- 编辑器更新回传 ---------- */
   const scheduleAutoSave = useCallback(
     (id: string) => {
@@ -534,6 +604,19 @@ export default function App() {
   const registerEditor = useCallback((id: string, editor: Editor | null) => {
     editorRegistry.current[id] = editor;
   }, []);
+
+  /* ---------- 图片粘贴处理 ---------- */
+  const handleImagePaste = useCallback(async (file: File): Promise<string> => {
+    try {
+      const currentPath = activeTab?.path ?? null;
+      const imagePath = await saveImage(file, currentPath);
+      return imagePath;
+    } catch (err) {
+      console.error('保存图片失败', err);
+      await showMessage(`保存图片失败: ${errorMessage(err)}`, 'error');
+      throw err;
+    }
+  }, [activeTab]);
 
   /* ---------- 撤销 / 重做 ---------- */
   const handleUndo = useCallback(() => {
@@ -589,12 +672,12 @@ export default function App() {
           ...(tabMirror.current[activeId] ?? {
             markdown: text,
             outline: [],
-            stats: { chars: 0, lines: 1 },
+            stats: { chars: 0, words: 0, lines: 1 },
             canUndo: false,
             canRedo: false,
           }),
           markdown: text,
-          stats: { chars: text.replace(/\s/g, '').length, lines: text.split('\n').length },
+          stats: computeStats(text),
         };
         setTabs((prevTabs) => {
           const next = prevTabs.map((t) =>
@@ -610,6 +693,35 @@ export default function App() {
     },
     [activeId, scheduleAutoSave],
   );
+
+  /* ---------- 大纲面板状态持久化 ---------- */
+  useEffect(() => {
+    void saveOutlineOpen(outlineOpen);
+  }, [outlineOpen]);
+
+  /* ---------- 窗口状态持久化 ---------- */
+  useEffect(() => {
+    if (!isTauri()) return;
+    const saveWindowState = async () => {
+      try {
+        const win = getCurrentWindow();
+        const size = await win.innerSize();
+        const position = await win.outerPosition();
+        await setWindowState({
+          width: size.width,
+          height: size.height,
+          x: position.x,
+          y: position.y,
+        });
+      } catch {
+        // 忽略错误
+      }
+    };
+
+    // 定时保存（避免频繁写入）
+    const timer = setInterval(() => void saveWindowState(), 2000);
+    return () => clearInterval(timer);
+  }, []);
 
   /* ---------- 大纲跳转 ---------- */
   const jumpToOutline = useCallback(
@@ -662,10 +774,7 @@ export default function App() {
               tabMirror.current[activeTab.id] = {
                 markdown: content,
                 outline: previous?.outline ?? [],
-                stats: {
-                  chars: content.replace(/\s/g, '').length,
-                  lines: content.split('\n').length,
-                },
+                stats: computeStats(content),
                 canUndo: previous?.canUndo ?? false,
                 canRedo: previous?.canRedo ?? false,
               };
@@ -718,6 +827,19 @@ export default function App() {
       } else if (key === 'f') {
         e.preventDefault();
         setSearchOpen((v) => !v);
+      } else if (key === 'w' && !e.shiftKey) {
+        // Ctrl+W 关闭当前标签
+        e.preventDefault();
+        if (activeId) void closeTabRequest(activeId);
+      } else if (key === 'tab') {
+        // Ctrl+Tab 切换到下一个标签, Ctrl+Shift+Tab 切换到上一个
+        e.preventDefault();
+        const currentIndex = tabs.findIndex((t) => t.id === activeId);
+        if (currentIndex === -1) return;
+        const nextIndex = e.shiftKey
+          ? (currentIndex - 1 + tabs.length) % tabs.length
+          : (currentIndex + 1) % tabs.length;
+        setActiveId(tabs[nextIndex]?.id ?? null);
       } else if (key === 'z') {
         // 编辑器(contenteditable)聚焦时交给 Milkdown 自身 history keymap,避免重复撤销;
         // textarea/input(源码模式、搜索框、mermaid 编辑框)交给浏览器原生撤销
@@ -737,7 +859,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [handleSave, handleOpen, handleUndo, handleRedo]);
+  }, [handleSave, handleOpen, handleUndo, handleRedo, activeId, tabs, closeTabRequest]);
 
   /* ---------- 拖拽打开 ---------- */
   useEffect(() => {
@@ -815,6 +937,7 @@ export default function App() {
 
   const activeSaveState =
     !activeTab ? 'idle' : savingId === activeTab.id ? 'saving' : activeTab.dirty || activeTab.isNew ? 'dirty' : 'saved';
+  const view = startupView(startupResolved, tabs.length);
 
   return (
     <div className="app">
@@ -823,6 +946,8 @@ export default function App() {
         onNew={() => setNewModalOpen(true)}
         onSave={() => void handleSave()}
         onSaveAs={() => void handleSaveAs()}
+        onExportHTML={() => void handleExportHTML()}
+        onExportPDF={() => void handleExportPDF()}
         hasActiveTab={Boolean(activeTab)}
         saving={savingId === activeTab?.id}
         onSearch={() => setSearchOpen((v) => !v)}
@@ -853,7 +978,9 @@ export default function App() {
         />
 
         <main className="editor-area">
-          {tabs.length === 0 ? (
+          {view === 'loading' ? (
+            <div className="startup-placeholder" aria-hidden="true" />
+          ) : view === 'welcome' ? (
             <div className="welcome">
               <div className="welcome-logo" aria-hidden="true">
                 <IconBrand size={72} />
@@ -889,6 +1016,7 @@ export default function App() {
                 active={tab.id === activeId}
                 onUpdate={handleTabUpdate}
                 onRegister={registerEditor}
+                onImagePaste={handleImagePaste}
               />
             ))
           )}

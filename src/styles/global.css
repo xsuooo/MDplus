@@ -184,6 +184,13 @@ textarea {
   user-select: none;
 }
 
+/* 确保按钮在拖拽区域内仍可点击 */
+.toolbar button,
+.toolbar .toolbar-dropdown,
+.toolbar .toolbar-group {
+  pointer-events: auto;
+}
+
 .toolbar-brand {
   display: flex;
   align-items: center;
@@ -262,6 +269,46 @@ textarea {
 }
 .toolbar-btn-icon:hover svg {
   transform: scale(1.12);
+}
+
+/* 工具栏下拉菜单 */
+.toolbar-dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.toolbar-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-soft);
+  min-width: 140px;
+  z-index: 1000;
+  padding: 4px 0;
+}
+
+.toolbar-dropdown-menu button {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.toolbar-dropdown-menu button:hover {
+  background: var(--bg-hover);
+}
+
+.toolbar-dropdown-menu button:active {
+  background: var(--bg-active);
 }
 
 .theme-icon-system {
@@ -558,6 +605,10 @@ textarea {
   background: var(--editor-bg);
 }
 
+.startup-placeholder {
+  height: 100%;
+}
+
 .editor-tab {
   display: none;
   height: 100%;
@@ -579,6 +630,11 @@ textarea {
   padding: 40px 64px 120px;
   max-width: 860px;
   margin: 0 auto;
+}
+
+/* 确保 ProseMirror 继承字体大小 */
+.milkdown .ProseMirror {
+  font-size: inherit;
 }
 
 /* ---------- 欢迎页 ---------- */
@@ -895,7 +951,7 @@ textarea {
   outline: none;
   background: transparent;
   font-family: var(--font-mono);
-  font-size: 13.5px;
+  font-size: var(--editor-font-size, 16px);
   line-height: 1.7;
   padding: 20px 32px;
   tab-size: 4;
@@ -1147,10 +1203,11 @@ body.dragging::after {
    ============================================================ */
 .milkdown .ProseMirror {
   font-family: var(--font-sans);
-  font-size: 15.5px;
+  font-size: inherit;
   line-height: 1.8;
   color: var(--text);
   outline: none;
+  transition: font-size 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .milkdown .ProseMirror p {

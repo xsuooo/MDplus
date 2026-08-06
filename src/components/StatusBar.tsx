@@ -24,9 +24,11 @@ export const StatusBar = memo(function StatusBar({
     <footer className="statusbar">
       {tab ? (
         <div className="statusbar-left">
-          <span className="status-item">字数 {tab.stats.chars}</span>
+          <span className="status-item">{tab.stats.words} 词</span>
           <span className="status-sep">·</span>
-          <span className="status-item">行 {tab.stats.lines}</span>
+          <span className="status-item">{tab.stats.chars} 字符</span>
+          <span className="status-sep">·</span>
+          <span className="status-item">{tab.stats.lines} 行</span>
           <span className="status-sep">·</span>
           <span className={`status-item status-save status-save-${saveState}${saveState === 'dirty' ? ' dirty' : ''}`}>
             {saveLabel}

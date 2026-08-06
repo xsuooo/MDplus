@@ -1,116 +1,89 @@
-# MDPlus 更新说明
+# 维护说明
 
-## 已解决的问题
+图标生成、构建检查与常见问题排查。文件关联的实现原理和使用方法见 [file-association.md](file-association.md)。
 
-### 1. ✅ 双击 .md 文件自动打开
+## 应用图标
 
-**之前的问题：**
-- 双击 .md 文件后，MDPlus 启动但显示欢迎页
-- 需要在软件里再次手动打开文件
-
-**现在的表现：**
-- 双击 .md 文件后，MDPlus 启动并自动打开该文件
-- 支持同时打开多个文件（选中多个文件后右键打开）
-
-### 2. ✅ 全新的应用图标
-
-**之前的问题：**
-- 图标样式过于简单，不够美观
-
-**新图标特点：**
-- 现代化的蓝绿渐变背景（#0ea5e9 → #06b6d4）
-- 简洁的 "M" + "D" + "+" 组合标志
-- 圆角矩形设计，符合现代应用审美
-- 支持所有尺寸（32x32、128x128、256x256、512x512、ICO）
-
-## 测试方法
-
-### 测试文件关联功能
-
-1. **构建应用**
-   ```bash
-   npm run tauri build
-   ```
-
-2. **安装应用**
-   - 找到构建输出：`src-tauri/target/release/bundle/msi/MDPlus_0.1.0_x64_zh-CN.msi`
-   - 双击安装
-
-3. **设置文件关联**
-   - 找到任意 .md 文件
-   - 右键 → "打开方式" → "选择其他应用"
-   - 选择 MDPlus
-   - ✅ 勾选"始终使用此应用打开 .md 文件"
-   - 点击"确定"
-
-4. **验证**
-   - 双击任意 .md 文件
-   - 应该直接在 MDPlus 中打开，而不是显示欢迎页
-
-### 查看新图标
-
-新图标在以下位置可见：
-
-- **桌面快捷方式图标**
-- **任务栏图标**
-- **开始菜单图标**
-- **文件资源管理器中的 .md 文件图标**（关联后）
-- **应用标题栏图标**
-
-## 技术实现
-
-### 文件关联
-
-- **配置文件**：`src-tauri/tauri.conf.json` 中添加了 Windows 文件关联
-- **后端处理**：`src-tauri/src/lib.rs` 解析命令行参数，提取文件路径
-- **前端接收**：`src/App.tsx` 在启动时读取并自动打开文件
-
-### 图标生成
-
-- **生成脚本**：`generate_icon.py`（需要 Pillow 库）
-- **手动工具**：`create-icon.html`（可在浏览器中打开）
-- **图标文件**：`src-tauri/icons/` 目录下的所有 PNG 和 ICO 文件
-
-## 已知限制
-
-1. **单实例问题**：双击文件时会启动新实例，而不是在已有窗口中打开
-   - 未来改进：实现单实例模式，通过 IPC 传递文件路径
-   
-2. **仅限构建版本**：文件关联仅在安装版本中生效
-   - 开发模式 (`npm run tauri dev`) 不支持文件关联
-
-## 开发工具
-
-### 重新生成图标
-
-如果需要修改图标设计：
+### 重新生成
 
 ```bash
-# 方法 1: 使用 Python 脚本（推荐）
 pip install Pillow
-python generate_icon.py
-
-# 方法 2: 使用浏览器工具
-# 打开 create-icon.html，在浏览器中下载各个尺寸
+python make_icon.py
 ```
 
-### 清理图标缓存
+脚本在 1024×1024 超采样绘制后降采样，一次性输出 Tauri 需要的全套图标到 `src-tauri/icons/`：
 
-如果更新图标后系统仍显示旧图标：
+- `icon.png`（512）、`128x128@2x.png`（256）、`128x128.png`、`32x32.png`
+- Windows Store 用的各 Square / StoreLogo 尺寸
+- `icon.ico`（内含 16 / 24 / 32 / 48 / 64 / 128 / 256 多个尺寸）
+- `icon.icns`（512）
+
+同时输出三套配色的预览到 `icon-preview/`，用 `icon-preview/index.html` 可以在各尺寸和深浅背景下比对。
+
+仓库里还有个早期的 `generate_icon.py`（手绘线条版）和 `create-icon.html`（浏览器手动导出），都已被 `make_icon.py` 取代，不要再用。
+
+### 当前设计
+
+纯白「MD+」一行居中，字号相同，衬在圆角渐变磁贴上。文字用系统 Arial Bold（`C:/Windows/Fonts/arialbd.ttf`）渲染，比手绘线条清晰，缩到 16px 仍可读。
+
+脚本内置三套配色，写入 `src-tauri/icons/` 的是**方案 A**：
+
+| 方案 | 磁贴渐变 |
+| --- | --- |
+| A | Indigo #6366f1 → Cyan #06b6d4 |
+| B | Dark Slate #1e293b → #334155 |
+| C | Violet #8b5cf6 → Pink #ec4899 |
+
+换配色要改 `main()` 里 `renders["A"]` 取的 key，改 `THEMES` 的颜色值只影响渐变本身。
+
+### 字号自适应的坑
+
+`render_mdplus()` 里从 600 开始递减试字号，判断宽度必须用 `bb[2] - bb[0]`。`textbbox` 在 `anchor='mm'` 下以原点为中心返回坐标，直接取 `bb[2]` 拿到的只是**半宽**，会让循环提前退出，「MD+」被渲染得比磁贴还宽而在裁切时截断。
+
+## 图标缓存
+
+更新图标后系统仍显示旧图标时，重建 Windows 图标缓存：
 
 ```bash
-# 重建 Windows 图标缓存
 ie4uinit.exe -show
 ```
 
-或手动删除：
+仍不生效可以删掉缓存文件后重启资源管理器：
+
 ```
 C:\Users\<用户名>\AppData\Local\IconCache.db
 ```
 
-## 下一步改进建议
+## 构建与检查
 
-1. **单实例模式**：实现应用单例，避免多次启动
-2. **最近文件菜单**：在 Windows 任务栏右键菜单中显示最近文件
-3. **文件缩略图**：为 .md 文件生成预览缩略图
-4. **macOS 支持**：添加 macOS 文件关联配置
+提交前跑前端检查（类型检查 + 单元测试，CI 跑的是同一条命令）：
+
+```bash
+npm run check
+```
+
+Rust 侧三项，和 CI 完全一致：
+
+```bash
+cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+```
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+```bash
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+```
+
+打包安装程序：
+
+```bash
+npm run tauri build
+```
+
+产物在 `src-tauri/target/release/bundle/` 下，MSI 和 NSIS 两种安装包都会生成。
+
+## 平台支持
+
+目前只针对 Windows。macOS / Linux 的文件关联和打包配置还没做。

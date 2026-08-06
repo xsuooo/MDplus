@@ -6,7 +6,20 @@ const STORE_FILE = 'mdplus-settings.json';
 const KEY_RECENT = 'recent-files';
 const KEY_THEME = 'theme-mode';
 const KEY_SOURCE_MODE = 'source-mode';
+const KEY_WINDOW_STATE = 'window-state';
+const KEY_OUTLINE_OPEN = 'outline-open';
+const KEY_FONT_SIZE = 'font-size';
 const MAX_RECENT = 10;
+const DEFAULT_FONT_SIZE = 16;
+const MIN_FONT_SIZE = 12;
+const MAX_FONT_SIZE = 32;
+
+interface WindowState {
+  width: number;
+  height: number;
+  x: number;
+  y: number;
+}
 
 let storePromise: Promise<Store> | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
@@ -103,6 +116,73 @@ export async function getSourceModePref(): Promise<boolean> {
 export async function setSourceModePref(enabled: boolean): Promise<void> {
   try {
     await enqueueStoreWrite((store) => store.set(KEY_SOURCE_MODE, enabled));
+  } catch {
+    // 忽略
+  }
+}
+
+/** 读取窗口状态 */
+export async function getWindowState(): Promise<WindowState | null> {
+  try {
+    const store = await getStore();
+    const v = await store.get<WindowState>(KEY_WINDOW_STATE);
+    if (v && typeof v.width === 'number' && typeof v.height === 'number') {
+      return v;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** 保存窗口状态 */
+export async function setWindowState(state: WindowState): Promise<void> {
+  try {
+    await enqueueStoreWrite((store) => store.set(KEY_WINDOW_STATE, state));
+  } catch {
+    // 忽略
+  }
+}
+
+/** 读取大纲面板状态 */
+export async function getOutlineOpen(): Promise<boolean> {
+  try {
+    const store = await getStore();
+    const v = await store.get<boolean>(KEY_OUTLINE_OPEN);
+    return typeof v === 'boolean' ? v : false;
+  } catch {
+    return false;
+  }
+}
+
+/** 保存大纲面板状态 */
+export async function setOutlineOpen(open: boolean): Promise<void> {
+  try {
+    await enqueueStoreWrite((store) => store.set(KEY_OUTLINE_OPEN, open));
+  } catch {
+    // 忽略
+  }
+}
+
+/** 读取字体大小 */
+export async function getFontSize(): Promise<number> {
+  try {
+    const store = await getStore();
+    const v = await store.get<number>(KEY_FONT_SIZE);
+    if (typeof v === 'number' && v >= MIN_FONT_SIZE && v <= MAX_FONT_SIZE) {
+      return v;
+    }
+    return DEFAULT_FONT_SIZE;
+  } catch {
+    return DEFAULT_FONT_SIZE;
+  }
+}
+
+/** 保存字体大小 */
+export async function setFontSize(size: number): Promise<void> {
+  try {
+    const clamped = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, size));
+    await enqueueStoreWrite((store) => store.set(KEY_FONT_SIZE, clamped));
   } catch {
     // 忽略
   }

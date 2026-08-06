@@ -136,3 +136,11 @@ export const IconChevronDown = (p: IconProps) => (
     <path d="m6 10 6 6 6-6" />
   </svg>
 );
+
+export const IconExport = (p: IconProps) => (
+  <svg {...base(p.size, p)}>
+    <path d="M12 3v12" />
+    <path d="m8 11 4-4 4 4" />
+    <path d="M3 15v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4" />
+  </svg>
+);

@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useState, useEffect, useRef } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   IconOpen,
@@ -12,6 +12,7 @@ import {
   IconMinimize,
   IconMaximize,
   IconClose,
+  IconExport,
 } from './icons';
 
 /** 惰性获取窗口实例;非 Tauri 环境(浏览器预览)返回 null,不影响渲染 */
@@ -28,6 +29,8 @@ interface ToolbarProps {
   onNew: () => void;
   onSave: () => void;
   onSaveAs: () => void;
+  onExportHTML: () => void;
+  onExportPDF: () => void;
   hasActiveTab: boolean;
   saving: boolean;
   onSearch: () => void;
@@ -47,6 +50,8 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
     onNew,
     onSave,
     onSaveAs,
+    onExportHTML,
+    onExportPDF,
     hasActiveTab,
     saving,
     onSearch,
@@ -60,9 +65,24 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
     onWindowClose,
   } = props;
 
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+
+  // 点击外部关闭菜单
+  useEffect(() => {
+    if (!exportMenuOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setExportMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [exportMenuOpen]);
+
   return (
-    <header className="toolbar">
-      <div className="toolbar-brand" title="MDPlus" data-tauri-drag-region>
+    <header className="toolbar" data-tauri-drag-region>
+      <div className="toolbar-brand" title="MDPlus">
         <span className="toolbar-brand-mark">MDPlus</span>
       </div>
 
@@ -93,9 +113,27 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
           <IconSaveAs size={15} />
           <span className="toolbar-btn-label">另存为</span>
         </button>
+        <div className="toolbar-dropdown" ref={exportMenuRef} style={{ pointerEvents: 'auto' }}>
+          <button
+            className="toolbar-btn toolbar-btn-secondary"
+            onClick={() => setExportMenuOpen(!exportMenuOpen)}
+            title="导出"
+            disabled={!hasActiveTab}
+            style={{ pointerEvents: 'auto' }}
+          >
+            <IconExport size={15} />
+            <span className="toolbar-btn-label">导出</span>
+          </button>
+          {exportMenuOpen && hasActiveTab && (
+            <div className="toolbar-dropdown-menu" style={{ pointerEvents: 'auto' }}>
+              <button onClick={() => { onExportHTML(); setExportMenuOpen(false); }}>导出为 HTML</button>
+              <button onClick={() => { onExportPDF(); setExportMenuOpen(false); }}>导出为 PDF</button>
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="toolbar-spacer" data-tauri-drag-region onDoubleClick={() => void appWindow()?.toggleMaximize()} />
+      <div className="toolbar-spacer" onDoubleClick={() => void appWindow()?.toggleMaximize()} />
 
       <div className="toolbar-group">
         <button

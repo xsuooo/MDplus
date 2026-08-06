@@ -23,12 +23,14 @@ import { prism } from '@milkdown/plugin-prism';
 import { nord } from '@milkdown/theme-nord';
 import { mermaidPlugin } from './mermaid';
 import { searchPlugin } from './search';
+import { computeStats } from './stats';
 import { taskListPlugin } from './tasklist';
 import type { EditorUpdate, OutlineItem } from './types';
 
 /** 编辑器更新回调 */
 export interface EditorCallbacks {
   onUpdate: (update: EditorUpdate) => void;
+  onImagePaste?: (file: File) => Promise<string>;
 }
 
 /** 从 ProseMirror doc 提取标题大纲 */
@@ -43,14 +45,6 @@ function extractOutline(doc: import('@milkdown/prose/model').Node): OutlineItem[
   return items;
 }
 
-/** 计算统计信息 */
-function computeStats(markdown: string): { chars: number; lines: number } {
-  return {
-    chars: markdown.replace(/\s/g, '').length,
-    lines: markdown.split('\n').length,
-  };
-}
-
 /** 读取撤销/重做深度(history 插件未启用时安全返回 false) */
 function historyState(doc: import('@milkdown/prose/state').EditorState): { canUndo: boolean; canRedo: boolean } {
   try {
@@ -62,7 +56,7 @@ function historyState(doc: import('@milkdown/prose/state').EditorState): { canUn
 
 /** 构建 Milkdown 编辑器 */
 export function createEditor(root: HTMLElement, content: string, callbacks: EditorCallbacks): Editor {
-  return Editor.make()
+  const editor = Editor.make()
     .config((ctx) => {
       ctx.set(rootCtx, root);
       ctx.set(defaultValueCtx, content);
@@ -93,6 +87,45 @@ export function createEditor(root: HTMLElement, content: string, callbacks: Edit
     .use(mermaidPlugin)
     .use($prose(() => searchPlugin))
     .use($prose(() => taskListPlugin));
+
+  // 添加图片粘贴支持
+  if (callbacks.onImagePaste) {
+    editor.config((ctx) => {
+      ctx.get(editorViewCtx);
+      // 在编辑器挂载后添加粘贴监听
+      setTimeout(() => {
+        const view = ctx.get(editorViewCtx);
+        const handlePaste = async (e: ClipboardEvent) => {
+          const items = e.clipboardData?.items;
+          if (!items || !callbacks.onImagePaste) return;
+
+          for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if (item.type.startsWith('image/')) {
+              e.preventDefault();
+              const file = item.getAsFile();
+              if (!file) continue;
+
+              try {
+                const imagePath = await callbacks.onImagePaste(file);
+                const { state, dispatch } = view;
+                const imageMarkdown = `![](${imagePath})`;
+                const transaction = state.tr.insertText(imageMarkdown);
+                dispatch(transaction);
+              } catch (err) {
+                console.error('粘贴图片失败', err);
+              }
+              break;
+            }
+          }
+        };
+
+        view.dom.addEventListener('paste', handlePaste);
+      }, 100);
+    });
+  }
+
+  return editor;
 }
 
 /** 获取当前文档的完整状态(用于挂载后初始化大纲与统计) */

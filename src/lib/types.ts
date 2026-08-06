@@ -11,6 +11,7 @@ export interface OutlineItem {
 /** 编辑器统计信息 */
 export interface DocStats {
   chars: number;
+  words: number;
   lines: number;
 }
 
