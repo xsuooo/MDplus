@@ -9,7 +9,7 @@ interface EditorTabProps {
   active: boolean;
   onUpdate: (id: string, update: EditorUpdate, isInitial?: boolean) => void;
   onRegister: (id: string, editor: Editor | null) => void;
-  onImagePaste?: (file: File) => Promise<string>;
+  onImagePaste?: (tabId: string, file: File) => Promise<string>;
 }
 
 /**
@@ -41,7 +41,7 @@ function EditorTabInner({ tab, active, onUpdate, onRegister, onImagePaste }: Edi
     (root) =>
       createEditor(root, initialContentRef.current, {
         onUpdate: (u) => onUpdateRef.current(tabIdRef.current, u),
-        onImagePaste: onImagePasteRef.current,
+        onImagePaste: (file) => onImagePasteRef.current?.(tabIdRef.current, file) ?? Promise.reject(new Error('图片处理不可用')),
       }),
     [],
   );

@@ -29,6 +29,8 @@ export interface Tab {
   dirty: boolean;
   /** 外部文件的修改时间(毫秒),用于检测外部变更 */
   externalMtime: number;
+  /** 文件在后台标签页中被外部修改,等待切回时提示 */
+  externalChanged: boolean;
   /** 编辑器初始内容(仅挂载时使用) */
   initialContent: string;
   /** 最近一次保存成功时的内容(dirty 判定基线,保存后更新) */

@@ -147,12 +147,26 @@ export async function exportPDF(): Promise<void> {
   `;
   document.head.appendChild(printStyle);
 
-  // 触发打印对话框
-  window.print();
+  // 触发打印对话框。优先等待 afterprint，避免对话框仍打开时提前恢复界面。
+  await new Promise<void>((resolve) => {
+    let restored = false;
+    const restore = () => {
+      if (restored) return;
+      restored = true;
+      window.removeEventListener('afterprint', restore);
+      elementsToHide.forEach((el) => (el.style.display = ''));
+      printStyle.remove();
+      resolve();
+    };
 
-  // 恢复隐藏的元素
-  setTimeout(() => {
-    elementsToHide.forEach(el => el.style.display = '');
-    printStyle.remove();
-  }, 100);
+    window.addEventListener('afterprint', restore, { once: true });
+    try {
+      window.print();
+    } catch (error) {
+      restore();
+      throw error;
+    }
+    // 某些 WebView 不派发 afterprint，保留兜底恢复。
+    window.setTimeout(restore, 10000);
+  });
 }

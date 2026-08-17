@@ -100,6 +100,13 @@ export const IconMoon = (p: IconProps) => (
   </svg>
 );
 
+export const IconMonitor = (p: IconProps) => (
+  <svg {...base(p.size, p)}>
+    <rect x="3" y="4" width="18" height="12" rx="2" />
+    <path d="M8 20h8M12 16v4" />
+  </svg>
+);
+
 export const IconClose = (p: IconProps) => (
   <svg {...base(p.size, p)}>
     <path d="M6 6l12 12M18 6 6 18" />

@@ -32,6 +32,7 @@ interface ToolbarProps {
   onExportHTML: () => void;
   onExportPDF: () => void;
   hasActiveTab: boolean;
+  activeIsNew: boolean;
   saving: boolean;
   onSearch: () => void;
   searchOpen: boolean;
@@ -53,6 +54,7 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
     onExportHTML,
     onExportPDF,
     hasActiveTab,
+    activeIsNew,
     saving,
     onSearch,
     searchOpen,
@@ -67,17 +69,43 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
 
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
+  const exportTriggerRef = useRef<HTMLButtonElement>(null);
 
-  // 点击外部关闭菜单
+  // 打开导出菜单后:聚焦首项、Escape 关闭、方向键在菜单项间移动、点击外部关闭
   useEffect(() => {
     if (!exportMenuOpen) return;
+    const first = exportMenuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]');
+    first?.focus();
+
     const handleClick = (e: MouseEvent) => {
       if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
         setExportMenuOpen(false);
       }
     };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setExportMenuOpen(false);
+        exportTriggerRef.current?.focus();
+        return;
+      }
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      e.preventDefault();
+      const items = Array.from(
+        exportMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [],
+      );
+      if (!items.length) return;
+      const idx = items.indexOf(document.activeElement as HTMLButtonElement);
+      const next =
+        e.key === 'ArrowDown' ? (idx + 1) % items.length : (idx - 1 + items.length) % items.length;
+      items[next]?.focus();
+    };
     document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKey);
+    };
   }, [exportMenuOpen]);
 
   return (
@@ -98,11 +126,11 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
         <button
           className="toolbar-btn toolbar-btn-labeled"
           onClick={onSave}
-          title="保存 (Ctrl+S)"
+          title={activeIsNew ? '另存为 (Ctrl+S)' : '保存 (Ctrl+S)'}
           disabled={!hasActiveTab || saving}
         >
           <IconSave size={16} />
-          <span className="toolbar-btn-label">保存</span>
+          <span className="toolbar-btn-label">{activeIsNew ? '另存为' : '保存'}</span>
         </button>
         <button
           className="toolbar-btn toolbar-btn-secondary"
@@ -115,19 +143,22 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
         </button>
         <div className="toolbar-dropdown" ref={exportMenuRef} style={{ pointerEvents: 'auto' }}>
           <button
+            ref={exportTriggerRef}
             className="toolbar-btn toolbar-btn-secondary"
             onClick={() => setExportMenuOpen(!exportMenuOpen)}
             title="导出"
             disabled={!hasActiveTab}
+            aria-haspopup="menu"
+            aria-expanded={exportMenuOpen && hasActiveTab}
             style={{ pointerEvents: 'auto' }}
           >
             <IconExport size={15} />
             <span className="toolbar-btn-label">导出</span>
           </button>
           {exportMenuOpen && hasActiveTab && (
-            <div className="toolbar-dropdown-menu" style={{ pointerEvents: 'auto' }}>
-              <button onClick={() => { onExportHTML(); setExportMenuOpen(false); }}>导出为 HTML</button>
-              <button onClick={() => { onExportPDF(); setExportMenuOpen(false); }}>导出为 PDF</button>
+            <div className="toolbar-dropdown-menu" role="menu" style={{ pointerEvents: 'auto' }}>
+              <button role="menuitem" onClick={() => { onExportHTML(); setExportMenuOpen(false); }}>导出为 HTML</button>
+              <button role="menuitem" onClick={() => { onExportPDF(); setExportMenuOpen(false); }}>导出为 PDF</button>
             </div>
           )}
         </div>
@@ -177,15 +208,16 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
       <div className="toolbar-sep" />
 
       <div className="window-controls">
-        <button className="window-btn" title="最小化" onClick={() => void appWindow()?.minimize()}>
+        <button className="window-btn" title="最小化" aria-label="最小化" onClick={() => void appWindow()?.minimize()}>
           <IconMinimize size={14} />
         </button>
-        <button className="window-btn" title="最大化 / 还原" onClick={() => void appWindow()?.toggleMaximize()}>
+        <button className="window-btn" title="最大化 / 还原" aria-label="最大化 / 还原" onClick={() => void appWindow()?.toggleMaximize()}>
           <IconMaximize size={13} />
         </button>
         <button
           className="window-btn window-btn-close"
           title="关闭"
+          aria-label="关闭窗口"
           onClick={onWindowClose}
         >
           <IconClose size={15} />

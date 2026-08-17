@@ -1,5 +1,6 @@
 import {
   Editor,
+  EditorStatus,
   rootCtx,
   defaultValueCtx,
   parserCtx,
@@ -90,10 +91,18 @@ export function createEditor(root: HTMLElement, content: string, callbacks: Edit
 
   // 添加图片粘贴支持
   if (callbacks.onImagePaste) {
+    let removePasteListener: (() => void) | null = null;
+    editor.onStatusChange((status) => {
+      if (status === EditorStatus.Destroyed) {
+        removePasteListener?.();
+        removePasteListener = null;
+      }
+    });
     editor.config((ctx) => {
       ctx.get(editorViewCtx);
       // 在编辑器挂载后添加粘贴监听
       setTimeout(() => {
+        if (editor.status === EditorStatus.Destroyed) return;
         const view = ctx.get(editorViewCtx);
         const handlePaste = async (e: ClipboardEvent) => {
           const items = e.clipboardData?.items;
@@ -108,10 +117,16 @@ export function createEditor(root: HTMLElement, content: string, callbacks: Edit
 
               try {
                 const imagePath = await callbacks.onImagePaste(file);
+                if (!view.dom.isConnected) return;
                 const { state, dispatch } = view;
-                const imageMarkdown = `![](${imagePath})`;
-                const transaction = state.tr.insertText(imageMarkdown);
-                dispatch(transaction);
+                // 插入真正的 image 节点而非纯文本,否则 Markdown 不会渲染成图片。
+                const imageType = state.schema.nodes.image;
+                if (imageType) {
+                  const node = imageType.create({ src: imagePath, alt: '', title: '' });
+                  dispatch(state.tr.replaceSelectionWith(node).scrollIntoView());
+                } else {
+                  dispatch(state.tr.insertText(`![](${imagePath})`));
+                }
               } catch (err) {
                 console.error('粘贴图片失败', err);
               }
@@ -121,6 +136,7 @@ export function createEditor(root: HTMLElement, content: string, callbacks: Edit
         };
 
         view.dom.addEventListener('paste', handlePaste);
+        removePasteListener = () => view.dom.removeEventListener('paste', handlePaste);
       }, 100);
     });
   }

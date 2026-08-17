@@ -394,6 +394,10 @@ textarea {
   background: var(--accent);
   animation: dotPop 0.3s ease;
 }
+.tab-dot[data-external="1"] {
+  background: var(--mark-strong);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mark-strong) 28%, transparent);
+}
 @keyframes dotPop {
   0% {
     transform: scale(0);
@@ -513,6 +517,10 @@ textarea {
   visibility: hidden;
   pointer-events: none;
   transition: opacity 0.18s ease, visibility 0s linear 0.18s;
+}
+
+.outline-backdrop {
+  display: none;
 }
 
 .outline-header {
@@ -1081,6 +1089,15 @@ textarea {
   position: fixed;
   inset: 0;
   z-index: 90;
+  animation: menuMaskIn 0.15s ease;
+}
+@keyframes menuMaskIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .recent-menu {
@@ -1754,6 +1771,11 @@ body.dragging::after {
   font-weight: 650;
   animation: none;
 }
+.status-save-unsaved {
+  color: var(--accent-text);
+  font-weight: 650;
+  animation: none;
+}
 
 .status-save-saved {
   color: var(--success);
@@ -1934,6 +1956,18 @@ body.dragging::after {
     width: min(246px, 86vw);
     flex-basis: auto;
     box-shadow: var(--shadow);
+  }
+
+  .outline-backdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 19;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    background: rgba(15, 23, 42, 0.22);
+    cursor: default;
   }
 
   .outline.collapsed {

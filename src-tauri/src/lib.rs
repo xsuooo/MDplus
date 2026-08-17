@@ -4,9 +4,10 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
 const MAX_TEXT_FILE_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_BINARY_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Default)]
 struct StartupFiles(Mutex<Vec<String>>);
@@ -21,8 +22,29 @@ impl StartupFiles {
     }
 }
 
+#[derive(Default)]
+struct PendingOpenFiles(Mutex<Vec<String>>);
+
+impl PendingOpenFiles {
+    fn push(&self, files: Vec<String>) {
+        self.0
+            .lock()
+            .expect("pending open files mutex poisoned")
+            .extend(files);
+    }
+
+    fn take(&self) -> Vec<String> {
+        std::mem::take(&mut *self.0.lock().expect("pending open files mutex poisoned"))
+    }
+}
+
 #[tauri::command]
 fn take_startup_files(state: State<'_, StartupFiles>) -> Vec<String> {
+    state.take()
+}
+
+#[tauri::command]
+fn take_pending_open_files(state: State<'_, PendingOpenFiles>) -> Vec<String> {
     state.take()
 }
 
@@ -198,6 +220,19 @@ fn save_binary_file(path: String, data: Vec<u8>) -> Result<(), String> {
     write_file_atomic(Path::new(&path), &data).map_err(|e| e.to_string())
 }
 
+/// Read a file's binary content (e.g., images) from disk.
+#[tauri::command]
+fn read_binary_file(path: String) -> Result<Vec<u8>, String> {
+    let metadata = fs::metadata(&path).map_err(|e| e.to_string())?;
+    if !metadata.is_file() {
+        return Err("path is not a regular file".to_owned());
+    }
+    if metadata.len() > MAX_BINARY_FILE_BYTES {
+        return Err("file is larger than the 64 MiB binary-file limit".to_owned());
+    }
+    fs::read(&path).map_err(|e| e.to_string())
+}
+
 /// Create a directory (and parent directories if needed).
 #[tauri::command]
 fn create_directory(path: String) -> Result<(), String> {
@@ -237,6 +272,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(StartupFiles::new(startup_files))
+        .manage(PendingOpenFiles::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
@@ -252,15 +288,16 @@ pub fn run() {
 
                 // 如果有文件，传递给前端
                 if !md_files.is_empty() {
-                    let files_json = serde_json::to_string(&md_files).unwrap_or_default();
-                    let _ = window.eval(format!("window.__TAURI_OPEN_FILES__ = {}", files_json));
+                    app.state::<PendingOpenFiles>().push(md_files);
+                    let _ = window.emit("open-files", ());
                 }
             }
         }))
         .on_page_load(|webview, payload| {
-            if payload.event() == tauri::webview::PageLoadEvent::Finished {
-                // The frontend is intentionally hidden from the welcome-page flash path.
-                // Show the real native window after its initial page has loaded.
+            // 页面一开始加载就显示窗口,避免用户双击后长时间看不到任何反馈。
+            // 窗口配置了 backgroundColor(#f6f5f1),配合前端的 startup-placeholder,
+            // 在内容渲染完成前不会闪白或闪欢迎页。
+            if payload.event() == tauri::webview::PageLoadEvent::Started {
                 let window = webview.window();
                 let _ = window.show();
                 let _ = window.set_focus();
@@ -271,9 +308,11 @@ pub fn run() {
             write_file,
             file_mtime,
             save_binary_file,
+            read_binary_file,
             create_directory,
             get_temp_dir,
-            take_startup_files
+            take_startup_files,
+            take_pending_open_files
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -289,6 +328,16 @@ mod tests {
 
         assert_eq!(startup_files.take(), vec!["README.md"]);
         assert!(startup_files.take().is_empty());
+    }
+
+    #[test]
+    fn pending_open_files_survive_before_frontend_listener_is_ready() {
+        let pending = PendingOpenFiles::default();
+        pending.push(vec!["first.md".to_string()]);
+        pending.push(vec!["second.md".to_string()]);
+
+        assert_eq!(pending.take(), vec!["first.md", "second.md"]);
+        assert!(pending.take().is_empty());
     }
 
     #[test]

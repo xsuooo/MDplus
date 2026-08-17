@@ -11,6 +11,11 @@ export async function readFile(path: string): Promise<string> {
   return invoke<string>('read_file', { path });
 }
 
+/** 读取文件二进制内容(如图片),返回字节数组 */
+export async function readBinaryFile(path: string): Promise<number[]> {
+  return invoke<number[]>('read_binary_file', { path });
+}
+
 /** 写入文件文本内容 */
 export async function writeFile(path: string, content: string): Promise<void> {
   return invoke<void>('write_file', { path, content });

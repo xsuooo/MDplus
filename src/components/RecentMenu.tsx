@@ -1,6 +1,7 @@
-import { memo, useEffect, useRef } from 'react';
+import { memo } from 'react';
 import type { RecentFile } from '../lib/types';
 import { IconClock, IconClose } from './icons';
+import { useDialogFocus } from '../lib/useDialogFocus';
 
 interface RecentMenuProps {
   items: RecentFile[];
@@ -10,30 +11,20 @@ interface RecentMenuProps {
 }
 
 export const RecentMenu = memo(function RecentMenu({ items, onOpen, onRemove, onClose }: RecentMenuProps) {
-  const firstItem = useRef<HTMLButtonElement | null>(null);
-
-  useEffect(() => {
-    firstItem.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
+  const menuRef = useDialogFocus<HTMLDivElement>(onClose);
 
   return (
     <>
       <div className="menu-mask" onClick={onClose} role="presentation" />
-      <div className="recent-menu" role="menu" aria-label="最近打开">
+      <div ref={menuRef} className="recent-menu" role="menu" aria-label="最近打开" tabIndex={-1}>
         <div className="recent-menu-header">最近打开</div>
         {items.length === 0 ? (
           <div className="recent-menu-empty">暂无最近打开的文件</div>
         ) : (
           <div className="recent-menu-list">
-            {items.map((f, index) => (
+            {items.map((f) => (
               <div key={f.path} className="recent-menu-row">
                 <button
-                  ref={index === 0 ? firstItem : undefined}
                   className="recent-menu-item"
                   onClick={() => onOpen(f.path)}
                   title={f.path}

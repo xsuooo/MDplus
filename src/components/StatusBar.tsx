@@ -1,13 +1,13 @@
 import { memo } from 'react';
 import type { Tab, ThemeMode } from '../lib/types';
-import { IconSun, IconMoon } from './icons';
+import { IconSun, IconMoon, IconMonitor } from './icons';
 
 interface StatusBarProps {
   tab: Tab | null;
   themeMode: ThemeMode;
   onThemeMode: (mode: ThemeMode) => void;
   sourceMode: boolean;
-  saveState: 'idle' | 'saving' | 'dirty' | 'saved';
+  saveState: 'idle' | 'saving' | 'unsaved' | 'dirty' | 'saved';
 }
 
 export const StatusBar = memo(function StatusBar({
@@ -18,7 +18,14 @@ export const StatusBar = memo(function StatusBar({
   saveState,
 }: StatusBarProps) {
   const next: ThemeMode = themeMode === 'system' ? 'light' : themeMode === 'light' ? 'dark' : 'system';
-  const saveLabel = saveState === 'saving' ? '保存中…' : saveState === 'dirty' ? '未保存' : '已保存';
+  const saveLabel =
+    saveState === 'saving'
+      ? '保存中…'
+      : saveState === 'unsaved'
+        ? '待另存为'
+        : saveState === 'dirty'
+          ? '未保存'
+          : '已保存';
 
   return (
     <footer className="statusbar">
@@ -47,7 +54,7 @@ export const StatusBar = memo(function StatusBar({
           title={`切换主题,当前为${themeMode === 'system' ? '跟随系统' : themeMode === 'light' ? '浅色' : '深色'}`}
           aria-label={`切换主题,当前为${themeMode === 'system' ? '跟随系统' : themeMode === 'light' ? '浅色' : '深色'}`}
         >
-          {themeMode === 'dark' ? <IconMoon size={13} /> : <IconSun size={13} />}
+          {themeMode === 'dark' ? <IconMoon size={13} /> : themeMode === 'system' ? <IconMonitor size={13} /> : <IconSun size={13} />}
           <span>{themeMode === 'system' ? '跟随系统' : themeMode === 'light' ? '浅色' : '深色'}</span>
         </button>
       </div>

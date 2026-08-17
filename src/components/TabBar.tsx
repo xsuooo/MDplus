@@ -41,7 +41,7 @@ export const TabBar = memo(function TabBar({ tabs, activeId, onSelect, onClose, 
             title={tab.path ?? tab.title}
             tabIndex={tab.id === activeId ? 0 : -1}
             aria-selected={tab.id === activeId}
-            aria-label={`${tab.title}${tab.dirty || tab.isNew ? ',尚未保存' : ''}`}
+            aria-label={`${tab.title}${tab.dirty || tab.isNew ? ',尚未保存' : ''}${tab.externalChanged ? ',文件已在外部修改' : ''}`}
             onKeyDown={(event) => {
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
@@ -63,7 +63,12 @@ export const TabBar = memo(function TabBar({ tabs, activeId, onSelect, onClose, 
               }
             }}
           >
-            <span className="tab-dot" data-dirty={tab.dirty || tab.isNew ? '1' : '0'} />
+            <span
+              className="tab-dot"
+              data-dirty={tab.dirty || tab.isNew ? '1' : '0'}
+              data-external={tab.externalChanged ? '1' : '0'}
+              title={tab.externalChanged ? '文件已在外部修改' : undefined}
+            />
             <span className="tab-title">{tab.title}</span>
             <button
               className="tab-close"

@@ -15,6 +15,7 @@ interface WindowState {
   height: number;
   x: number;
   y: number;
+  maximized: boolean;
 }
 
 let storePromise: Promise<Store> | null = null;
@@ -123,7 +124,7 @@ export async function getWindowState(): Promise<WindowState | null> {
     const store = await getStore();
     const v = await store.get<WindowState>(KEY_WINDOW_STATE);
     if (v && typeof v.width === 'number' && typeof v.height === 'number') {
-      return v;
+      return { ...v, maximized: v.maximized === true };
     }
     return null;
   } catch {
