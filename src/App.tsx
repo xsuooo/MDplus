@@ -738,8 +738,7 @@ export default function App() {
   /* ---------- 图片粘贴处理 ---------- */
   const handleImagePaste = useCallback(async (tabId: string, file: File): Promise<string> => {
     try {
-      const tab = tabsRef.current.find((candidate) => candidate.id === tabId);
-      const imagePath = await saveImage(file, tab?.path ?? null, tabId);
+      const imagePath = await saveImage(file, tabId);
       return imagePath;
     } catch (err) {
       console.error('保存图片失败', err);

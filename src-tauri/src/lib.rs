@@ -239,15 +239,6 @@ fn create_directory(path: String) -> Result<(), String> {
     fs::create_dir_all(&path).map_err(|e| e.to_string())
 }
 
-/// Get the system temporary directory.
-#[tauri::command]
-fn get_temp_dir() -> Result<String, String> {
-    std::env::temp_dir()
-        .to_str()
-        .map(|s| s.to_owned())
-        .ok_or_else(|| "Failed to get temp directory".to_owned())
-}
-
 fn markdown_files_from_args<I, F>(args: I, path_exists: F) -> Vec<String>
 where
     I: IntoIterator<Item = String>,
@@ -310,7 +301,6 @@ pub fn run() {
             save_binary_file,
             read_binary_file,
             create_directory,
-            get_temp_dir,
             take_startup_files,
             take_pending_open_files
         ])

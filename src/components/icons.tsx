@@ -1,4 +1,5 @@
 import type { SVGProps } from 'react';
+import appIconUrl from '../assets/app-icon.svg';
 
 type IconProps = SVGProps<SVGSVGElement> & { size?: number };
 
@@ -16,16 +17,10 @@ function base(size: number | undefined, props: IconProps): SVGProps<SVGSVGElemen
   };
 }
 
-/** Markdown document mark used consistently in the welcome view and toolbar. */
+/** Shares the exact artwork used by the desktop icon and browser favicon. */
 export const IconBrand = (p: IconProps) => (
-  <svg {...base(p.size, p)} viewBox="0 0 32 32" strokeWidth={1.8}>
-    <path
-      className="brand-icon-page"
-      d="M8 3.5h10.1L24.5 9.9V25A3.5 3.5 0 0 1 21 28.5H8A3.5 3.5 0 0 1 4.5 25V7A3.5 3.5 0 0 1 8 3.5Z"
-    />
-    <path d="M18 3.8v6.1h6.1" />
-    <path d="m11.2 13.8-1.1 6.4M16 13.8l-1.1 6.4M10.4 16.5h7.3M9.9 19.2h7.3" strokeWidth={1.7} />
-    <path className="brand-icon-plus" d="M23.2 20.7v5.2M20.6 23.3h5.2" strokeWidth={2.05} />
+  <svg {...base(p.size, p)} viewBox="0 0 32 32" fill="none" stroke="none">
+    <image href={appIconUrl} width="32" height="32" />
   </svg>
 );
 

@@ -4,41 +4,33 @@
 
 ## 应用图标
 
+### 图形来源
+
+唯一正式源图为 `src/assets/app-icon.svg`：深青绿圆角底，纸页折成浅色 M，薄荷绿加号。应用欢迎页与浏览器 favicon 直接引用它；大小尺寸、浅色与深色背景保持同一品牌图形。
+
+修改图标时只编辑该 SVG，再重新生成桌面资源。图形不依赖字体，CSS 不单独重定义品牌颜色。
+
 ### 重新生成
 
+安装项目 npm 依赖后运行：
+
 ```bash
-pip install Pillow
 python make_icon.py
 ```
 
-脚本在 1024×1024 超采样绘制后降采样，一次性输出 Tauri 需要的全套图标到 `src-tauri/icons/`：
+脚本仅使用 Python 标准库，调用项目已有的 Tauri CLI，不需要 Pillow、NumPy 或系统字体。先在临时目录生成，成功后只复制以下六个文件到 `src-tauri/icons/`：
 
-- `icon.png`（512）、`128x128@2x.png`（256）、`128x128.png`、`32x32.png`
-- Windows Store 用的各 Square / StoreLogo 尺寸
-- `icon.ico`（内含 16 / 24 / 32 / 48 / 64 / 128 / 256 多个尺寸）
-- `icon.icns`（512）
+- `icon.png`（512）、`128x128@2x.png`（256）、`128x128.png`（128）、`32x32.png`（32）
+- `icon.ico`（Tauri 生成的 16 / 24 / 32 / 48 / 64 / 256 像素帧）
+- `icon.icns`
 
-同时输出三套配色的预览到 `icon-preview/`，用 `icon-preview/index.html` 可以在各尺寸和深浅背景下比对。
+Tauri 临时生成的移动端和商店图标不会写入仓库。需要独立预览、核对输出时：
 
-仓库里还有个早期的 `generate_icon.py`（手绘线条版）和 `create-icon.html`（浏览器手动导出），都已被 `make_icon.py` 取代，不要再用。
+```bash
+python make_icon.py --output icon-preview/generated
+```
 
-### 当前设计
-
-纯白「MD+」一行居中，字号相同，衬在圆角渐变磁贴上。文字用系统 Arial Bold（`C:/Windows/Fonts/arialbd.ttf`）渲染，比手绘线条清晰，缩到 16px 仍可读。
-
-脚本内置三套配色，写入 `src-tauri/icons/` 的是**方案 A**：
-
-| 方案 | 磁贴渐变 |
-| --- | --- |
-| A | Indigo #6366f1 → Cyan #06b6d4 |
-| B | Dark Slate #1e293b → #334155 |
-| C | Violet #8b5cf6 → Pink #ec4899 |
-
-换配色要改 `main()` 里 `renders["A"]` 取的 key，改 `THEMES` 的颜色值只影响渐变本身。
-
-### 字号自适应的坑
-
-`render_mdplus()` 里从 600 开始递减试字号，判断宽度必须用 `bb[2] - bb[0]`。`textbbox` 在 `anchor='mm'` 下以原点为中心返回坐标，直接取 `bb[2]` 拿到的只是**半宽**，会让循环提前退出，「MD+」被渲染得比磁贴还宽而在裁切时截断。
+正式资源使用选定设计，不再支持旧版脚本的 `paper`、`teal` 等方案切换参数。重新生成资源后需要重新构建应用，已安装的程序与任务栏图标不会仅随源码修改而更新。
 
 ## 图标缓存
 
