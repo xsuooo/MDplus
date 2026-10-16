@@ -17,7 +17,7 @@ import { CloseConfirmModal } from './components/CloseConfirmModal';
 import { RecentMenu } from './components/RecentMenu';
 import { SourceEditor } from './components/SourceEditor';
 import { readFile, writeFile, fileMtime, pickOpenFile, pickSaveFile, basename } from './lib/fileOps';
-import { clearPendingImages, migratePendingImages, saveImage, loadImageReferences } from './lib/imageOps';
+import { clearPendingImages, commitImageMigration, migratePendingImages, saveImage, loadImageReferences } from './lib/imageOps';
 import { exportHTML, exportPDF } from './lib/export';
 import { IconBrand } from './components/icons';
 import {
@@ -252,10 +252,18 @@ export default function App() {
   );
 
   const handleSaveAsFor = useCallback(
-    async (tab: Tab): Promise<boolean> => {
+    async (tab: Tab, generation: number, saveCurrent: () => Promise<boolean>): Promise<boolean> => {
+      const isCurrentSave = () =>
+        (saveGenerations.current[tab.id] ?? 0) === generation && tabsRef.current.some((candidate) => candidate.id === tab.id);
       try {
+        if (!isCurrentSave()) return false;
         const target = await pickSaveFile(tab.path ?? `${tab.title}`);
-        if (!target) return false;
+        if (!target || !isCurrentSave()) return false;
+        const latestBeforeWrite = tabsRef.current.find((candidate) => candidate.id === tab.id)!;
+        // Choosing the current path must keep the normal external-change checks.
+        if (latestBeforeWrite.path && pathKey(latestBeforeWrite.path) === pathKey(target)) {
+          return saveCurrent();
+        }
         const collision = tabsRef.current.find(
           (candidate) =>
             candidate.id !== tab.id &&
@@ -267,22 +275,25 @@ export default function App() {
           return false;
         }
 
-        const latestBeforeWrite = tabsRef.current.find((candidate) => candidate.id === tab.id) ?? tab;
         const content = resolveContent(latestBeforeWrite);
         const contentGeneration = contentGenerations.current[tab.id] ?? 0;
-        const migratedContent = await migratePendingImages(tab.id, target, content);
+        const migration = await migratePendingImages(tab.id, target, content);
+        const migratedContent = migration.markdown;
+        if (!isCurrentSave()) return false;
         await writeFile(target, migratedContent);
+        if (!isCurrentSave()) return false;
         let mtime = 0;
         try {
           mtime = await fileMtime(target);
         } catch (error) {
           console.warn('文件已保存,但读取修改时间失败', error);
         }
+        if (!isCurrentSave()) return false;
         const contentChangedDuringWrite =
           (contentGenerations.current[tab.id] ?? 0) !== contentGeneration;
         if (!contentChangedDuringWrite) {
+          commitImageMigration(migration);
           applyMigratedContent(tab.id, migratedContent, content);
-          clearPendingImages(tab.id);
         }
         const latestContent = resolveContent(latestBeforeWrite);
         updateTab(tab.id, {
@@ -300,6 +311,7 @@ export default function App() {
         setRecentFiles(await getRecentFiles());
         return true;
       } catch (err) {
+        if (!isCurrentSave()) return false;
         console.error('另存为失败', err);
         await showMessage(`另存为失败:${errorMessage(err)}`, 'error');
         return false;
@@ -309,15 +321,17 @@ export default function App() {
   );
 
   const performSave = useCallback(
-    async (id: string, manual = false, generation = saveGenerations.current[id] ?? 0): Promise<boolean> => {
+    async (id: string, manual = false, generation = saveGenerations.current[id] ?? 0, saveAs = false): Promise<boolean> => {
       const isCurrentSave = () =>
         (saveGenerations.current[id] ?? 0) === generation && tabsRef.current.some((tab) => tab.id === id);
 
       if (!isCurrentSave()) return false;
       const tab = tabsRef.current.find((candidate) => candidate.id === id);
       if (!tab) return false;
-      if (!tab.path) {
-        return manual ? handleSaveAsFor(tab) : false;
+      if (saveAs || !tab.path) {
+        return manual
+          ? handleSaveAsFor(tab, generation, () => performSave(id, true, generation))
+          : false;
       }
 
       try {
@@ -387,7 +401,9 @@ export default function App() {
         }
         const rawContent = resolveContent(tab);
         const contentGeneration = contentGenerations.current[id] ?? 0;
-        const content = await migratePendingImages(id, tab.path, rawContent);
+        const migration = await migratePendingImages(id, tab.path, rawContent);
+        const content = migration.markdown;
+        if (!isCurrentSave()) return false;
         await writeFile(tab.path, content);
         if (!isCurrentSave()) return false;
         let savedMtime = diskMtime;
@@ -396,11 +412,12 @@ export default function App() {
         } catch (error) {
           console.warn('文件已保存,但读取修改时间失败', error);
         }
+        if (!isCurrentSave()) return false;
         const contentChangedDuringWrite =
           (contentGenerations.current[id] ?? 0) !== contentGeneration;
         if (!contentChangedDuringWrite) {
+          commitImageMigration(migration);
           applyMigratedContent(id, content, rawContent);
-          clearPendingImages(id);
         }
         const latest = contentChangedDuringWrite
           ? (tabMirror.current[id]?.markdown ?? rawContent)
@@ -425,15 +442,20 @@ export default function App() {
   );
 
   const doSave = useCallback(
-    (id: string, manual = false): Promise<boolean> => {
+    (id: string, manual = false, saveAs = false): Promise<boolean> => {
+      const timer = saveTimers.current[id];
+      if (timer) clearTimeout(timer);
+      delete saveTimers.current[id];
       const previous = saveQueues.current[id] ?? Promise.resolve(true);
       const generation = saveGenerations.current[id] ?? 0;
       setSavingId(id);
-      const next = previous.catch(() => false).then(() => performSave(id, manual, generation));
+      const next = previous.catch(() => false).then(() => performSave(id, manual, generation, saveAs));
       saveQueues.current[id] = next;
       void next.finally(() => {
-        if (saveQueues.current[id] === next) delete saveQueues.current[id];
-        setSavingId((current) => (current === id ? null : current));
+        if (saveQueues.current[id] === next) {
+          delete saveQueues.current[id];
+          setSavingId((current) => (current === id ? null : current));
+        }
       });
       return next;
     },
@@ -451,13 +473,8 @@ export default function App() {
       }
       if (action === 'save') {
         const tab = pendingCloseTab;
-        if (!tab.path) {
-          const saved = await handleSaveAsFor(tab);
-          if (!saved) return; // 用户取消另存为,保留标签页
-        } else {
-          const saved = await doSave(tab.id, true);
-          if (!saved) return;
-        }
+        const saved = await doSave(tab.id, true);
+        if (!saved || tabsRef.current.find((candidate) => candidate.id === tab.id)?.dirty) return;
       }
       const closedId = pendingCloseTab.id;
       setPendingCloseTab(null);
@@ -482,7 +499,7 @@ export default function App() {
         }
       }
     },
-    [pendingCloseTab, removeTab, handleSaveAsFor, doSave, persistWindowState],
+    [pendingCloseTab, removeTab, doSave, persistWindowState],
   );
 
   /* ---------- 打开 / 新建 ---------- */
@@ -639,13 +656,8 @@ export default function App() {
 
   const handleSaveAs = useCallback(async () => {
     if (!activeTab) return;
-    setSavingId(activeTab.id);
-    try {
-      await handleSaveAsFor(activeTab);
-    } finally {
-      setSavingId((current) => (current === activeTab.id ? null : current));
-    }
-  }, [activeTab, handleSaveAsFor]);
+    await doSave(activeTab.id, true, true);
+  }, [activeTab, doSave]);
 
   const syncActiveEditorForExport = useCallback(
     async (tab: Tab) => {

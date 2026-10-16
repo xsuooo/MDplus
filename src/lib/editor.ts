@@ -14,11 +14,11 @@ import {
   redoDepth,
 } from '@milkdown/prose/history';
 import { TextSelection } from '@milkdown/prose/state';
-import { commonmark } from '@milkdown/kit/preset/commonmark';
+import { commonmark, imageSchema } from '@milkdown/kit/preset/commonmark';
 import { gfm } from '@milkdown/kit/preset/gfm';
 import { history } from '@milkdown/kit/plugin/history';
 import { listener, listenerCtx } from '@milkdown/kit/plugin/listener';
-import { $prose, getMarkdown as utilsGetMarkdown } from '@milkdown/kit/utils';
+import { $prose, $view, getMarkdown as utilsGetMarkdown } from '@milkdown/kit/utils';
 import { math } from '@milkdown/plugin-math';
 import { prism } from '@milkdown/plugin-prism';
 import { nord } from '@milkdown/theme-nord';
@@ -32,6 +32,7 @@ import type { EditorUpdate, OutlineItem } from './types';
 export interface EditorCallbacks {
   onUpdate: (update: EditorUpdate) => void;
   onImagePaste?: (file: File) => Promise<string>;
+  resolveImageSource?: (url: string) => string;
 }
 
 /** 从 ProseMirror doc 提取标题大纲 */
@@ -88,6 +89,27 @@ export function createEditor(root: HTMLElement, content: string, callbacks: Edit
     .use(mermaidPlugin)
     .use($prose(() => searchPlugin))
     .use($prose(() => taskListPlugin));
+
+  if (callbacks.resolveImageSource) {
+    editor.use($view(imageSchema.node, () => (node) => {
+      const dom = document.createElement('img');
+      const render = (image: typeof node) => {
+        // Keep document URLs relative; only the rendered image uses cached bytes.
+        dom.src = callbacks.resolveImageSource!(image.attrs.src);
+        dom.alt = image.attrs.alt ?? '';
+        dom.title = image.attrs.title ?? '';
+      };
+      render(node);
+      return {
+        dom,
+        update: (next) => {
+          if (next.type !== node.type) return false;
+          render(next);
+          return true;
+        },
+      };
+    }));
+  }
 
   // 添加图片粘贴支持
   if (callbacks.onImagePaste) {

@@ -1,13 +1,13 @@
 // MDPlus - Tauri backend commands
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::io::{self, Read, Write};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State};
 
 const MAX_TEXT_FILE_BYTES: u64 = 32 * 1024 * 1024;
-const MAX_BINARY_FILE_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_IMAGE_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Default)]
 struct StartupFiles(Mutex<Vec<String>>);
@@ -222,17 +222,119 @@ fn save_binary_file(path: String, data: Vec<u8>) -> Result<(), String> {
     write_file_atomic(Path::new(&path), &data).map_err(|e| e.to_string())
 }
 
-/// Read a file's binary content (e.g., images) from disk.
+#[derive(serde::Serialize)]
+struct ImageFile {
+    path: String,
+    mime: &'static str,
+    data: Vec<u8>,
+}
+
+fn document_image_path(doc_path: &Path, relative_path: &Path) -> Result<PathBuf, String> {
+    if relative_path
+        .components()
+        .any(|component| matches!(component, Component::Prefix(_) | Component::RootDir))
+    {
+        return Err("image reference must be a relative path".to_owned());
+    }
+    let document = fs::canonicalize(doc_path).map_err(|e| e.to_string())?;
+    let directory = document
+        .parent()
+        .ok_or("document has no parent directory")?;
+    let image = fs::canonicalize(directory.join(relative_path)).map_err(|e| e.to_string())?;
+    // Canonicalization also resolves symlinks and Windows junctions before the boundary check.
+    if !image.starts_with(directory) {
+        return Err("image reference is outside the document directory".to_owned());
+    }
+    Ok(image)
+}
+
+fn is_svg(bytes: &[u8]) -> bool {
+    use quick_xml::events::Event;
+
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return false;
+    };
+    let mut reader = quick_xml::Reader::from_str(text);
+    let mut root_seen = false;
+    let mut depth = 0usize;
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(tag)) => {
+                if depth == 0 && (root_seen || tag.name().as_ref() != b"svg") {
+                    return false;
+                }
+                root_seen = true;
+                depth += 1;
+            }
+            Ok(Event::Empty(tag)) if depth == 0 => {
+                if root_seen || tag.name().as_ref() != b"svg" {
+                    return false;
+                }
+                root_seen = true;
+            }
+            Ok(Event::End(_)) => {
+                let Some(next_depth) = depth.checked_sub(1) else {
+                    return false;
+                };
+                depth = next_depth;
+            }
+            Ok(Event::DocType(_)) | Err(_) => return false,
+            Ok(Event::Text(text)) if depth == 0 => {
+                if text.iter().any(|byte| !byte.is_ascii_whitespace()) {
+                    return false;
+                }
+            }
+            Ok(Event::CData(_) | Event::GeneralRef(_)) if depth == 0 => return false,
+            Ok(Event::Eof) => return root_seen && depth == 0,
+            Ok(_) => {}
+        }
+    }
+}
+
+fn image_mime(path: &Path, bytes: &[u8]) -> Result<&'static str, String> {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let expected = match extension.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" if is_svg(bytes) => return Ok("image/svg+xml"),
+        _ => return Err("unsupported or invalid image file".to_owned()),
+    };
+    match infer::get(bytes) {
+        Some(kind) if kind.mime_type() == expected => Ok(expected),
+        _ => Err("image content does not match its extension".to_owned()),
+    }
+}
+
+/// Only read supported images inside the directory of the user-opened document.
 #[tauri::command]
-fn read_binary_file(path: String) -> Result<Vec<u8>, String> {
-    let metadata = fs::metadata(&path).map_err(|e| e.to_string())?;
+fn read_image_file(doc_path: String, relative_path: String) -> Result<ImageFile, String> {
+    let path = document_image_path(Path::new(&doc_path), Path::new(&relative_path))?;
+    let file = File::open(&path).map_err(|e| e.to_string())?;
+    let metadata = file.metadata().map_err(|e| e.to_string())?;
     if !metadata.is_file() {
         return Err("path is not a regular file".to_owned());
     }
-    if metadata.len() > MAX_BINARY_FILE_BYTES {
-        return Err("file is larger than the 64 MiB binary-file limit".to_owned());
+    if metadata.len() > MAX_IMAGE_FILE_BYTES {
+        return Err("image is larger than the 64 MiB image-file limit".to_owned());
     }
-    fs::read(&path).map_err(|e| e.to_string())
+    let mut data = Vec::new();
+    file.take(MAX_IMAGE_FILE_BYTES + 1)
+        .read_to_end(&mut data)
+        .map_err(|e| e.to_string())?;
+    if data.len() as u64 > MAX_IMAGE_FILE_BYTES {
+        return Err("image is larger than the 64 MiB image-file limit".to_owned());
+    }
+    Ok(ImageFile {
+        mime: image_mime(&path, &data)?,
+        path: path.to_string_lossy().into_owned(),
+        data,
+    })
 }
 
 /// Create a directory (and parent directories if needed).
@@ -301,7 +403,7 @@ pub fn run() {
             write_file,
             file_mtime,
             save_binary_file,
-            read_binary_file,
+            read_image_file,
             create_directory,
             take_startup_files,
             take_pending_open_files
@@ -313,6 +415,128 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct TestDirectory(PathBuf);
+
+    impl TestDirectory {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "mdplus-image-test-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn image_paths_are_limited_to_the_document_directory() {
+        let root = TestDirectory::new();
+        let docs = root.0.join("docs");
+        fs::create_dir_all(docs.join("img")).unwrap();
+        let document = docs.join("note.md");
+        fs::write(&document, "document").unwrap();
+        fs::write(docs.join("img/picture.png"), b"image").unwrap();
+        fs::write(root.0.join("secret.png"), b"secret").unwrap();
+
+        assert!(document_image_path(&document, Path::new("img/picture.png")).is_ok());
+        assert!(document_image_path(&document, Path::new("../secret.png")).is_err());
+        assert!(document_image_path(&document, &root.0.join("secret.png")).is_err());
+        assert!(document_image_path(&document, Path::new("img/missing.png")).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_absolute_and_drive_relative_image_paths_are_rejected() {
+        let root = TestDirectory::new();
+        let document = root.0.join("note.md");
+        fs::write(&document, "document").unwrap();
+        for reference in [
+            r"C:\private\secret.png",
+            r"C:private\secret.png",
+            r"\private\secret.png",
+            r"\\server\share\secret.png",
+            r"\\?\C:\private\secret.png",
+        ] {
+            assert!(document_image_path(&document, Path::new(reference)).is_err());
+        }
+    }
+
+    #[test]
+    fn directory_links_cannot_escape_the_document_directory() {
+        let root = TestDirectory::new();
+        let docs = root.0.join("docs");
+        let outside = root.0.join("outside");
+        fs::create_dir(&docs).unwrap();
+        fs::create_dir(&outside).unwrap();
+        let document = docs.join("note.md");
+        fs::write(&document, "document").unwrap();
+        fs::write(outside.join("secret.png"), b"secret").unwrap();
+        let link = docs.join("linked");
+        #[cfg(windows)]
+        {
+            let output = std::process::Command::new("cmd")
+                .args(["/c", "mklink", "/J"])
+                .arg(&link)
+                .arg(&outside)
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+        }
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+
+        assert!(document_image_path(&document, Path::new("linked/secret.png")).is_err());
+        #[cfg(windows)]
+        fs::remove_dir(&link).unwrap();
+        #[cfg(unix)]
+        fs::remove_file(&link).unwrap();
+    }
+
+    #[test]
+    fn image_content_must_match_a_supported_extension() {
+        let png = [
+            0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, b'I', b'H', b'D', b'R',
+        ];
+        assert_eq!(image_mime(Path::new("image.png"), &png), Ok("image/png"));
+        assert!(image_mime(Path::new("secret.png"), b"PRIVATE_KEY=secret").is_err());
+        assert!(image_mime(Path::new("secret.txt"), &png).is_err());
+        assert!(image_mime(Path::new("image.jpg"), &png).is_err());
+        assert!(image_mime(Path::new("image.svg"), b"not an image").is_err());
+        assert!(image_mime(Path::new("image.svg"), b"<html/>").is_err());
+        assert!(image_mime(Path::new("image.svg"), b"<svg><g>").is_err());
+        assert!(image_mime(Path::new("image.svg"), b"<!DOCTYPE svg><svg/>").is_err());
+        assert_eq!(
+            image_mime(
+                Path::new("image.svg"),
+                br#"<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/></svg>"#
+            ),
+            Ok("image/svg+xml")
+        );
+    }
+
+    #[test]
+    fn image_command_rejects_disguised_non_images() {
+        let root = TestDirectory::new();
+        let document = root.0.join("note.md");
+        fs::write(&document, "document").unwrap();
+        fs::write(root.0.join("secret.png"), "PRIVATE_KEY=secret").unwrap();
+        assert!(read_image_file(
+            document.to_string_lossy().into_owned(),
+            "secret.png".to_owned()
+        )
+        .is_err());
+    }
 
     #[test]
     fn startup_files_are_consumed_only_once() {

@@ -11,9 +11,13 @@ export async function readFile(path: string): Promise<string> {
   return invoke<string>('read_file', { path });
 }
 
-/** 读取文件二进制内容(如图片),返回字节数组 */
-export async function readBinaryFile(path: string): Promise<number[]> {
-  return invoke<number[]>('read_binary_file', { path });
+/** 由后端验证目录边界及图片格式,不提供任意文件二进制读取。 */
+export async function readImageFile(docPath: string, relativePath: string): Promise<{
+  path: string;
+  mime: string;
+  data: number[];
+}> {
+  return invoke('read_image_file', { docPath, relativePath });
 }
 
 /** 写入文件文本内容 */

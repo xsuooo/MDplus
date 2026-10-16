@@ -1,13 +1,13 @@
 import { invoke } from '@tauri-apps/api/core';
 import { join, dirname } from '@tauri-apps/api/path';
 import { rewriteImageReferences, type PendingImageReference } from './imagePaths';
-import { basename, fileMtime, readBinaryFile } from './fileOps';
+import { basename, fileMtime, readImageFile } from './fileOps';
 
 interface PendingImage extends PendingImageReference {
   filename: string;
   data: number[];
   /**
-   * 打开文档时就已经在磁盘上的图片,记录它的原始引用与解析出的绝对路径。
+   * 已在磁盘上的图片,记录它的引用与绝对路径;粘贴图片首次保存后也登记来源。
    * 保存回同一个目录时按原引用还原(既不复制也不改写路径);只有另存为到
    * 别的目录、原引用会失效时才复制进 assets。粘贴进来的新图没有这个字段。
    */
@@ -56,20 +56,6 @@ function bytesToDataUrl(bytes: Uint8Array, mime: string): string {
   return `data:${mime};base64,${btoa(binary)}`;
 }
 
-const MIME_BY_EXTENSION: Record<string, string> = {
-  gif: 'image/gif',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  png: 'image/png',
-  svg: 'image/svg+xml',
-  webp: 'image/webp',
-};
-
-function mimeFromPath(path: string): string {
-  const ext = path.split('.').pop()?.toLowerCase() ?? '';
-  return MIME_BY_EXTENSION[ext] ?? 'image/png';
-}
-
 /** 匹配 Markdown 图片引用中的目标 URL,只捕获相对路径(不含 http/data/file/绝对路径)。 */
 const IMAGE_URL_RE = /!\[[^\]]*\]\(([^)\s]+)\)/g;
 
@@ -91,6 +77,24 @@ export function clearPendingImages(tabId: string): void {
   pendingImages.delete(tabId);
 }
 
+export function resolveImageSource(tabId: string, url: string): string {
+  return pendingImages.get(tabId)?.find((image) => image.source?.url === url)?.placeholder ?? url;
+}
+
+interface ImageMigration {
+  markdown: string;
+  updates: { image: PendingImage; filename: string; source: { url: string; absolutePath: string } }[];
+}
+
+/** 仅在文档写入成功后提交来源,失败的另存为不能改变后续迁移的基准目录。 */
+export function commitImageMigration(migration: ImageMigration): void {
+  for (const { image, filename, source } of migration.updates) {
+    image.filename = filename;
+    image.relativePath = source.url;
+    image.source = source;
+  }
+}
+
 /**
  * 将某个未保存标签中的图片写入目标文档 assets 目录，并重写 Markdown 引用。
  * 图片字节保存在前端内存中，因此不依赖临时目录和跨磁盘 rename。
@@ -99,11 +103,13 @@ export async function migratePendingImages(
   tabId: string,
   targetFilePath: string,
   markdown: string,
-): Promise<string> {
+): Promise<ImageMigration> {
   const pending = getPendingImages(tabId);
-  if (pending.length === 0) return markdown;
+  const updates: ImageMigration['updates'] = [];
+  if (pending.length === 0) return { markdown, updates };
 
   const dir = await dirname(targetFilePath);
+  const urls = new Set(Array.from(markdown.matchAll(IMAGE_URL_RE), (match) => match[1]));
 
   const references: PendingImageReference[] = [];
   let assetsDirReady = false;
@@ -117,7 +123,9 @@ export async function migratePendingImages(
   };
 
   for (const image of pending) {
-    if (!markdown.includes(image.placeholder)) continue;
+    const imageReferences = [image.placeholder, image.source?.url]
+      .filter((url): url is string => !!url && urls.has(url));
+    if (imageReferences.length === 0) continue;
 
     // 磁盘上原有的图片:只要它相对新的保存位置仍然指向同一个文件,就把
     // 原引用原样写回。这既保住了作者自己的目录结构(如 ./img/pic.png),
@@ -125,7 +133,9 @@ export async function migratePendingImages(
     if (image.source) {
       const resolved = await join(dir, image.source.url.replace(/^\.\//, ''));
       if (isSamePath(resolved, image.source.absolutePath)) {
-        references.push({ placeholder: image.placeholder, relativePath: image.source.url });
+        for (const reference of imageReferences) {
+          references.push({ placeholder: reference, relativePath: image.source.url });
+        }
         continue;
       }
     }
@@ -136,13 +146,17 @@ export async function migratePendingImages(
     const filename = await uniqueAssetName(assetsDir, image.filename);
     const targetPath = await join(assetsDir, filename);
     await invoke('save_binary_file', { path: targetPath, data: image.data });
-    references.push({
-      placeholder: image.placeholder,
-      relativePath: `./assets/${filename}`,
+    for (const reference of imageReferences) {
+      references.push({ placeholder: reference, relativePath: `./assets/${filename}` });
+    }
+    updates.push({
+      image,
+      filename,
+      source: { url: `./assets/${filename}`, absolutePath: targetPath },
     });
   }
 
-  return rewriteImageReferences(markdown, references);
+  return { markdown: rewriteImageReferences(markdown, references), updates };
 }
 
 /**
@@ -150,7 +164,11 @@ export async function migratePendingImages(
  * 与 App.tsx 判断「同一文件是否已在别的标签打开」用的是同一套口径。
  */
 function isSamePath(a: string, b: string): boolean {
-  const normalize = (path: string) => path.replace(/\//g, '\\').toLocaleLowerCase();
+  const normalize = (path: string) => path
+    .replace(/\//g, '\\')
+    .replace(/^\\\\\?\\UNC\\/i, '\\\\')
+    .replace(/^\\\\\?\\/, '')
+    .toLocaleLowerCase();
   return normalize(a) === normalize(b);
 }
 
@@ -183,8 +201,6 @@ export async function loadImageReferences(
   markdown: string,
   docPath: string,
 ): Promise<string> {
-  const dir = await dirname(docPath);
-
   const pending = getPendingImages(tabId);
   const seen = new Set(pending.map((image) => image.relativePath));
   let result = markdown;
@@ -201,9 +217,11 @@ export async function loadImageReferences(
     let dataUrl: string;
     let assetPath: string;
     try {
-      assetPath = await join(dir, relativePath);
-      bytes = await readBinaryFile(assetPath);
-      dataUrl = bytesToDataUrl(new Uint8Array(bytes), mimeFromPath(assetPath));
+      const image = await readImageFile(docPath, relativePath);
+      assetPath = image.path;
+      bytes = image.data;
+      // A distinct fragment preserves source identity even when two files have identical bytes.
+      dataUrl = `${bytesToDataUrl(new Uint8Array(bytes), image.mime)}#mdplus-${imageFilename('ref')}`;
     } catch {
       continue;
     }
@@ -217,7 +235,7 @@ export async function loadImageReferences(
       data: bytes,
       source: { url, absolutePath: assetPath },
     });
-    result = result.split(url).join(dataUrl);
+    result = rewriteImageReferences(result, [{ placeholder: url, relativePath: dataUrl }]);
   }
 
   return result;
@@ -231,7 +249,7 @@ export async function saveImage(blob: Blob, tabId?: string): Promise<string> {
   const filename = imageFilename(extension);
 
   // 无论文档是否已保存,都先用 data URL 显示;pending 由保存/另存为统一迁移。
-  const placeholder = await blobToDataUrl(blob);
+  const placeholder = `${await blobToDataUrl(blob)}#mdplus-${filename}`;
   if (tabId) {
     rememberPendingImage(tabId, {
       placeholder,

@@ -2,6 +2,7 @@ import { memo, useEffect, useRef } from 'react';
 import { useEditor, Milkdown, MilkdownProvider } from '@milkdown/react';
 import type { Editor } from '@milkdown/kit/core';
 import { createEditor, getCurrentState } from '../lib/editor';
+import { resolveImageSource } from '../lib/imageOps';
 import type { Tab, EditorUpdate } from '../lib/types';
 
 interface EditorTabProps {
@@ -41,6 +42,7 @@ function EditorTabInner({ tab, active, onUpdate, onRegister, onImagePaste }: Edi
     (root) =>
       createEditor(root, initialContentRef.current, {
         onUpdate: (u) => onUpdateRef.current(tabIdRef.current, u),
+        resolveImageSource: (url) => resolveImageSource(tabIdRef.current, url),
         onImagePaste: (file) => onImagePasteRef.current?.(tabIdRef.current, file) ?? Promise.reject(new Error('图片处理不可用')),
       }),
     [],

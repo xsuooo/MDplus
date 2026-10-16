@@ -20,4 +20,11 @@ describe('rewriteImageReferences', () => {
       ]),
     ).toBe('![](./assets/old.png)');
   });
+
+  it('only rewrites image destinations, not prose or normal links', () => {
+    expect(rewriteImageReferences(
+      'pic.png [download](pic.png) ![](pic.png)',
+      [{ placeholder: 'pic.png', relativePath: './assets/pic.png' }],
+    )).toBe('pic.png [download](pic.png) ![](./assets/pic.png)');
+  });
 });
