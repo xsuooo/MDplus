@@ -1,7 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
   <title>MDPlus</title>
-  <rect x="24" y="24" width="464" height="464" rx="112" fill="#0D6B61"/>
-  <path d="M112 364V148l104 88 104-88v216h-56V268l-48 40-48-40v96Z" fill="#F5FBF7"/>
-  <path d="m112 148 104 88v72l-48-40v96h-56Z" fill="#B9DDD2"/>
-  <path d="M366 150h24v34h34v24h-34v34h-24v-34h-34v-24h34Z" fill="#9FE6C7"/>
+  <rect width="512" height="512" rx="112" fill="#FFFFFF"/>
+  <g transform="translate(0,31)">
+    <path d="M86 355V167l96 116 96-116v188" fill="none" stroke="#000000" stroke-width="52" stroke-linejoin="miter" stroke-linecap="butt"/>
+    <path d="M368 158h44v40h40v44h-40v40h-44v-40h-40v-44h40Z" fill="#000000"/>
+  </g>
 </svg>

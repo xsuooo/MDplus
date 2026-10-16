@@ -76,12 +76,14 @@ fn decode_text(bytes: &[u8]) -> String {
 /// 按 UTF-16 解码(已去掉 BOM 的字节),little_endian 指定字节序。
 fn decode_utf16(data: &[u8], little_endian: bool) -> Option<String> {
     let units: Vec<u16> = data
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| {
             if little_endian {
-                u16::from_le_bytes([c[0], c[1]])
+                u16::from_le_bytes(*c)
             } else {
-                u16::from_be_bytes([c[0], c[1]])
+                u16::from_be_bytes(*c)
             }
         })
         .collect();
