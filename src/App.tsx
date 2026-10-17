@@ -13,6 +13,7 @@ import { StatusBar } from './components/StatusBar';
 import { EditorTab } from './components/EditorTab';
 import { SearchBar } from './components/SearchBar';
 import { NewFileModal } from './components/NewFileModal';
+import { ShortcutModal } from './components/ShortcutModal';
 import { CloseConfirmModal } from './components/CloseConfirmModal';
 import { RecentMenu } from './components/RecentMenu';
 import { SourceEditor } from './components/SourceEditor';
@@ -32,7 +33,16 @@ import {
   setWindowState,
   getOutlineOpen,
   setOutlineOpen as saveOutlineOpen,
+  getShortcutBindings,
+  saveShortcutBindings,
 } from './lib/store';
+import {
+  DEFAULT_SHORTCUTS,
+  SHORTCUT_DEFINITIONS,
+  shortcutFromEvent,
+  type ShortcutAction,
+  type ShortcutBindings,
+} from './lib/shortcuts';
 import { getTemplate } from './lib/templates';
 import { setMarkdown, undo, redo } from './lib/editor';
 import { computeStats } from './lib/stats';
@@ -73,6 +83,9 @@ export default function App() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [startupResolved, setStartupResolved] = useState(() => !isTauri());
   const [editorZoom, setEditorZoom] = useState(readEditorZoom);
+  // 快捷键表先用默认值渲染,启动后由已保存的绑定覆盖,避免首帧闪断
+  const [shortcuts, setShortcuts] = useState<ShortcutBindings>(DEFAULT_SHORTCUTS);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   // 编辑器实例注册表,避免每次输入都重渲染
   const editorRegistry = useRef<Record<string, Editor | null>>({});
@@ -93,6 +106,8 @@ export default function App() {
   const startupInitStarted = useRef(false);
   // 输入节流:每个标签最近一次未落定的 React 渲染同步定时器
   const tabRenderTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  // 绑定表读盘完成前不写盘,否则默认值会覆盖用户的已存设置
+  const shortcutsLoaded = useRef(false);
 
   const editorAreaRef = useRef<HTMLElement | null>(null);
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeId) ?? null, [tabs, activeId]);
@@ -133,6 +148,24 @@ export default function App() {
   useEffect(() => {
     void getRecentFiles().then(setRecentFiles);
   }, []);
+
+  /* ---------- 快捷键绑定载入 / 持久化 ---------- */
+  useEffect(() => {
+    let alive = true;
+    void getShortcutBindings().then((loaded) => {
+      if (!alive) return;
+      shortcutsLoaded.current = true;
+      setShortcuts(loaded);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!shortcutsLoaded.current) return;
+    void saveShortcutBindings(shortcuts);
+  }, [shortcuts]);
 
   /* ---------- 标签页操作 ---------- */
   const updateTab = useCallback((id: string, patch: Partial<Tab>) => {
@@ -1050,57 +1083,114 @@ export default function App() {
     return () => clearInterval(timer);
   }, [activeId, promptExternalReload, updateTab]);
 
-  /* ---------- 全局快捷键 ---------- */
+  /* ---------- 全局快捷键(唯一分发点) ---------- */
+  const cycleTab = useCallback(
+    (delta: number) => {
+      const currentIndex = tabs.findIndex((t) => t.id === activeId);
+      if (currentIndex === -1) return;
+      const nextIndex = (currentIndex + delta + tabs.length) % tabs.length;
+      setActiveId(tabs[nextIndex]?.id ?? null);
+    },
+    [activeId, tabs],
+  );
+
+  const runShortcut = useCallback(
+    (action: ShortcutAction) => {
+      switch (action) {
+        case 'new':
+          setNewModalOpen(true);
+          return;
+        case 'open':
+          void handleOpen();
+          return;
+        case 'save':
+          void handleSave();
+          return;
+        case 'saveAs':
+          void handleSaveAs();
+          return;
+        case 'search':
+          setSearchOpen((v) => !v);
+          return;
+        case 'toggleOutline':
+          setOutlineOpen((v) => !v);
+          return;
+        case 'toggleSource':
+          toggleSourceMode();
+          return;
+        case 'exportHtml':
+          void handleExportHTML();
+          return;
+        case 'exportPdf':
+          void handleExportPDF();
+          return;
+        case 'closeTab':
+          if (activeId) void closeTabRequest(activeId);
+          return;
+        case 'nextTab':
+          cycleTab(1);
+          return;
+        case 'prevTab':
+          cycleTab(-1);
+          return;
+      }
+    },
+    [
+      activeId,
+      closeTabRequest,
+      cycleTab,
+      handleExportHTML,
+      handleExportPDF,
+      handleOpen,
+      handleSave,
+      handleSaveAs,
+      toggleSourceMode,
+    ],
+  );
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // 目标元素已处理过该按键(编辑器 keymap、工具栏菜单)时不再重复响应
+      if (e.defaultPrevented) return;
+      // 输入法组字中(e.key === 'Process' 覆盖部分中文输入法)不响应
+      if (e.isComposing || e.key === 'Process') return;
+      // 有模态框/确认对话框打开时不响应
+      if (newModalOpen || shortcutsOpen || pendingCloseTab) return;
+
       const mod = e.ctrlKey || e.metaKey;
-      if (!mod) return;
       const key = e.key.toLowerCase();
-      if (key === 's') {
-        e.preventDefault();
-        void handleSave();
-      } else if (key === 'o') {
-        e.preventDefault();
-        void handleOpen();
-      } else if (key === 'n') {
-        e.preventDefault();
-        setNewModalOpen(true);
-      } else if (key === 'f') {
-        e.preventDefault();
-        setSearchOpen((v) => !v);
-      } else if (key === 'w' && !e.shiftKey) {
-        // Ctrl+W 关闭当前标签
-        e.preventDefault();
-        if (activeId) void closeTabRequest(activeId);
-      } else if (key === 'tab') {
-        // Ctrl+Tab 切换到下一个标签, Ctrl+Shift+Tab 切换到上一个
-        e.preventDefault();
-        const currentIndex = tabs.findIndex((t) => t.id === activeId);
-        if (currentIndex === -1) return;
-        const nextIndex = e.shiftKey
-          ? (currentIndex - 1 + tabs.length) % tabs.length
-          : (currentIndex + 1) % tabs.length;
-        setActiveId(tabs[nextIndex]?.id ?? null);
-      } else if (key === 'z') {
-        // 编辑器(contenteditable)聚焦时交给 Milkdown 自身 history keymap,避免重复撤销;
+
+      if (mod && (key === 'z' || key === 'y')) {
+        // 撤销/重做不走快捷键表:编辑器(contenteditable)聚焦时交给 Milkdown 自身 history keymap,避免重复撤销;
         // textarea/input(源码模式、搜索框、mermaid 编辑框)交给浏览器原生撤销
-        const t = e.target as HTMLElement | null;
-        const inEditable = !!t && (t.isContentEditable || t.tagName === 'TEXTAREA' || t.tagName === 'INPUT');
+        const target = e.target as HTMLElement | null;
+        const inEditable =
+          !!target && (target.isContentEditable || target.tagName === 'TEXTAREA' || target.tagName === 'INPUT');
         if (inEditable) return;
         e.preventDefault();
-        if (e.shiftKey) handleRedo();
+        if (key === 'y' || e.shiftKey) handleRedo();
         else handleUndo();
-      } else if (key === 'y') {
-        const t = e.target as HTMLElement | null;
-        const inEditable = !!t && (t.isContentEditable || t.tagName === 'TEXTAREA' || t.tagName === 'INPUT');
-        if (inEditable) return;
-        e.preventDefault();
-        handleRedo();
+        return;
       }
+
+      const accelerator = shortcutFromEvent(e);
+      if (!accelerator) return;
+      const definition = SHORTCUT_DEFINITIONS.find((item) => shortcuts[item.id] === accelerator);
+      if (!definition) return;
+      e.preventDefault();
+      runShortcut(definition.id);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [handleSave, handleOpen, handleUndo, handleRedo, activeId, tabs, closeTabRequest]);
+  }, [
+    shortcuts,
+    newModalOpen,
+    shortcutsOpen,
+    pendingCloseTab,
+    handleUndo,
+    handleRedo,
+    runShortcut,
+  ]);
 
   /* ---------- 拖拽打开 ---------- */
   useEffect(() => {
@@ -1209,6 +1299,7 @@ export default function App() {
         onToggleSource={toggleSourceMode}
         onRecent={() => setRecentMenuOpen((v) => !v)}
         recentOpen={recentMenuOpen}
+        onOpenShortcuts={() => setShortcutsOpen(true)}
         onWindowClose={handleWindowClose}
       />
 
@@ -1316,6 +1407,14 @@ export default function App() {
       />
 
       {newModalOpen && <NewFileModal onCancel={() => setNewModalOpen(false)} onConfirm={handleNew} />}
+
+      {shortcutsOpen && (
+        <ShortcutModal
+          bindings={shortcuts}
+          onChange={setShortcuts}
+          onClose={() => setShortcutsOpen(false)}
+        />
+      )}
 
       {pendingCloseTab && (
         <CloseConfirmModal

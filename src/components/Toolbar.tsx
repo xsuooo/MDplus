@@ -42,6 +42,7 @@ interface ToolbarProps {
   onToggleSource: () => void;
   onRecent: () => void;
   recentOpen: boolean;
+  onOpenShortcuts: () => void;
   onWindowClose: () => void;
 }
 
@@ -64,6 +65,7 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
     onToggleSource,
     onRecent,
     recentOpen,
+    onOpenShortcuts,
     onWindowClose,
   } = props;
 
@@ -202,6 +204,27 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
           aria-pressed={recentOpen}
         >
           <IconClock size={16} />
+        </button>
+        <button
+          className="toolbar-btn toolbar-btn-secondary shortcut-trigger"
+          onClick={onOpenShortcuts}
+          title="快捷键设置"
+          aria-label="打开快捷键设置"
+        >
+          <svg
+            width={15}
+            height={15}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.7}
+            strokeLinecap="round"
+            aria-hidden="true"
+          >
+            <rect x="2.5" y="6.5" width="19" height="11" rx="2.5" />
+            <path d="M6 10.5h1M9.5 10.5h1M13 10.5h1M16.5 10.5h1M8.5 14.5h7" />
+          </svg>
+          <span className="toolbar-btn-label">快捷键</span>
         </button>
       </div>
 

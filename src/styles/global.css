@@ -2037,3 +2037,122 @@ body.dragging::after {
     min-width: 4px;
   }
 }
+
+
+/* ---------- 快捷键设置 ---------- */
+.shortcut-trigger svg {
+  display: block;
+}
+
+.shortcut-modal {
+  width: 560px;
+  max-width: calc(100vw - 48px);
+}
+
+.shortcut-table-wrap {
+  max-height: min(74vh, 780px);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.shortcut-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.shortcut-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+}
+
+.shortcut-table th,
+.shortcut-table td {
+  padding: 8px 12px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.shortcut-table th[scope="row"] {
+  font-weight: 500;
+  color: var(--text-strong);
+  white-space: nowrap;
+}
+
+.shortcut-table thead th:last-child,
+.shortcut-table td.shortcut-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.shortcut-group-row th {
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  background: var(--bg-hover);
+  border-top: 1px solid var(--border);
+}
+
+.shortcut-table tbody:first-of-type .shortcut-group-row th {
+  border-top: none;
+}
+
+.shortcut-row + .shortcut-row th,
+.shortcut-row + .shortcut-row td {
+  border-top: 1px solid var(--border);
+}
+
+.shortcut-kbd {
+  display: inline-block;
+  min-width: 76px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  text-align: center;
+}
+
+.shortcut-kbd-unbound {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.shortcut-kbd-capturing {
+  font-family: var(--font-sans);
+  font-style: normal;
+  color: var(--accent-text);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.shortcut-conflict {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--danger);
+}
+
+.shortcut-actions .btn {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.shortcut-actions .btn + .btn {
+  margin-left: 6px;
+}

@@ -1,6 +1,12 @@
 import { Store } from '@tauri-apps/plugin-store';
 import type { RecentFile, ThemeMode } from './types';
-import { sanitizeRecentFiles, sanitizeSourceMode, sanitizeThemeMode } from './validation';
+import type { ShortcutBindings } from './shortcuts';
+import {
+  sanitizeRecentFiles,
+  sanitizeShortcutBindings,
+  sanitizeSourceMode,
+  sanitizeThemeMode,
+} from './validation';
 
 const STORE_FILE = 'mdplus-settings.json';
 const KEY_RECENT = 'recent-files';
@@ -8,6 +14,7 @@ const KEY_THEME = 'theme-mode';
 const KEY_SOURCE_MODE = 'source-mode';
 const KEY_WINDOW_STATE = 'window-state';
 const KEY_OUTLINE_OPEN = 'outline-open';
+const KEY_SHORTCUTS = 'shortcuts';
 const MAX_RECENT = 10;
 
 interface WindowState {
@@ -156,6 +163,27 @@ export async function getOutlineOpen(): Promise<boolean> {
 export async function setOutlineOpen(open: boolean): Promise<void> {
   try {
     await enqueueStoreWrite((store) => store.set(KEY_OUTLINE_OPEN, open));
+  } catch {
+    // 忽略
+  }
+}
+
+/** 读取快捷键绑定(损坏时回落到默认表) */
+export async function getShortcutBindings(): Promise<ShortcutBindings> {
+  try {
+    await writeQueue;
+    const store = await getStore();
+    const v = await store.get<ShortcutBindings>(KEY_SHORTCUTS);
+    return sanitizeShortcutBindings(v);
+  } catch {
+    return sanitizeShortcutBindings(null);
+  }
+}
+
+/** 写入快捷键绑定 */
+export async function saveShortcutBindings(bindings: ShortcutBindings): Promise<void> {
+  try {
+    await enqueueStoreWrite((store) => store.set(KEY_SHORTCUTS, bindings));
   } catch {
     // 忽略
   }
