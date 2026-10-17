@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
@@ -40,6 +40,7 @@ import { showMessage, confirmDialog } from './lib/dialog';
 import { refreshMermaidTheme } from './lib/mermaid';
 import { errorMessage } from './lib/errors';
 import { startupView } from './lib/startup';
+import { bindEditorZoomControls, nextEditorZoom, readEditorZoom, writeEditorZoom } from './lib/editorZoom';
 import type { RecentFile, Tab, ThemeMode, EditorUpdate } from './lib/types';
 import './styles/global.css';
 
@@ -71,6 +72,7 @@ export default function App() {
   const [fileDialogBusy, setFileDialogBusy] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [startupResolved, setStartupResolved] = useState(() => !isTauri());
+  const [editorZoom, setEditorZoom] = useState(readEditorZoom);
 
   // 编辑器实例注册表,避免每次输入都重渲染
   const editorRegistry = useRef<Record<string, Editor | null>>({});
@@ -92,7 +94,18 @@ export default function App() {
   // 输入节流:每个标签最近一次未落定的 React 渲染同步定时器
   const tabRenderTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
+  const editorAreaRef = useRef<HTMLElement | null>(null);
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeId) ?? null, [tabs, activeId]);
+
+  useEffect(() => {
+    const area = editorAreaRef.current;
+    if (!area) return;
+    return bindEditorZoomControls(area, (action) => setEditorZoom((value) => nextEditorZoom(value, action)));
+  }, []);
+
+  useEffect(() => {
+    writeEditorZoom(editorZoom);
+  }, [editorZoom]);
 
   /* ---------- 主题与偏好初始化 ---------- */
   useEffect(() => {
@@ -1223,7 +1236,11 @@ export default function App() {
           onJump={jumpToOutline}
         />
 
-        <main className="editor-area">
+        <main
+          className="editor-area"
+          ref={editorAreaRef}
+          style={{ '--editor-zoom': editorZoom / 100 } as CSSProperties}
+        >
           {view === 'loading' ? (
             <div className="startup-placeholder" aria-hidden="true" />
           ) : view === 'welcome' ? (
@@ -1294,6 +1311,8 @@ export default function App() {
         onThemeMode={setThemeModeState}
         sourceMode={sourceMode}
         saveState={activeSaveState}
+        zoom={editorZoom}
+        onResetZoom={() => setEditorZoom(100)}
       />
 
       {newModalOpen && <NewFileModal onCancel={() => setNewModalOpen(false)} onConfirm={handleNew} />}

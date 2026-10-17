@@ -645,6 +645,22 @@ textarea {
   font-size: inherit;
 }
 
+.milkdown-container .milkdown,
+.source-textarea {
+  zoom: var(--editor-zoom, 1);
+}
+
+/* sandbox iframe 的事件不会冒泡,由 holder 接收滚轮和编辑点击。 */
+.md-mermaid-holder iframe {
+  pointer-events: none;
+}
+
+.statusbar-zoom {
+  min-width: 42px;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------- 欢迎页 ---------- */
 .welcome {
   height: 100%;

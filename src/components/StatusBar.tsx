@@ -8,6 +8,8 @@ interface StatusBarProps {
   onThemeMode: (mode: ThemeMode) => void;
   sourceMode: boolean;
   saveState: 'idle' | 'saving' | 'unsaved' | 'dirty' | 'saved';
+  zoom: number;
+  onResetZoom: () => void;
 }
 
 export const StatusBar = memo(function StatusBar({
@@ -16,6 +18,8 @@ export const StatusBar = memo(function StatusBar({
   onThemeMode,
   sourceMode,
   saveState,
+  zoom,
+  onResetZoom,
 }: StatusBarProps) {
   const next: ThemeMode = themeMode === 'system' ? 'light' : themeMode === 'light' ? 'dark' : 'system';
   const saveLabel =
@@ -48,6 +52,16 @@ export const StatusBar = memo(function StatusBar({
       )}
 
       <div className="statusbar-right">
+        {tab && (
+          <button
+            className="statusbar-theme statusbar-zoom"
+            onClick={onResetZoom}
+            title="重置编辑器缩放为100%"
+            aria-label={`编辑器缩放${zoom}%,点击重置为100%`}
+          >
+            {zoom}%
+          </button>
+        )}
         <button
           className="statusbar-theme"
           onClick={() => onThemeMode(next)}
