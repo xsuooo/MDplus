@@ -520,7 +520,7 @@ export default function App() {
         if (existing) {
           setActiveId(existing.id);
         } else {
-          // 先确定标签 id,把文档里的相对图片引用转成 data URL 以便编辑器显示,
+          // 先确定标签 id,把文档里的相对图片引用转成短 token,通过预览缓存显示,
           // 并登记为 pending,保存时再转回相对路径落盘。
           const id = makeId();
           const displayContent = await loadImageReferences(id, content, path);
@@ -1276,7 +1276,14 @@ export default function App() {
           )}
 
           {activeTab && sourceMode && (
-            <SourceEditor value={sourceText} onChange={handleSourceChange} onClose={toggleSourceMode} />
+            <SourceEditor
+              key={activeTab.id}
+              tabId={activeTab.id}
+              value={sourceText}
+              onChange={handleSourceChange}
+              onClose={toggleSourceMode}
+              onImagePaste={handleImagePaste}
+            />
           )}
         </main>
       </div>

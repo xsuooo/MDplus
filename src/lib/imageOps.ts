@@ -6,6 +6,7 @@ import { basename, fileMtime, readImageFile } from './fileOps';
 interface PendingImage extends PendingImageReference {
   filename: string;
   data: number[];
+  preview: string;
   /**
    * 已在磁盘上的图片,记录它的引用与绝对路径;粘贴图片首次保存后也登记来源。
    * 保存回同一个目录时按原引用还原(既不复制也不改写路径);只有另存为到
@@ -29,12 +30,14 @@ function imageExtension(blob: Blob): string {
   return IMAGE_EXTENSIONS[mime] ?? 'bin';
 }
 
+function imageId(): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function imageFilename(extension: string): string {
-  const id =
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  return `image-${id}.${extension}`;
+  return `image-${imageId()}.${extension}`;
 }
 
 async function blobToDataUrl(blob: Blob): Promise<string> {
@@ -60,7 +63,7 @@ function bytesToDataUrl(bytes: Uint8Array, mime: string): string {
 const IMAGE_URL_RE = /!\[[^\]]*\]\(([^)\s]+)\)/g;
 
 function isExternalUrl(url: string): boolean {
-  return /^(?:https?:|data:|file:|[a-zA-Z]:[\\/]|\/|\/\/)/.test(url);
+  return /^(?:mdplus-image:|https?:|data:|file:|[a-zA-Z]:[\\/]|\/|\/\/)/.test(url);
 }
 
 function rememberPendingImage(tabId: string, image: PendingImage): void {
@@ -78,7 +81,8 @@ export function clearPendingImages(tabId: string): void {
 }
 
 export function resolveImageSource(tabId: string, url: string): string {
-  return pendingImages.get(tabId)?.find((image) => image.source?.url === url)?.placeholder ?? url;
+  const image = pendingImages.get(tabId)?.find((item) => item.placeholder === url || item.source?.url === url);
+  return image?.preview ?? url;
 }
 
 interface ImageMigration {
@@ -192,8 +196,8 @@ async function uniqueAssetName(assetsDir: string, filename: string): Promise<str
 }
 
 /**
- * 将磁盘上已存在的文档里的相对图片引用(如 `./assets/xxx.png`)转成 data URL,
- * 以便在编辑器里直接显示,同时登记为 pending,保存时再转回相对路径并落盘。
+ * 将磁盘上已存在文档的相对图片引用转成短 token,显示数据仅存缓存。
+ * 登记为 pending 后,保存时再转回相对路径并落盘。
  * 读不到的文件保留原引用(显示为加载失败),不阻断文档打开。
  */
 export async function loadImageReferences(
@@ -220,14 +224,15 @@ export async function loadImageReferences(
       const image = await readImageFile(docPath, relativePath);
       assetPath = image.path;
       bytes = image.data;
-      // A distinct fragment preserves source identity even when two files have identical bytes.
-      dataUrl = `${bytesToDataUrl(new Uint8Array(bytes), image.mime)}#mdplus-${imageFilename('ref')}`;
+      dataUrl = bytesToDataUrl(new Uint8Array(bytes), image.mime);
     } catch {
       continue;
     }
 
+    const placeholder = `mdplus-image:${imageId()}`;
     rememberPendingImage(tabId, {
-      placeholder: dataUrl,
+      placeholder,
+      preview: dataUrl,
       // 原样保留作者写的引用。只有另存为到别的目录、这个引用不再指向同一
       // 个文件时,migratePendingImages 才会把它复制进 assets 并改写路径。
       relativePath: url,
@@ -235,28 +240,26 @@ export async function loadImageReferences(
       data: bytes,
       source: { url, absolutePath: assetPath },
     });
-    result = rewriteImageReferences(result, [{ placeholder: url, relativePath: dataUrl }]);
+    result = rewriteImageReferences(result, [{ placeholder: url, relativePath: placeholder }]);
   }
 
   return result;
 }
 
-/** 粘贴图片:统一用 data URL 保证编辑器立即可见,保存/另存为时再迁移为相对路径文件。 */
-export async function saveImage(blob: Blob, tabId?: string): Promise<string> {
+/** 粘贴图片:返回短 token,显示数据留在缓存,保存/另存为统一迁移。 */
+export async function saveImage(blob: Blob, tabId: string): Promise<string> {
   const buffer = await blob.arrayBuffer();
   const data = new Uint8Array(buffer);
   const extension = imageExtension(blob);
   const filename = imageFilename(extension);
-
-  // 无论文档是否已保存,都先用 data URL 显示;pending 由保存/另存为统一迁移。
-  const placeholder = `${await blobToDataUrl(blob)}#mdplus-${filename}`;
-  if (tabId) {
-    rememberPendingImage(tabId, {
-      placeholder,
-      relativePath: `./assets/${filename}`,
-      filename,
-      data: Array.from(data),
-    });
-  }
+  const preview = await blobToDataUrl(blob);
+  const placeholder = `mdplus-image:${imageId()}`;
+  rememberPendingImage(tabId, {
+    placeholder,
+    preview,
+    relativePath: `./assets/${filename}`,
+    filename,
+    data: Array.from(data),
+  });
   return placeholder;
 }

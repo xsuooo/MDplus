@@ -26,6 +26,7 @@ import { mermaidPlugin } from './mermaid';
 import { searchPlugin } from './search';
 import { computeStats } from './stats';
 import { taskListPlugin } from './tasklist';
+import { firstClipboardImage } from './sourcePaste';
 import type { EditorUpdate, OutlineItem } from './types';
 
 /** 编辑器更新回调 */
@@ -33,6 +34,7 @@ export interface EditorCallbacks {
   onUpdate: (update: EditorUpdate) => void;
   onImagePaste?: (file: File) => Promise<string>;
   resolveImageSource?: (url: string) => string;
+  captureImagePaste?: () => () => boolean;
 }
 
 /** 从 ProseMirror doc 提取标题大纲 */
@@ -127,38 +129,32 @@ export function createEditor(root: HTMLElement, content: string, callbacks: Edit
         if (editor.status === EditorStatus.Destroyed) return;
         const view = ctx.get(editorViewCtx);
         const handlePaste = async (e: ClipboardEvent) => {
-          const items = e.clipboardData?.items;
-          if (!items || !callbacks.onImagePaste) return;
-
-          for (let i = 0; i < items.length; i++) {
-            const item = items[i];
-            if (item.type.startsWith('image/')) {
-              e.preventDefault();
-              const file = item.getAsFile();
-              if (!file) continue;
-
-              try {
-                const imagePath = await callbacks.onImagePaste(file);
-                if (!view.dom.isConnected) return;
-                const { state, dispatch } = view;
-                // 插入真正的 image 节点而非纯文本,否则 Markdown 不会渲染成图片。
-                const imageType = state.schema.nodes.image;
-                if (imageType) {
-                  const node = imageType.create({ src: imagePath, alt: '', title: '' });
-                  dispatch(state.tr.replaceSelectionWith(node).scrollIntoView());
-                } else {
-                  dispatch(state.tr.insertText(`![](${imagePath})`));
-                }
-              } catch (err) {
-                console.error('粘贴图片失败', err);
-              }
-              break;
+          const file = firstClipboardImage(e.clipboardData);
+          if (!file || !callbacks.onImagePaste) return;
+          e.preventDefault();
+          const original = view.state;
+          const isCurrent = callbacks.captureImagePaste?.();
+          try {
+            const imagePath = await callbacks.onImagePaste(file);
+            if (!imagePath || !view.dom.isConnected || view.isDestroyed || view.state !== original
+              || isCurrent?.() === false) return;
+            const { state, dispatch } = view;
+            // 插入真正的 image 节点而非纯文本,否则 Markdown 不会渲染成图片。
+            const imageType = state.schema.nodes.image;
+            if (imageType) {
+              const node = imageType.create({ src: imagePath, alt: '', title: '' });
+              dispatch(state.tr.replaceSelectionWith(node).scrollIntoView());
+            } else {
+              dispatch(state.tr.insertText(`![](${imagePath})`));
             }
+          } catch (err) {
+            console.error('粘贴图片失败', err);
           }
         };
 
-        view.dom.addEventListener('paste', handlePaste);
-        removePasteListener = () => view.dom.removeEventListener('paste', handlePaste);
+        // Capture before ProseMirror consumes the text/HTML part of mixed clipboard data.
+        view.dom.addEventListener('paste', handlePaste, true);
+        removePasteListener = () => view.dom.removeEventListener('paste', handlePaste, true);
       }, 100);
     });
   }

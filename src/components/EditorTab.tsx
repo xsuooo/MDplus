@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef } from 'react';
 import { useEditor, Milkdown, MilkdownProvider } from '@milkdown/react';
 import type { Editor } from '@milkdown/kit/core';
 import { createEditor, getCurrentState } from '../lib/editor';
@@ -37,12 +37,21 @@ function EditorTabInner({ tab, active, onUpdate, onRegister, onImagePaste }: Edi
   tabIdRef.current = tab.id;
   const initialContentRef = useRef(tab.initialContent);
   const initializedRef = useRef(false);
+  const activity = useRef(0);
+  useLayoutEffect(() => {
+    activity.current += 1;
+    return () => { activity.current += 1; };
+  }, [active, tab.id]);
 
   const { get, loading } = useEditor(
     (root) =>
       createEditor(root, initialContentRef.current, {
         onUpdate: (u) => onUpdateRef.current(tabIdRef.current, u),
         resolveImageSource: (url) => resolveImageSource(tabIdRef.current, url),
+        captureImagePaste: () => {
+          const current = activity.current;
+          return () => activity.current === current;
+        },
         onImagePaste: (file) => onImagePasteRef.current?.(tabIdRef.current, file) ?? Promise.reject(new Error('图片处理不可用')),
       }),
     [],
