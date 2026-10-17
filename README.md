@@ -30,6 +30,8 @@ Windows 上的 Markdown 桌面编辑器，所见即所得。
 
 需要 Node.js 20.19+ 或 22.12+（推荐当前 LTS）、Rust stable、Windows WebView2。
 
+支持范围：Windows 10/11 + WebView2；macOS / Linux 与非 Chromium WebView 不在支持范围内。
+
 ```bash
 npm install
 npm run tauri dev
