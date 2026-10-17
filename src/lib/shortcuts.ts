@@ -224,6 +224,23 @@ export function findConflicts(
   return conflicts;
 }
 
+export interface ShortcutConflictReport {
+  accelerator: string;
+  /** 实际生效的动作:与 App 分发一致,取 SHORTCUT_DEFINITIONS 顺序里的第一个 */
+  active: ShortcutAction;
+  /** 同一个组合键下不会触发的其余动作 */
+  ignored: ShortcutAction[];
+}
+
+/** 把 findConflicts 的分组结果标出"谁生效、谁被忽略",供设置面板提示历史脏数据。 */
+export function conflictReport(bindings: ShortcutBindings): ShortcutConflictReport[] {
+  return findConflicts(bindings).map(({ accelerator, actions }) => ({
+    accelerator,
+    active: actions[0]!,
+    ignored: actions.slice(1),
+  }));
+}
+
 export function sanitizeShortcuts(value: unknown): ShortcutBindings {
   const source =
     typeof value === 'object' && value !== null && !Array.isArray(value)

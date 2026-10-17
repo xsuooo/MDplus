@@ -57,3 +57,30 @@ describe('ShortcutModal', () => {
     expect(html).toContain('role="dialog"');
   });
 });
+
+describe('ShortcutModal duplicate bindings', () => {
+  it('warns about a persisted duplicate and names the effective and ignored action', () => {
+    const html = render({ ...DEFAULT_SHORTCUTS, open: 'ctrl+n' });
+
+    expect(html).toContain('shortcut-duplicate-warning');
+    expect(html).toContain('存在重复绑定');
+    expect(html).toContain('已由「新建」使用');
+    expect(html).toContain('「打开」不会触发');
+    expect(html).toContain('shortcut-ignored');
+  });
+
+  it('shows no warning and no "不生效" marker for a clean configuration', () => {
+    const html = render();
+
+    expect(html).not.toContain('shortcut-duplicate-warning');
+    expect(html).not.toContain('shortcut-ignored');
+  });
+
+  it('keeps both rows listed so the user can clear either one', () => {
+    const html = render({ ...DEFAULT_SHORTCUTS, open: 'ctrl+n' });
+
+    expect(html).toContain('aria-label="修改「新建」快捷键"');
+    expect(html).toContain('aria-label="修改「打开」快捷键"');
+    expect(html).toContain('aria-label="清除「打开」快捷键"');
+  });
+});

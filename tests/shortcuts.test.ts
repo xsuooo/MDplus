@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyShortcut,
+  conflictReport,
   DEFAULT_SHORTCUTS,
   findConflicts,
   formatShortcut,
@@ -240,5 +241,39 @@ describe('applyShortcut', () => {
     const result = applyShortcut(DEFAULT_SHORTCUTS, 'save', 'ctrl+');
     expect(result.conflict).toEqual([]);
     expect(result.bindings).toBe(DEFAULT_SHORTCUTS);
+  });
+});
+
+describe('conflictReport', () => {
+  it('reports nothing for a clean configuration', () => {
+    expect(conflictReport(DEFAULT_SHORTCUTS)).toEqual([]);
+  });
+
+  it('marks the first definition as active and the rest as ignored', () => {
+    const bindings: ShortcutBindings = { ...DEFAULT_SHORTCUTS, open: 'ctrl+n' };
+    expect(conflictReport(bindings)).toEqual([
+      { accelerator: 'ctrl+n', active: 'new', ignored: ['open'] },
+    ]);
+  });
+
+  it('keeps definition order for three-way duplicates and ignores unbound entries', () => {
+    const bindings: ShortcutBindings = {
+      ...DEFAULT_SHORTCUTS,
+      save: 'ctrl+n',
+      saveAs: 'ctrl+n',
+      search: null,
+    };
+    const report = conflictReport(bindings);
+    expect(report).toHaveLength(1);
+    expect(report[0]?.accelerator).toBe('ctrl+n');
+    expect(report[0]?.active).toBe('new');
+    expect(report[0]?.ignored).toEqual(['save', 'saveAs']);
+  });
+
+  it('returns to a clean report once the duplicate is cleared', () => {
+    const duplicated: ShortcutBindings = { ...DEFAULT_SHORTCUTS, open: 'ctrl+n' };
+    expect(conflictReport(duplicated)).toHaveLength(1);
+    expect(conflictReport({ ...duplicated, open: null })).toEqual([]);
+    expect(conflictReport({ ...duplicated, open: 'ctrl+alt+o' })).toEqual([]);
   });
 });

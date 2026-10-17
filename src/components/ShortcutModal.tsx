@@ -4,6 +4,7 @@ import {
   DEFAULT_SHORTCUTS,
   SHORTCUT_DEFINITIONS,
   applyShortcut,
+  conflictReport,
   formatShortcut,
   shortcutFromEvent,
   type ShortcutAction,
@@ -75,6 +76,10 @@ export const ShortcutModal = memo(function ShortcutModal({ bindings, onChange, o
     onChange({ ...DEFAULT_SHORTCUTS });
   };
 
+  // 持久化配置里可能已有重复绑定(手工编辑或旧版本遗留):只提示,不静默改写。
+  const duplicateGroups = conflictReport(bindings);
+  const ignoredActions = new Set<ShortcutAction>(duplicateGroups.flatMap((group) => group.ignored));
+
   const conflictText = (action: ShortcutAction): string | null => {
     if (!conflict || conflict.action !== action) return null;
     const labels = conflict.actions.map((other) => `「${ACTION_LABELS[other]}」`).join('、');
@@ -97,6 +102,20 @@ export const ShortcutModal = memo(function ShortcutModal({ bindings, onChange, o
         <p id="shortcuts-description" className="modal-description">
           点击「修改」后按下新的组合键;按 Esc 取消。冲突的组合键不会被保存。
         </p>
+        {duplicateGroups.length > 0 && (
+          <div className="shortcut-duplicate-warning" role="alert">
+            <strong>存在重复绑定,部分快捷键不会生效</strong>
+            <ul>
+              {duplicateGroups.map((group) => (
+                <li key={group.accelerator}>
+                  {formatShortcut(group.accelerator)} 已由「{ACTION_LABELS[group.active]}」使用,
+                  「{group.ignored.map((action) => ACTION_LABELS[action]).join('、')}」不会触发
+                </li>
+              ))}
+            </ul>
+            <span>同一组合键只执行第一个匹配的操作,请清除或修改重复项。</span>
+          </div>
+        )}
         <div className="shortcut-table-wrap">
           <table className="shortcut-table">
             <thead>
@@ -128,6 +147,9 @@ export const ShortcutModal = memo(function ShortcutModal({ bindings, onChange, o
                           <kbd className={`shortcut-kbd${binding ? '' : ' shortcut-kbd-unbound'}`}>
                             {formatShortcut(binding)}
                           </kbd>
+                        )}
+                        {ignoredActions.has(definition.id) && (
+                          <span className="shortcut-ignored">不生效</span>
                         )}
                         {message && (
                           <span className="shortcut-conflict" role="alert">
