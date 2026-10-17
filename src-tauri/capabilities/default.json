@@ -16,6 +16,7 @@
     "core:window:allow-set-position",
     "core:window:allow-show",
     "core:window:allow-set-focus",
+    "core:window:allow-available-monitors",
     "core:window:allow-unminimize",
     "dialog:default",
     "opener:default",

@@ -1,6 +1,7 @@
 import { Store } from '@tauri-apps/plugin-store';
 import type { RecentFile, ThemeMode } from './types';
 import type { ShortcutBindings } from './shortcuts';
+import { sanitizeWindowState, type WindowState } from './windowState';
 import {
   sanitizeRecentFiles,
   sanitizeShortcutBindings,
@@ -17,13 +18,7 @@ const KEY_OUTLINE_OPEN = 'outline-open';
 const KEY_SHORTCUTS = 'shortcuts';
 const MAX_RECENT = 10;
 
-interface WindowState {
-  width: number;
-  height: number;
-  x: number;
-  y: number;
-  maximized: boolean;
-}
+export type { WindowState };
 
 let storePromise: Promise<Store> | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
@@ -129,11 +124,8 @@ export async function setSourceModePref(enabled: boolean): Promise<void> {
 export async function getWindowState(): Promise<WindowState | null> {
   try {
     const store = await getStore();
-    const v = await store.get<WindowState>(KEY_WINDOW_STATE);
-    if (v && typeof v.width === 'number' && typeof v.height === 'number') {
-      return { ...v, maximized: v.maximized === true };
-    }
-    return null;
+    // 最小化期间写下的哨兵坐标、过小尺寸等无效记录在这里被丢弃,回落到默认窗口。
+    return sanitizeWindowState(await store.get(KEY_WINDOW_STATE));
   } catch {
     return null;
   }
