@@ -61,6 +61,29 @@ describe('editor zoom values', () => {
     expect(readEditorZoom()).toBe(100);
     expect(() => writeEditorZoom(120)).not.toThrow();
   });
+
+  it('falls back to 100 when the localStorage getter itself throws', () => {
+    vi.stubGlobal('window', Object.defineProperty({}, 'localStorage', {
+      get() {
+        throw new DOMException('blocked', 'SecurityError');
+      },
+    }));
+    try {
+      expect(readEditorZoom()).toBe(100);
+      expect(() => writeEditorZoom(120)).not.toThrow();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('attempts the write once before swallowing a storage failure', () => {
+    const setItem = vi.fn(() => {
+      throw new DOMException('full', 'QuotaExceededError');
+    });
+    expect(() => writeEditorZoom(120, { setItem })).not.toThrow();
+    expect(setItem).toHaveBeenCalledTimes(1);
+    expect(setItem).toHaveBeenCalledWith(EDITOR_ZOOM_STORAGE_KEY, '120');
+  });
 });
 
 describe('editor zoom controls', () => {
