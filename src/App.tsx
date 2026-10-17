@@ -53,6 +53,7 @@ import { startupView } from './lib/startup';
 import { bindEditorZoomControls, nextEditorZoom, readEditorZoom, writeEditorZoom } from './lib/editorZoom';
 import { clampToVisibleDisplays, windowStateToPersist, type DisplayWorkArea } from './lib/windowState';
 import { readOutlineWidth, writeOutlineWidth } from './lib/outlineWidth';
+import { cycleTabIndex, type TabWheelDirection } from './lib/tabWheel';
 import type { RecentFile, Tab, ThemeMode, EditorUpdate } from './lib/types';
 import './styles/global.css';
 
@@ -1122,10 +1123,10 @@ export default function App() {
 
   /* ---------- 全局快捷键(唯一分发点) ---------- */
   const cycleTab = useCallback(
-    (delta: number) => {
+    (delta: TabWheelDirection | number) => {
       const currentIndex = tabs.findIndex((t) => t.id === activeId);
-      if (currentIndex === -1) return;
-      const nextIndex = (currentIndex + delta + tabs.length) % tabs.length;
+      const nextIndex = cycleTabIndex(currentIndex, tabs.length, delta);
+      if (nextIndex === null) return;
       setActiveId(tabs[nextIndex]?.id ?? null);
     },
     [activeId, tabs],
@@ -1346,6 +1347,7 @@ export default function App() {
         onSelect={setActiveId}
         onClose={closeTabRequest}
         onNew={() => setNewModalOpen(true)}
+        onWheelSwitch={cycleTab}
       />
 
       <div className="app-body">

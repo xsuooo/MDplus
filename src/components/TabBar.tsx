@@ -1,5 +1,6 @@
-import { memo, useRef } from 'react';
+import { memo, useEffect, useRef } from 'react';
 import type { Tab } from '../lib/types';
+import { TAB_WHEEL_INITIAL, wheelStep, type TabWheelDirection } from '../lib/tabWheel';
 import { IconClose } from './icons';
 
 interface TabBarProps {
@@ -8,10 +9,34 @@ interface TabBarProps {
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
   onNew: () => void;
+  onWheelSwitch?: (direction: TabWheelDirection) => void;
 }
 
-export const TabBar = memo(function TabBar({ tabs, activeId, onSelect, onClose, onNew }: TabBarProps) {
+export const TabBar = memo(function TabBar({ tabs, activeId, onSelect, onClose, onNew, onWheelSwitch }: TabBarProps) {
   const tabRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const barRef = useRef<HTMLDivElement | null>(null);
+  const wheelState = useRef({ ...TAB_WHEEL_INITIAL });
+  const wheelHandler = useRef(onWheelSwitch);
+  wheelHandler.current = onWheelSwitch;
+  const tabCount = tabs.length;
+
+  // 滚轮监听需要 passive: false 才能阻止页面滚动,而 React 的 onWheel 是 passive 的,
+  // 所以这里自己挂原生监听。
+  useEffect(() => {
+    const bar = barRef.current;
+    if (!bar) return;
+    const onWheel = (event: WheelEvent) => {
+      const handler = wheelHandler.current;
+      if (!handler) return;
+      const result = wheelStep(wheelState.current, event, tabCount, Date.now());
+      wheelState.current = result.state;
+      if (result.direction === 0) return;
+      event.preventDefault();
+      handler(result.direction);
+    };
+    bar.addEventListener('wheel', onWheel, { passive: false });
+    return () => bar.removeEventListener('wheel', onWheel);
+  }, [tabCount]);
 
   const focusTab = (id: string) => {
     requestAnimationFrame(() => tabRefs.current[id]?.focus());
@@ -27,7 +52,7 @@ export const TabBar = memo(function TabBar({ tabs, activeId, onSelect, onClose, 
   };
 
   return (
-    <div className="tabbar" role="tablist" aria-label="打开的文档">
+    <div className="tabbar" role="tablist" aria-label="打开的文档" ref={barRef}>
       <div className="tabbar-tabs">
         {tabs.map((tab, index) => (
           <div
