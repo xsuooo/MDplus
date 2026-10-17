@@ -52,6 +52,7 @@ import { errorMessage } from './lib/errors';
 import { startupView } from './lib/startup';
 import { bindEditorZoomControls, nextEditorZoom, readEditorZoom, writeEditorZoom } from './lib/editorZoom';
 import { clampToVisibleDisplays, windowStateToPersist, type DisplayWorkArea } from './lib/windowState';
+import { readOutlineWidth, writeOutlineWidth } from './lib/outlineWidth';
 import type { RecentFile, Tab, ThemeMode, EditorUpdate } from './lib/types';
 import './styles/global.css';
 
@@ -90,6 +91,7 @@ export default function App() {
   const [sourceMode, setSourceMode] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
+  const [outlineWidth, setOutlineWidth] = useState(readOutlineWidth);
   const [newModalOpen, setNewModalOpen] = useState(false);
   const [recentMenuOpen, setRecentMenuOpen] = useState(false);
   const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
@@ -915,6 +917,10 @@ export default function App() {
   }, [outlineOpen]);
 
   useEffect(() => {
+    writeOutlineWidth(outlineWidth);
+  }, [outlineWidth]);
+
+  useEffect(() => {
     if (!outlineOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -1354,6 +1360,8 @@ export default function App() {
         <OutlinePanel
           open={outlineOpen}
           onToggle={() => setOutlineOpen((v) => !v)}
+          width={outlineWidth}
+          onWidthChange={setOutlineWidth}
           items={activeTab ? (tabMirror.current[activeId ?? '']?.outline ?? []) : []}
           onJump={jumpToOutline}
         />

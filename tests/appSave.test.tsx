@@ -29,8 +29,12 @@ vi.mock('react', async (importOriginal) => {
     ...react,
     useState: (initial: unknown) => {
       const index = mocks.useStateIndex++;
+      // 索引对应 App 里 useState 的声明顺序:0=tabs, 1=activeId, 2=主题, 3=源码模式,
+      // 4=搜索, 5=大纲开关, 6=大纲宽度, 7=新建弹窗, 8=最近菜单, 9=最近文件, 10=待关闭标签。
+      const PENDING_CLOSE_TAB_INDEX = 10;
       const value = index === 0 ? [mocks.initialTab] : index === 1 ? 'tab' :
-        index === 9 ? mocks.initialTab : typeof initial === 'function' ? initial() : initial;
+        index === PENDING_CLOSE_TAB_INDEX ? mocks.initialTab
+          : typeof initial === 'function' ? initial() : initial;
       return [value, vi.fn()];
     },
     useRef: (initial: unknown) => {
