@@ -16,7 +16,9 @@ export default defineConfig(async () => ({
   server: {
     port: 1420,
     strictPort: true,
-    host: host || false,
+    // 本机 localhost 解析到 ::1,而 tauri CLI 的健康检查访问 127.0.0.1:
+    // 显式绑定 IPv4 回环,避免启动时卡在"等待前端 dev server"。
+    host: host || "127.0.0.1",
     hmr: host
       ? {
           protocol: "ws",
