@@ -127,12 +127,14 @@ describe('wheelStep gesture handling', () => {
     expect(b.state.direction).toBe(1);
   });
 
-  it('needs a fresh gesture to switch again after a completed one', () => {
-    const first = wheelStep(TAB_WHEEL_INITIAL, wheel(TAB_WHEEL_STEP), 4, T0);
-    expect(first.direction).toBe(1);
-    const sameGesture = wheelStep(first.state, wheel(TAB_WHEEL_STEP * 3), 4, T0 + 30);
+  it('needs a fresh gesture before a small-delta gesture switches a second time', () => {
+    // 连续小步(触控板):累计到阈值切一格,同一手势内不再切;离散档位不受此限制
+    const first = wheelStep(TAB_WHEEL_INITIAL, wheel(TAB_WHEEL_STEP - 12), 4, T0);
+    const completing = wheelStep(first.state, wheel(12), 4, T0 + 16);
+    expect(completing.direction).toBe(1);
+    const sameGesture = wheelStep(completing.state, wheel(24), 4, T0 + 32);
     expect(sameGesture.direction).toBe(0);
-    const nextGesture = wheelStep(sameGesture.state, wheel(TAB_WHEEL_STEP), 4, T0 + 30 + TAB_WHEEL_GESTURE_IDLE_MS + 60);
+    const nextGesture = wheelStep(sameGesture.state, wheel(TAB_WHEEL_STEP), 4, T0 + 32 + TAB_WHEEL_GESTURE_IDLE_MS + 60);
     expect(nextGesture.direction).toBe(1);
   });
 
@@ -163,5 +165,60 @@ describe('cycleTabIndex', () => {
       seen.push(index);
     }
     expect(seen).toEqual([1, 2, 0, 1, 2]);
+  });
+});
+
+describe('discrete wheel notches', () => {
+  it('switches on every notch instead of swallowing the next one', () => {
+    // 真实鼠标实测每格 deltaY = ±100
+    let state: TabWheelState = { ...TAB_WHEEL_INITIAL };
+    const directions: number[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const result = wheelStep(state, wheel(100), 5, T0 + i * 160);
+      state = result.state;
+      directions.push(result.direction);
+    }
+    expect(directions).toEqual([1, 1, 1]);
+  });
+
+  it('keeps the direction of each notch even when notches come back to back', () => {
+    const first = wheelStep(TAB_WHEEL_INITIAL, wheel(100), 5, T0);
+    const second = wheelStep(first.state, wheel(100), 5, T0 + 20);
+    const third = wheelStep(second.state, wheel(-100), 5, T0 + 40);
+    expect([first.direction, second.direction, third.direction]).toEqual([1, 1, -1]);
+  });
+
+  it('treats a classic line-mode notch as one switch', () => {
+    expect(wheelStep(TAB_WHEEL_INITIAL, wheel(6, 0, 1), 4, T0).direction).toBe(1);
+  });
+});
+
+describe('continuous trackpad gestures', () => {
+  it('still allows only one switch per gesture', () => {
+    const { directions } = gesture(Array.from({ length: 30 }, () => 20));
+    expect(directions.filter((d) => d !== 0)).toEqual([1]);
+  });
+
+  it('starts a new gesture when the hand clearly reverses, so the switch is not blocked', () => {
+    // 先向下累计并切换一格
+    const down = gesture(Array.from({ length: 4 }, () => 20));
+    expect(down.directions.filter((d) => d !== 0)).toEqual([1]);
+    // 紧接着反向:第一帧明确反向事件开新手势,累计到阈值后按反方向切
+    let state = down.state;
+    const reversed: number[] = [];
+    for (let i = 0; i < 4; i += 1) {
+      const result = wheelStep(state, wheel(-20), 5, T0 + 100 + i * 16);
+      state = result.state;
+      reversed.push(result.direction);
+    }
+    expect(reversed.filter((d) => d !== 0)).toEqual([-1]);
+  });
+
+  it('ignores tiny wobble before a switch is made', () => {
+    const a = wheelStep(TAB_WHEEL_INITIAL, wheel(3), 4, T0);
+    const b = wheelStep(a.state, wheel(-2), 4, T0 + 16);
+    expect(a.direction).toBe(0);
+    expect(b.direction).toBe(0);
+    expect(b.state.accumulated).toBe(1);
   });
 });

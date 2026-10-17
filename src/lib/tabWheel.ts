@@ -1,9 +1,14 @@
 /** 一次手势内累计到这么多像素才切一格。 */
 export const TAB_WHEEL_STEP = 48;
-/** 累计超过这个量就锁定方向,之后反向抖动不再改判。 */
+/** 累计超过这个量就锁定方向,之后小幅反向抖动不再改判。 */
 export const TAB_WHEEL_DIRECTION_LOCK = 6;
-/** 超过这个静默间隔视为新手势(触控板惯性尾巴不会接到下一次手势上)。 */
+/** 超过这个静默间隔视为新手势。 */
 export const TAB_WHEEL_GESTURE_IDLE_MS = 140;
+/**
+ * 单个事件达到这个量就当作一个"滚轮档位"(鼠标一格实测 100px)。
+ * 档位是离散的:每一格都必须独立生效,不能因为上一格刚切过就被吞掉。
+ */
+export const TAB_WHEEL_NOTCH = 60;
 
 export interface TabWheelState {
   /** 当前手势内的累计位移(带方向) */
@@ -11,7 +16,7 @@ export interface TabWheelState {
   /** 当前手势已锁定的方向,0 表示还没锁定 */
   direction: -1 | 0 | 1;
   lastEventAt: number;
-  /** 本次手势是否已经切过一次:切过就不再切,直到手势结束 */
+  /** 本次连续手势是否已经切过一次 */
   consumed: boolean;
 }
 
@@ -42,10 +47,14 @@ export function normalizeWheelDelta(delta: number, deltaMode = 0): number {
 const isIdle = (state: TabWheelState, now: number) => now - state.lastEventAt > TAB_WHEEL_GESTURE_IDLE_MS;
 
 /**
- * 纯计算:每次 wheel 事件传入当前状态与时间戳,返回"是否切换、切哪边"和下一份状态。
+ * 纯计算:每次 wheel 事件传入当前状态与时间戳,返回是否切换、切哪边,以及下一份状态。
  *
- * 方向稳定性来自两点:手势内第一次出现明确方向时锁定它(反向抖动被忽略),
- * 以及一次手势只允许切一格(consumed),而不是用固定延时去压事件。
+ * 两类输入分开处理:
+ * - 离散档位(单个事件就 ≥ TAB_WHEEL_NOTCH,鼠标一格 100px):每格立刻切一格,
+ *   方向取该事件自身的符号。这样连续两格不会因为"上一次刚切过"被吞掉,
+ *   也就不会出现"滚了两下只动一格、再反向时看着像反了"。
+ * - 连续小步(触控板/平滑滚动):按手势累计,首次明确方向即锁定,一次手势最多切一格;
+ *   反向累计明确(而非抖动)时立刻开启新手势,保证停顿或转向后能马上响应。
  */
 export function wheelStep(
   state: TabWheelState,
@@ -57,29 +66,42 @@ export function wheelStep(
 
   const deltaY = normalizeWheelDelta(event.deltaY, event.deltaMode ?? 0);
   const deltaX = normalizeWheelDelta(event.deltaX, event.deltaMode ?? 0);
+  if (deltaY === 0) return { state: { ...state, lastEventAt: now }, direction: 0 };
+  // 横向滑动优先交给标签条自己滚动
+  if (Math.abs(deltaX) > Math.abs(deltaY) * 1.5) return { state: { ...state, lastEventAt: now }, direction: 0 };
 
-  // 新手势:清掉上一次手势的累计与锁定
+  const sign: -1 | 1 = deltaY > 0 ? 1 : -1;
+
+  // 离散档位:每格独立生效,并结束上一段连续手势
+  if (Math.abs(deltaY) >= TAB_WHEEL_NOTCH) {
+    return {
+      state: { accumulated: 0, direction: sign, lastEventAt: now, consumed: true },
+      direction: sign,
+    };
+  }
+
   const base: TabWheelState = isIdle(state, now)
     ? { accumulated: 0, direction: 0, lastEventAt: now, consumed: false }
     : { ...state, lastEventAt: now };
 
-  if (deltaY === 0) return { state: base, direction: 0 };
-  // 横向滑动优先交给标签条自己滚动
-  if (Math.abs(deltaX) > Math.abs(deltaY) * 1.5) return { state: base, direction: 0 };
-  // 本次手势已经切过了:剩下的(含惯性)一律忽略
-  if (base.consumed) return { state: base, direction: 0 };
-
-  const sign: -1 | 1 = deltaY > 0 ? 1 : -1;
-  let direction = base.direction;
   let accumulated = base.accumulated;
+  let direction = base.direction;
 
   if (direction !== 0 && sign !== direction) {
-    // 手势内反向抖动:丢掉,不改判
+    if (base.consumed) {
+      // 已经切过一格,又来一个明确的反向小步:这是转向,不是抖动,直接开新手势
+      return {
+        state: { accumulated: deltaY, direction: sign, lastEventAt: now, consumed: false },
+        direction: 0,
+      };
+    }
+    // 尚未切换:当作抖动丢弃
     return { state: base, direction: 0 };
   }
+
   accumulated += deltaY;
   if (direction === 0 && Math.abs(accumulated) >= TAB_WHEEL_DIRECTION_LOCK) direction = sign;
-
+  if (base.consumed) return { state: { ...base, accumulated, direction }, direction: 0 };
   if (direction !== 0 && Math.abs(accumulated) >= TAB_WHEEL_STEP) {
     return {
       state: { accumulated: 0, direction, lastEventAt: now, consumed: true },
