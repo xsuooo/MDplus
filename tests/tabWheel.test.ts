@@ -1,69 +1,144 @@
 import { describe, expect, it } from 'vitest';
 import {
-  TAB_WHEEL_COOLDOWN_MS,
+  TAB_WHEEL_DIRECTION_LOCK,
+  TAB_WHEEL_GESTURE_IDLE_MS,
   TAB_WHEEL_INITIAL,
-  TAB_WHEEL_THRESHOLD,
+  TAB_WHEEL_STEP,
   cycleTabIndex,
+  normalizeWheelDelta,
   wheelStep,
   type TabWheelState,
 } from '../src/lib/tabWheel';
 
-const wheel = (deltaY: number, deltaX = 0) => ({ deltaX, deltaY });
-const at = (time: number) => time;
+const wheel = (deltaY: number, deltaX = 0, deltaMode = 0) => ({ deltaX, deltaY, deltaMode });
+const T0 = 10_000;
 
-describe('wheelStep', () => {
-  it('switches to the next tab when the wheel rolls down past the threshold', () => {
-    const result = wheelStep(TAB_WHEEL_INITIAL, wheel(TAB_WHEEL_THRESHOLD), 3, at(1000));
-    expect(result.direction).toBe(1);
-    expect(result.state.accumulated).toBe(0);
+/** 模拟一段手势:每帧间隔 stepMs,返回每次事件的切换方向。 */
+function gesture(
+  deltas: number[],
+  tabCount = 4,
+  stepMs = 16,
+  start = T0,
+  initial: TabWheelState = { ...TAB_WHEEL_INITIAL },
+) {
+  let state = initial;
+  const directions: number[] = [];
+  deltas.forEach((delta, i) => {
+    const result = wheelStep(state, wheel(delta), tabCount, start + i * stepMs);
+    state = result.state;
+    directions.push(result.direction);
+  });
+  return { state, directions };
+}
+
+describe('normalizeWheelDelta', () => {
+  it('converts line and page deltas to pixels', () => {
+    expect(normalizeWheelDelta(3)).toBe(3);
+    expect(normalizeWheelDelta(3, 1)).toBe(48);
+    expect(normalizeWheelDelta(1, 2)).toBe(100);
   });
 
-  it('switches to the previous tab when the wheel rolls up', () => {
-    const result = wheelStep(TAB_WHEEL_INITIAL, wheel(-TAB_WHEEL_THRESHOLD), 3, at(1000));
-    expect(result.direction).toBe(-1);
+  it('drops non-finite deltas', () => {
+    expect(normalizeWheelDelta(Number.NaN)).toBe(0);
+    expect(normalizeWheelDelta(Number.POSITIVE_INFINITY)).toBe(0);
+  });
+});
+
+describe('wheelStep direction', () => {
+  it('goes to the next tab when scrolling down', () => {
+    expect(wheelStep(TAB_WHEEL_INITIAL, wheel(120), 4, T0).direction).toBe(1);
+  });
+
+  it('goes to the previous tab when scrolling up', () => {
+    expect(wheelStep(TAB_WHEEL_INITIAL, wheel(-120), 4, T0).direction).toBe(-1);
   });
 
   it('ignores a single tab or no tabs', () => {
-    expect(wheelStep(TAB_WHEEL_INITIAL, wheel(500), 1, at(1000)).direction).toBe(0);
-    expect(wheelStep(TAB_WHEEL_INITIAL, wheel(500), 0, at(1000)).direction).toBe(0);
+    expect(wheelStep(TAB_WHEEL_INITIAL, wheel(500), 1, T0).direction).toBe(0);
+    expect(wheelStep(TAB_WHEEL_INITIAL, wheel(500), 0, T0).direction).toBe(0);
   });
 
-  it('accumulates high-resolution deltas before switching', () => {
+  it('respects line-mode deltas from a classic wheel', () => {
+    // 行模式一次 3 行 = 48px,正好一格
+    expect(wheelStep(TAB_WHEEL_INITIAL, wheel(3, 0, 1), 4, T0).direction).toBe(1);
+    expect(wheelStep(TAB_WHEEL_INITIAL, wheel(-3, 0, 1), 4, T0).direction).toBe(-1);
+  });
+
+  it('leaves horizontal scrolling to the tab strip', () => {
+    const result = wheelStep(TAB_WHEEL_INITIAL, wheel(4, 120), 4, T0);
+    expect(result.direction).toBe(0);
+  });
+});
+
+describe('wheelStep gesture handling', () => {
+  it('accumulates a high-resolution trackpad gesture instead of switching per event', () => {
+    const { directions } = gesture(Array.from({ length: 12 }, () => 6));
+    expect(directions.filter((d) => d !== 0)).toEqual([1]);
+  });
+
+  it('switches at most once per gesture even with a long inertia tail', () => {
+    const { directions } = gesture(Array.from({ length: 40 }, () => 40), 6, 16);
+    expect(directions.filter((d) => d !== 0)).toEqual([1]);
+  });
+
+  it('keeps the direction stable when the gesture wobbles the other way', () => {
+    const { directions } = gesture([30, 30, -20, 40, -10, 40]);
+    expect(directions.filter((d) => d !== 0)).toEqual([1]);
+  });
+
+  it('reports the opposite direction on a gesture that starts after the idle gap', () => {
+    const first = wheelStep(TAB_WHEEL_INITIAL, wheel(120), 4, T0);
+    expect(first.direction).toBe(1);
+    const second = wheelStep(
+      first.state,
+      wheel(-120),
+      4,
+      T0 + TAB_WHEEL_GESTURE_IDLE_MS + 40,
+    );
+    expect(second.direction).toBe(-1);
+  });
+
+  it('allows several switches when the user scrolls in separate gestures', () => {
     let state: TabWheelState = { ...TAB_WHEEL_INITIAL };
     const directions: number[] = [];
-    for (let i = 0; i < TAB_WHEEL_THRESHOLD / 4 - 1; i += 1) {
-      const step = wheelStep(state, wheel(4), 4, at(1000));
-      state = step.state;
-      directions.push(step.direction);
+    for (let i = 0; i < 3; i += 1) {
+      const at = T0 + i * (TAB_WHEEL_GESTURE_IDLE_MS + 100);
+      const result = wheelStep(state, wheel(60), 6, at);
+      state = result.state;
+      directions.push(result.direction);
     }
-    expect(directions.every((direction) => direction === 0)).toBe(true);
-    const final = wheelStep(state, wheel(4), 4, at(1000));
-    expect(final.direction).toBe(1);
+    expect(directions).toEqual([1, 1, 1]);
   });
 
-  it('lets one gesture move only one tab', () => {
-    const first = wheelStep(TAB_WHEEL_INITIAL, wheel(TAB_WHEEL_THRESHOLD), 5, at(1000));
+  it('ignores opposite-direction noise before the direction is locked', () => {
+    // 第一个事件只有 3px,不足以锁定方向;随后反向事件把它抵掉
+    const a = wheelStep(TAB_WHEEL_INITIAL, wheel(3), 4, T0);
+    expect(a.direction).toBe(0);
+    const b = wheelStep(a.state, wheel(-3), 4, T0 + 16);
+    expect(b.direction).toBe(0);
+    expect(b.state.accumulated).toBe(0);
+  });
+
+  it('locks the direction after the lock threshold and keeps it', () => {
+    const a = wheelStep(TAB_WHEEL_INITIAL, wheel(TAB_WHEEL_DIRECTION_LOCK), 4, T0);
+    expect(a.state.direction).toBe(1);
+    const b = wheelStep(a.state, wheel(-30), 4, T0 + 16);
+    expect(b.direction).toBe(0);
+    expect(b.state.direction).toBe(1);
+  });
+
+  it('needs a fresh gesture to switch again after a completed one', () => {
+    const first = wheelStep(TAB_WHEEL_INITIAL, wheel(TAB_WHEEL_STEP), 4, T0);
     expect(first.direction).toBe(1);
-    // 同一次手势里的后续事件(仍在冷却期)不应再切换
-    const second = wheelStep(first.state, wheel(TAB_WHEEL_THRESHOLD * 4), 5, at(1000 + TAB_WHEEL_COOLDOWN_MS - 1));
-    expect(second.direction).toBe(0);
-    expect(second.state.accumulated).toBe(0);
-    // 冷却结束后要重新累计到阈值才会再次切换
-    const afterCooldown = wheelStep(second.state, wheel(TAB_WHEEL_THRESHOLD / 2), 5, at(1000 + TAB_WHEEL_COOLDOWN_MS));
-    expect(afterCooldown.direction).toBe(0);
-    const resumed = wheelStep(afterCooldown.state, wheel(TAB_WHEEL_THRESHOLD), 5, at(1000 + TAB_WHEEL_COOLDOWN_MS * 2));
-    expect(resumed.direction).toBe(1);
+    const sameGesture = wheelStep(first.state, wheel(TAB_WHEEL_STEP * 3), 4, T0 + 30);
+    expect(sameGesture.direction).toBe(0);
+    const nextGesture = wheelStep(sameGesture.state, wheel(TAB_WHEEL_STEP), 4, T0 + 30 + TAB_WHEEL_GESTURE_IDLE_MS + 60);
+    expect(nextGesture.direction).toBe(1);
   });
 
-  it('ignores horizontal scrolling so the tab strip can still scroll sideways', () => {
-    const result = wheelStep(TAB_WHEEL_INITIAL, wheel(10, 120), 4, at(1000));
-    expect(result.direction).toBe(0);
-    expect(result.state).toEqual(TAB_WHEEL_INITIAL);
-  });
-
-  it('ignores empty or non-finite deltas', () => {
-    expect(wheelStep(TAB_WHEEL_INITIAL, wheel(0), 4, at(1000)).direction).toBe(0);
-    expect(wheelStep(TAB_WHEEL_INITIAL, wheel(Number.NaN), 4, at(1000)).direction).toBe(0);
+  it('ignores empty or non-finite deltas without switching', () => {
+    expect(wheelStep(TAB_WHEEL_INITIAL, wheel(0), 4, T0).direction).toBe(0);
+    expect(wheelStep(TAB_WHEEL_INITIAL, wheel(Number.NaN), 4, T0).direction).toBe(0);
   });
 });
 

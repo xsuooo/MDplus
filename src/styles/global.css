@@ -357,18 +357,27 @@ textarea {
   transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
 
-.tab:hover {
+.tab:hover:not(.active) {
   background: var(--bg-hover);
   color: var(--text);
   transform: translateY(-1px);
 }
 
+/* 活动标签:抬起的底色 + 青绿图标色的边框与底部强调线,标题加重;
+   悬停只影响非活动标签,两者不会看起来一样。 */
 .tab.active {
   background: var(--bg-elevated);
   color: var(--text-strong);
-  border-color: var(--border);
+  font-weight: 600;
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
   border-bottom-color: var(--bg-elevated);
+  box-shadow: inset 0 -2px 0 var(--accent);
   animation: tabIn 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 活动标签底部已有强调线,未保存圆点加一圈底色,避免和线条混在一起。 */
+.tab.active .tab-dot[data-dirty="1"] {
+  box-shadow: 0 0 0 2px var(--bg-elevated);
 }
 
 @keyframes tabIn {
