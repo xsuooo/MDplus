@@ -194,9 +194,29 @@ textarea {
 .toolbar-brand {
   display: flex;
   align-items: center;
+  gap: 7px;
   min-width: 72px;
   padding-right: 6px;
   color: var(--accent-text);
+}
+
+/* 图标本身是白底圆角方块:浅色工具栏上靠一圈极淡描边保持可辨。 */
+.toolbar-brand-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 90%, transparent);
+  flex-shrink: 0;
+}
+
+.toolbar-brand-logo svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .toolbar-brand-mark {

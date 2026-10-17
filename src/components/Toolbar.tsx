@@ -1,6 +1,7 @@
 import { memo, useState, useEffect, useRef } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
+  IconBrand,
   IconOpen,
   IconNew,
   IconSave,
@@ -113,6 +114,9 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
   return (
     <header className="toolbar" data-tauri-drag-region>
       <div className="toolbar-brand" title="MDPlus">
+        <span className="toolbar-brand-logo" aria-hidden="true">
+          <IconBrand size={18} />
+        </span>
         <span className="toolbar-brand-mark">MDPlus</span>
       </div>
 
