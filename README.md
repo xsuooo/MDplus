@@ -4,13 +4,13 @@ Windows 上的 Markdown 桌面编辑器，所见即所得。
 
 ## 当前状态与下载
 
-当前本机验收版本为 **`0.2.5-phase6.2`**，构建标识 **`global-font-20261031.1`**。阶段 1～6 与全局字体补修全部保留；本次仅封存源码基线、交付脚本与文档，不新增功能，不重新安装。
+当前正式发布版本为 **`0.2.5`**，构建标识 **`release-20261031.1`**，发布分支为 `release`，标签为 `v0.2.5`。保留阶段 1～6 与全局字体补修，不新增功能；安装包是否已公开以 [v0.2.5 发布页面](https://github.com/xsuooo/MDplus/releases/tag/v0.2.5) 为准。
 
-用户已反馈当前使用正常；这不等于原生逐项自动化验收。浏览器测试使用真实 React/Milkdown/CSS/字体，但模拟原生 IPC；字体弹窗与真实重启复验的缺口及最短人工步骤见 [收尾验收报告](docs/stable-closeout.md)。
+下载发布页中的 **`MDPlus_0.2.5_x64-setup.exe`** 与对应 `.sha256` 校验文件。本版只提供 Windows x64 NSIS 安装包；不提供 MSI，不支持直接覆盖既有 MSI 安装。包未配置代码签名，安装前请核对来源和 SHA256，遵循本机安全策略。
 
-旧 v0.2.4 Release、标签及安装包已于 2026-10-30 撤下。**当前没有重新公开发布，不推送、不打标签、不发 Release。** [历史 Releases](https://github.com/xsuooo/MDplus/releases) 不包含本轮修复。
+旧 v0.2.4 Release、标签及安装包已于 2026-10-30 撤下，本次不复用该标签。详细变更、验证边界和回滚方法见 [v0.2.5 发布说明](docs/ops/release-notes-v0.2.5.md)。浏览器测试使用真实 React/Milkdown/CSS/字体，但模拟原生 IPC，不等于 Windows 原生逐项验收。
 
-本机已交付包仍位于 `%USERPROFILE%\Downloads\MDPlus\MDPlus_0.2.5-phase6.2_x64-setup.exe`，无需再次安装。未来构建、单一当前包目录、归档与回退统一遵循 [Windows 交付与回退入口](docs/ops/windows-delivery.md)，不要直接运行工作区内的构建包。
+本次发布不自动更新开发者本机；原 `0.2.5-phase6.2` 安装及回退资料保留。构建、单一当前包目录、归档与回退统一遵循 [Windows 交付与回退入口](docs/ops/windows-delivery.md)，不要直接运行工作区内的低完整性构建包。
 
 ## 功能
 
@@ -77,6 +77,7 @@ Tauri · React · TypeScript · Vite · Milkdown · Mermaid · KaTeX
 
 ## 文档
 
+- [v0.2.5 发布说明](docs/ops/release-notes-v0.2.5.md) —— 变更、安装条件、验证边界与回滚
 - [Windows 交付与回退入口](docs/ops/windows-delivery.md) —— 构建、唯一当前包、备份、显式安装、失败停止与回退
 - [收尾验收报告](docs/stable-closeout.md) —— 本次验证、历史证据边界、未执行项与字体人工检查
 - [阶段 1](docs/phase1-execution.md) · [阶段 2](docs/phase2-execution.md) · [阶段 3](docs/phase3-execution.md) · [阶段 4](docs/phase4-execution.md) · [阶段 5](docs/phase5-execution.md) · [阶段 6](docs/phase6-execution.md) · [全局字体补修](docs/global-font-update.md) —— 历史执行记录，保留当时结论
