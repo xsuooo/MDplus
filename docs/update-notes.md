@@ -2,7 +2,7 @@
 
 图标生成、构建检查与常见问题排查。文件关联的实现原理和使用方法见 [file-association.md](file-association.md)。
 
-当前版本和验收状态以 [README](../README.md) 为准；安装包构建、导出、安装和回退只使用 [Windows 交付入口](ops/windows-delivery.md)，不要从工作区直接运行低完整性构建包。
+当前版本与下载见 [README](../README.md)。交付包的校验、导出、安装和回退详见 [Windows 交付说明](ops/windows-delivery.md)。
 
 ## 应用图标
 
@@ -73,10 +73,10 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 打包安装程序：
 
 ```bash
-npm run tauri build
+npm run tauri -- build --bundles nsis
 ```
 
-产物在 `src-tauri/target/release/bundle/` 下，MSI 和 NSIS 两种安装包都会生成。
+产物在 `src-tauri/target/release/bundle/nsis/`。当前只分发 Windows x64 NSIS 安装包；需要版本、SHA256 和安装包载荷校验时，使用 [交付脚本](ops/windows-delivery.md)。
 
 ## 平台支持
 
