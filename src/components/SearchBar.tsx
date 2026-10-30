@@ -8,6 +8,7 @@ import {
   subscribeSearchCount,
 } from '../lib/search';
 import { IconChevronDown, IconChevronUp, IconClose, IconSearch } from './icons';
+import { isComposingEvent } from '../lib/shortcuts';
 
 interface SearchBarProps {
   editor: Editor | null;
@@ -55,8 +56,15 @@ export const SearchBar = memo(function SearchBar({ editor, onClose }: SearchBarP
         value={keyword}
         onChange={(e) => apply(e.target.value, caseSensitive)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') step(e.shiftKey ? -1 : 1);
-          if (e.key === 'Escape') onClose();
+          if (e.defaultPrevented || isComposingEvent(e.nativeEvent)) return;
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            step(e.shiftKey ? -1 : 1);
+          }
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            onClose();
+          }
         }}
       />
       <label className="search-case" title="区分大小写">

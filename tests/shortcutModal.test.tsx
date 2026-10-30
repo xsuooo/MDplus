@@ -28,7 +28,7 @@ describe('ShortcutModal', () => {
 
     for (const definition of SHORTCUT_DEFINITIONS) {
       expect(html).toContain(`>${definition.label}</th>`);
-      expect(html).toContain(`aria-label="修改「${definition.label}」快捷键"`);
+      expect(html).toContain(`aria-label="添加「${definition.label}」快捷键"`);
       expect(html).toContain(`aria-label="清除「${definition.label}」快捷键"`);
     }
     expect(html.split('class="shortcut-row"').length - 1).toBe(SHORTCUT_DEFINITIONS.length);
@@ -37,12 +37,41 @@ describe('ShortcutModal', () => {
   it('显示当前绑定,未绑定的动作显示「未绑定」', () => {
     const html = render();
     for (const definition of SHORTCUT_DEFINITIONS) {
-      expect(html).toContain(formatShortcut(DEFAULT_SHORTCUTS[definition.id]));
+      for (const accelerator of DEFAULT_SHORTCUTS[definition.id]) {
+        expect(html).toContain(formatShortcut(accelerator));
+      }
     }
 
-    const withUnbound = render({ ...DEFAULT_SHORTCUTS, save: null });
+    const withUnbound = render({ ...DEFAULT_SHORTCUTS, save: [] });
     expect(withUnbound).toContain('未绑定');
     expect(withUnbound).toContain('class="shortcut-kbd shortcut-kbd-unbound"');
+  });
+
+  it('为每个键位提供独立的修改和移除按钮', () => {
+    const html = render();
+
+    // toggleOutline 默认是 ctrl+shift+e + f11
+    expect(html).toContain('class="shortcut-kbd-list"');
+    expect(html).toContain('Ctrl+Shift+E');
+    expect(html).toContain('F11');
+    expect(html).toContain('aria-label="移除「切换大纲」的 F11"');
+    expect(html).toContain('aria-label="移除「切换大纲」的 Ctrl+Shift+E"');
+    expect(html).toContain('aria-label="移除「切换源码模式」的 F2"');
+    expect(html).toContain('aria-label="修改「切换大纲」的 F11"');
+    expect(html).toContain('aria-label="修改「切换大纲」的 Ctrl+Shift+E"');
+    expect(html).toContain('title="点击修改"');
+
+    const chips = html.split('class="shortcut-kbd-chip"').length - 1;
+    const total = Object.values(DEFAULT_SHORTCUTS).reduce((sum, list) => sum + list.length, 0);
+    expect(chips).toBe(total);
+  });
+
+  it('省去顶部说明,未绑定行也使用添加按钮', () => {
+    const html = render();
+    expect(html).not.toContain('shortcuts-description');
+    expect(html).not.toContain('Fn 本身通常不产生按键事件');
+    expect(html).not.toContain('modal-description');
+    expect(render({ ...DEFAULT_SHORTCUTS, save: [] })).toContain('aria-label="添加「保存」快捷键"');
   });
 
   it('渲染列头、底部操作与捕获态占位之外的静态内容', () => {
@@ -52,20 +81,21 @@ describe('ShortcutModal', () => {
     expect(html).toContain('aria-label="快捷键操作"');
     expect(html).toContain('恢复默认值');
     expect(html).toContain('关闭');
-    expect(html).not.toContain('按下新组合键…');
+    expect(html).not.toContain('按下快捷键…');
     expect(html).not.toContain('shortcut-conflict');
+    expect(html).not.toContain('shortcut-hint');
     expect(html).toContain('role="dialog"');
   });
 });
 
 describe('ShortcutModal duplicate bindings', () => {
   it('warns about a persisted duplicate and names the effective and ignored action', () => {
-    const html = render({ ...DEFAULT_SHORTCUTS, open: 'ctrl+n' });
+    const html = render({ ...DEFAULT_SHORTCUTS, open: ['ctrl+n'] });
 
     expect(html).toContain('shortcut-duplicate-warning');
     expect(html).toContain('存在重复绑定');
     expect(html).toContain('已由「新建」使用');
-    expect(html).toContain('「打开」不会触发');
+    expect(html).toContain('「打开」不会由此键位触发');
     expect(html).toContain('shortcut-ignored');
   });
 
@@ -77,10 +107,10 @@ describe('ShortcutModal duplicate bindings', () => {
   });
 
   it('keeps both rows listed so the user can clear either one', () => {
-    const html = render({ ...DEFAULT_SHORTCUTS, open: 'ctrl+n' });
+    const html = render({ ...DEFAULT_SHORTCUTS, open: ['ctrl+n'] });
 
-    expect(html).toContain('aria-label="修改「新建」快捷键"');
-    expect(html).toContain('aria-label="修改「打开」快捷键"');
+    expect(html).toContain('aria-label="修改「新建」的 Ctrl+N"');
+    expect(html).toContain('aria-label="修改「打开」的 Ctrl+N"');
     expect(html).toContain('aria-label="清除「打开」快捷键"');
   });
 });

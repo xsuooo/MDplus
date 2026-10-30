@@ -1,3 +1,5 @@
+import { isComposingEvent } from './shortcuts';
+
 export const EDITOR_ZOOM_DEFAULT = 100;
 export const EDITOR_ZOOM_MIN = 50;
 export const EDITOR_ZOOM_MAX = 250;
@@ -59,6 +61,7 @@ export function bindEditorZoomControls(root: HTMLElement, onZoom: (action: Edito
     onZoom(event.deltaY < 0 ? 'increase' : 'decrease');
   };
   const onKey = (event: KeyboardEvent) => {
+    if (isComposingEvent(event)) return;
     const action = editorZoomKeyAction(event);
     const target = event.target === doc || event.target === view ? doc.activeElement : event.target;
     if (!action || event.defaultPrevented || !isEditorZoomTarget(root, target)) return;

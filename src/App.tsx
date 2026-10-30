@@ -38,8 +38,9 @@ import {
 } from './lib/store';
 import {
   DEFAULT_SHORTCUTS,
-  SHORTCUT_DEFINITIONS,
-  shortcutFromEvent,
+  createShortcutIndex,
+  dispatchShortcut,
+  isComposingEvent,
   type ShortcutAction,
   type ShortcutBindings,
 } from './lib/shortcuts';
@@ -127,6 +128,9 @@ export default function App() {
   const tabRenderTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   // 绑定表读盘完成前不写盘,否则默认值会覆盖用户的已存设置
   const shortcutsLoaded = useRef(false);
+  // 异步保存/重载完成时读取当前视图,不能使用发起操作时的闭包。
+  const currentView = useRef({ activeId, sourceMode });
+  currentView.current = { activeId, sourceMode };
 
   const editorAreaRef = useRef<HTMLElement | null>(null);
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeId) ?? null, [tabs, activeId]);
@@ -291,7 +295,7 @@ export default function App() {
   /* ---------- 保存 ---------- */
   /**
    * 获取标签页当前内容的权威镜像。
-   * tabMirror 由编辑器 listener(渲染模式)与 handleSourceChange(源码模式)实时同步,
+   * tabMirror 由编辑器事务回调(渲染模式)与 handleSourceChange(源码模式)同步更新,
    * 始终为最新内容;避免从编辑器实例读取时拿到源码模式下未同步的陈旧内容,
    * 也避免 setTimeout 闭包捕获旧渲染的 sourceText 而丢最后一次输入。
    */
@@ -310,7 +314,8 @@ export default function App() {
       if (migratedContent === originalContent) return;
       const editor = editorRegistry.current[tabId];
       if (editor) setMarkdown(editor, migratedContent);
-      if (sourceMode && activeId === tabId) setSourceText(migratedContent);
+      const view = currentView.current;
+      if (view.sourceMode && view.activeId === tabId) setSourceText(migratedContent);
       tabMirror.current[tabId] = {
         ...(tabMirror.current[tabId] ?? {
           markdown: migratedContent,
@@ -323,7 +328,7 @@ export default function App() {
         stats: computeStats(migratedContent),
       };
     },
-    [activeId, sourceMode],
+    [],
   );
 
   const handleSaveAsFor = useCallback(
@@ -924,10 +929,13 @@ export default function App() {
   useEffect(() => {
     if (!outlineOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        setOutlineOpen(false);
-      }
+      if (event.key !== 'Escape') return;
+      // 输入法组字时的 Esc 是取消候选词(Chrome 上 keyCode 为 229),不能顺手关面板
+      if (isComposingEvent(event)) return;
+      // 搜索框、mermaid 编辑框、对话框等已经消费了这次 Esc,不要再关大纲
+      if (event.defaultPrevented) return;
+      event.preventDefault();
+      setOutlineOpen(false);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -1008,28 +1016,51 @@ export default function App() {
       externalPrompts.current.add(tabId);
       try {
         const tab = tabsRef.current.find((candidate) => candidate.id === tabId);
-        if (!tab?.path || tab.dirty) return;
+        if (!tab?.path || tab.dirty || tabId in saveQueues.current) return;
+        const version = contentGenerations.current[tabId] ?? 0;
+        const saveGeneration = saveGenerations.current[tabId] ?? 0;
+        const isCurrentDocument = () => {
+          const latest = tabsRef.current.find((candidate) => candidate.id === tabId);
+          return !!latest && latest.path === tab.path
+            && (saveGenerations.current[tabId] ?? 0) === saveGeneration;
+        };
+        const canApply = () => isCurrentDocument()
+          && (contentGenerations.current[tabId] ?? 0) === version
+          && !tabsRef.current.find((candidate) => candidate.id === tabId)?.dirty
+          && !(tabId in saveQueues.current);
+        const cancelReload = async () => {
+          if (!isCurrentDocument()) return;
+          // 不推进已知 mtime:下次检测仍需确认,自动保存也必须保留冲突保护。
+          blockedExternalMtime.current[tabId] = detectedMtime;
+          await showMessage(`「${tab.title}」在重新加载期间发生变化,本次重载已取消,已保留本地内容。请按 Ctrl+S 手动处理。`, 'info');
+        };
 
         const reload = await confirmDialog(
           `「${tab.title}」已在磁盘上被修改。\n\n选择「确定」重新加载文件;选择「取消」保留本地内容。`,
         );
+        if (!canApply()) { await cancelReload(); return; }
         if (reload) {
           const content = await readFile(tab.path);
+          if (!canApply()) { await cancelReload(); return; }
           const loadedMtime = await fileMtime(tab.path);
-          const previous = tabMirror.current[tab.id];
+          // 必须在最后一个 await 后检查,从这里到提交之间不再让出执行权。
+          if (!canApply() || loadedMtime !== detectedMtime) { await cancelReload(); return; }
+          const previous = tabMirror.current[tabId];
           const nextStats = computeStats(content);
-          tabMirror.current[tab.id] = {
+          const timer = saveTimers.current[tabId];
+          if (timer) clearTimeout(timer);
+          delete saveTimers.current[tabId];
+          contentGenerations.current[tabId] = version + 1;
+          delete blockedExternalMtime.current[tabId];
+          // 先提交新基线,避免同步编辑器回调把重载当作未保存输入。
+          tabMirror.current[tabId] = {
             markdown: content,
             outline: previous?.outline ?? [],
             stats: nextStats,
             canUndo: previous?.canUndo ?? false,
             canRedo: previous?.canRedo ?? false,
           };
-          const editor = editorRegistry.current[tab.id];
-          if (editor) setMarkdown(editor, content);
-          if (sourceMode && activeId === tab.id) setSourceText(content);
-          delete blockedExternalMtime.current[tab.id];
-          updateTab(tab.id, {
+          updateTab(tabId, {
             markdown: content,
             stats: nextStats,
             dirty: false,
@@ -1037,12 +1068,16 @@ export default function App() {
             externalChanged: false,
             savedContent: content,
           });
+          const editor = editorRegistry.current[tabId];
+          if (editor) setMarkdown(editor, content);
+          const view = currentView.current;
+          if (view.sourceMode && view.activeId === tabId) setSourceText(content);
         } else {
           // 保留本地内容时记录冲突 mtime,避免后续自动保存静默覆盖外部版本。
-          blockedExternalMtime.current[tab.id] = detectedMtime;
-          updateTab(tab.id, {
+          blockedExternalMtime.current[tabId] = detectedMtime;
+          updateTab(tabId, {
             externalMtime: detectedMtime,
-            externalChanged: tab.id === activeId ? false : true,
+            externalChanged: tabId !== currentView.current.activeId,
           });
         }
       } catch (error) {
@@ -1186,21 +1221,25 @@ export default function App() {
     ],
   );
 
+  // 键位索引:一个动作可以挂多个键位,规范化后建表;同一组合键按定义顺序取第一个,与冲突提示一致
+  const shortcutIndex = useMemo(() => createShortcutIndex(shortcuts), [shortcuts]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // 目标元素已处理过该按键(编辑器 keymap、工具栏菜单)时不再重复响应
       if (e.defaultPrevented) return;
       // 输入法组字中(e.key === 'Process' 覆盖部分中文输入法)不响应
-      if (e.isComposing || e.key === 'Process') return;
+      if (isComposingEvent(e) || e.getModifierState('AltGraph')) return;
       // 有模态框/确认对话框打开时不响应
       if (newModalOpen || shortcutsOpen || pendingCloseTab) return;
 
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
 
-      if (mod && (key === 'z' || key === 'y')) {
+      // Alt 组合不参与:AltGr 布局下 Ctrl+Alt+Z 是正常输入,Ctrl+Alt+Z 交给下面的快捷键表处理
+      if (mod && !e.altKey && (key === 'z' || key === 'y')) {
         // 撤销/重做不走快捷键表:编辑器(contenteditable)聚焦时交给 Milkdown 自身 history keymap,避免重复撤销;
-        // textarea/input(源码模式、搜索框、mermaid 编辑框)交给浏览器原生撤销
+        // 源码组件自行处理撤销;其它 textarea/input 交给浏览器。
         const target = e.target as HTMLElement | null;
         const inEditable =
           !!target && (target.isContentEditable || target.tagName === 'TEXTAREA' || target.tagName === 'INPUT');
@@ -1211,17 +1250,12 @@ export default function App() {
         return;
       }
 
-      const accelerator = shortcutFromEvent(e);
-      if (!accelerator) return;
-      const definition = SHORTCUT_DEFINITIONS.find((item) => shortcuts[item.id] === accelerator);
-      if (!definition) return;
-      e.preventDefault();
-      runShortcut(definition.id);
+      dispatchShortcut(e, shortcutIndex, runShortcut);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [
-    shortcuts,
+    shortcutIndex,
     newModalOpen,
     shortcutsOpen,
     pendingCloseTab,

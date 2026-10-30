@@ -33,21 +33,26 @@ export const SHORTCUT_DEFINITIONS: readonly ShortcutDefinition[] = [
   { id: 'prevTab', label: '上一个标签', group: '标签' },
 ];
 
-export type ShortcutBindings = Record<ShortcutAction, string | null>;
+/**
+ * 一个动作可以挂多个键位(例如「切换大纲」同时有 Ctrl+Shift+E 和 F11)。
+ * 旧版本的 Record<Action, string | null> 由 sanitizeShortcuts 自动迁移:
+ * 缺失 → 新默认值;显式 null → 空数组(用户主动解绑)。
+ */
+export type ShortcutBindings = Record<ShortcutAction, string[]>;
 
 export const DEFAULT_SHORTCUTS: ShortcutBindings = {
-  new: 'ctrl+n',
-  open: 'ctrl+o',
-  save: 'ctrl+s',
-  saveAs: 'ctrl+shift+s',
-  search: 'ctrl+f',
-  toggleOutline: 'ctrl+shift+e',
-  toggleSource: 'ctrl+shift+m',
-  exportHtml: 'ctrl+shift+h',
-  exportPdf: 'ctrl+shift+p',
-  closeTab: 'ctrl+w',
-  nextTab: 'ctrl+tab',
-  prevTab: 'ctrl+shift+tab',
+  new: ['ctrl+n'],
+  open: ['ctrl+o'],
+  save: ['ctrl+s'],
+  saveAs: ['ctrl+shift+s'],
+  search: ['ctrl+f'],
+  toggleOutline: ['ctrl+shift+e', 'f11'],
+  toggleSource: ['ctrl+shift+m', 'f2'],
+  exportHtml: ['ctrl+shift+h'],
+  exportPdf: ['ctrl+shift+p'],
+  closeTab: ['ctrl+w'],
+  nextTab: ['ctrl+tab'],
+  prevTab: ['ctrl+shift+tab'],
 };
 
 export interface ShortcutEventLike {
@@ -57,6 +62,8 @@ export interface ShortcutEventLike {
   shiftKey: boolean;
   metaKey: boolean;
   isComposing?: boolean;
+  keyCode?: number;
+  getModifierState?: (key: string) => boolean;
 }
 
 interface ParsedShortcut {
@@ -96,6 +103,9 @@ const NAMED_KEYS = new Set([
   'f11',
   'f12',
 ]);
+
+// 宿主禁用浏览器加速键后, F5/F12 也可由用户分配;未绑定时不刷新或打开开发工具。
+const FUNCTION_KEYS = new Set(Array.from({ length: 12 }, (_, index) => `f${index + 1}`));
 
 /** '+号会破坏加速器分隔，故不纳入单字符键 */
 const SYMBOL_KEYS = new Set([',', '.', '/', '-', '=', '[', ']', ';', "'"]);
@@ -146,7 +156,6 @@ function parseAccelerator(binding: string): ParsedShortcut | null {
   if (typeof binding !== 'string' || binding.length === 0) return null;
   if (/\s/.test(binding)) return null;
   const parts = binding.split('+');
-  if (parts.length < 2) return null;
   const key = normalizeKey(parts[parts.length - 1]);
   if (!key) return null;
   const parsed: ParsedShortcut = { ctrl: false, alt: false, shift: false, meta: false, key };
@@ -156,23 +165,25 @@ function parseAccelerator(binding: string): ParsedShortcut | null {
     if (parsed[mod]) return null;
     parsed[mod] = true;
   }
-  if (!parsed.ctrl && !parsed.alt && !parsed.shift && !parsed.meta) return null;
+  const hasModifier = parsed.ctrl || parsed.alt || parsed.shift || parsed.meta;
+  // 裸键只放行白名单里的功能键;其余裸键(a、delete、space…)会劫持正常输入
+  if (!hasModifier && !FUNCTION_KEYS.has(key)) return null;
   return parsed;
 }
 
 /** 归一化成规范加速器；非法返回 null */
-function canonicalize(binding: string | null): string | null {
+export function canonicalize(binding: string | null): string | null {
   if (binding === null) return null;
   const parsed = parseAccelerator(binding);
   return parsed ? formatAccelerator(parsed) : null;
 }
 
-function isComposingEvent(event: ShortcutEventLike): boolean {
-  return event.isComposing === true || event.key === 'Process';
+export function isComposingEvent(event: Pick<ShortcutEventLike, 'key' | 'isComposing' | 'keyCode'>): boolean {
+  return event.isComposing === true || event.key === 'Process' || event.keyCode === 229;
 }
 
 export function shortcutFromEvent(event: ShortcutEventLike): string | null {
-  if (isComposingEvent(event)) return null;
+  if (isComposingEvent(event) || event.getModifierState?.('AltGraph')) return null;
   const key = normalizeKey(event.key);
   if (!key) return null;
   const parsed: ParsedShortcut = {
@@ -182,8 +193,50 @@ export function shortcutFromEvent(event: ShortcutEventLike): string | null {
     meta: event.metaKey === true,
     key,
   };
-  if (!parsed.ctrl && !parsed.alt && !parsed.shift && !parsed.meta) return null;
+  const hasModifier = parsed.ctrl || parsed.alt || parsed.shift || parsed.meta;
+  // 与 parseAccelerator 同一套规则:裸 F 键可以录制/触发,裸字母仍然拒绝
+  if (!hasModifier && !FUNCTION_KEYS.has(key)) return null;
   return formatAccelerator(parsed);
+}
+
+export function createShortcutIndex(bindings: ShortcutBindings): Map<string, ShortcutAction> {
+  const index = new Map<string, ShortcutAction>();
+  for (const definition of SHORTCUT_DEFINITIONS) {
+    for (const raw of bindings[definition.id] ?? []) {
+      const accelerator = canonicalize(raw);
+      if (accelerator && !index.has(accelerator)) index.set(accelerator, definition.id);
+    }
+  }
+  return index;
+}
+
+/** 返回是否消费事件;长按已绑定键仍屏蔽宿主行为,但不重复执行应用动作。 */
+export function dispatchShortcut(
+  event: ShortcutEventLike & { defaultPrevented: boolean; repeat: boolean; preventDefault: () => void },
+  index: ReadonlyMap<string, ShortcutAction>,
+  run: (action: ShortcutAction) => void,
+): boolean {
+  if (event.defaultPrevented) return false;
+  const accelerator = shortcutFromEvent(event);
+  const action = accelerator ? index.get(accelerator) : undefined;
+  if (!action) return false;
+  event.preventDefault();
+  if (!event.repeat) run(action);
+  return true;
+}
+
+/** 已知的作用域冲突只提示,不删除用户原有的 Ctrl/Shift/Meta 绑定。 */
+export function shortcutWarning(binding: string): string | null {
+  const parsed = parseAccelerator(binding);
+  if (!parsed) return null;
+  if (parsed.meta || (parsed.alt && ['tab', 'escape', 'f4', 'space'].includes(parsed.key))) {
+    return '系统可能优先处理此组合键;应用无法保证收到事件。';
+  }
+  if ((parsed.ctrl && !parsed.alt && ['a', 'c', 'x', 'v', 'z', 'y', 'b', 'i', '=', '-', '0'].includes(parsed.key))
+    || (!parsed.ctrl && !parsed.alt && parsed.shift && !FUNCTION_KEYS.has(parsed.key))) {
+    return '此键位与文本编辑或缩放重叠;编辑器内可能被优先处理或影响输入。';
+  }
+  return null;
 }
 
 export function matchesShortcut(binding: string | null, event: ShortcutEventLike): boolean {
@@ -211,11 +264,17 @@ export function findConflicts(
 ): { accelerator: string; actions: ShortcutAction[] }[] {
   const owners = new Map<string, ShortcutAction[]>();
   for (const def of SHORTCUT_DEFINITIONS) {
-    const accelerator = canonicalize(bindings[def.id] ?? null);
-    if (!accelerator) continue;
-    const list = owners.get(accelerator);
-    if (list) list.push(def.id);
-    else owners.set(accelerator, [def.id]);
+    for (const raw of bindings[def.id] ?? []) {
+      const accelerator = canonicalize(raw);
+      if (!accelerator) continue;
+      const list = owners.get(accelerator);
+      if (list) {
+        // 同一动作的多个键位不会互相冲突,重复登记同一动作时跳过
+        if (!list.includes(def.id)) list.push(def.id);
+      } else {
+        owners.set(accelerator, [def.id]);
+      }
+    }
   }
   const conflicts: { accelerator: string; actions: ShortcutAction[] }[] = [];
   for (const [accelerator, actions] of owners) {
@@ -241,6 +300,26 @@ export function conflictReport(bindings: ShortcutBindings): ShortcutConflictRepo
   }));
 }
 
+/** 单个动作的键位列表去重并保持顺序(规范化之后比较,避免 'Ctrl+S' 与 'ctrl+s' 并存) */
+function normalizeBindingList(raw: unknown): string[] | null {
+  if (!Array.isArray(raw)) return null;
+  const seen = new Set<string>();
+  const list: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'string') continue;
+    const canonical = canonicalize(item);
+    if (!canonical || seen.has(canonical)) continue;
+    seen.add(canonical);
+    list.push(canonical);
+  }
+  return list;
+}
+
+/**
+ * 把持久化数据归一化成 ShortcutBindings。
+ * 迁移语义:字段缺失 → 新默认值;显式 null → 空数组(用户主动解绑);
+ * 兼容旧版单字符串值;数组内非法项丢弃、重复项去重。
+ */
 export function sanitizeShortcuts(value: unknown): ShortcutBindings {
   const source =
     typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -248,39 +327,101 @@ export function sanitizeShortcuts(value: unknown): ShortcutBindings {
       : null;
   const result = {} as ShortcutBindings;
   for (const def of SHORTCUT_DEFINITIONS) {
-    const fallback = DEFAULT_SHORTCUTS[def.id];
+    const fallback = [...DEFAULT_SHORTCUTS[def.id]];
     if (!source || !(def.id in source)) {
       result[def.id] = fallback;
       continue;
     }
     const raw = source[def.id];
     if (raw === null) {
-      result[def.id] = null;
+      result[def.id] = [];
       continue;
     }
-    const canonical = typeof raw === 'string' ? canonicalize(raw) : null;
-    result[def.id] = canonical ?? fallback;
+    if (typeof raw === 'string') {
+      const canonical = canonicalize(raw);
+      result[def.id] = canonical ? [canonical] : fallback;
+      continue;
+    }
+    const list = normalizeBindingList(raw);
+    if (list === null) {
+      result[def.id] = fallback;
+      continue;
+    }
+    // 空数组是合法的「显式解绑」;非空却全被丢弃则视为脏数据,回退默认
+    const emptyArray = Array.isArray(raw) && raw.length === 0;
+    result[def.id] = emptyArray || list.length > 0 ? list : fallback;
+  }
+  // 旧字符串配置补充新功能键,但保留自定义组合键、显式解绑与其它动作的占用。
+  // 数组表示已经迁移过,用户移除的功能键不能在下次启动时重新出现。
+  for (const def of SHORTCUT_DEFINITIONS) {
+    const raw = source?.[def.id];
+    const explicit = typeof raw === 'string' ? [canonicalize(raw)] : normalizeBindingList(raw) ?? [];
+    result[def.id] = result[def.id].filter((binding) =>
+      !FUNCTION_KEYS.has(binding) || explicit.includes(binding)
+      || !SHORTCUT_DEFINITIONS.some((other) => other.id !== def.id && result[other.id].includes(binding)));
+    if (typeof raw !== 'string' || !canonicalize(raw)) continue;
+    for (const accelerator of DEFAULT_SHORTCUTS[def.id].filter((key) => FUNCTION_KEYS.has(key))) {
+      if (!Object.values(result).some((list) => list.includes(accelerator))) {
+        result[def.id].push(accelerator);
+      }
+    }
   }
   return result;
 }
 
+/** 找出除 action 之外已经占用 accelerator 的动作 */
+export function findOwners(
+  bindings: ShortcutBindings,
+  action: ShortcutAction,
+  accelerator: string,
+): ShortcutAction[] {
+  const conflict: ShortcutAction[] = [];
+  for (const def of SHORTCUT_DEFINITIONS) {
+    if (def.id === action) continue;
+    const list = bindings[def.id] ?? [];
+    if (list.some((item) => canonicalize(item) === accelerator)) conflict.push(def.id);
+  }
+  return conflict;
+}
+
+/** 追加键位,或只替换指定旧键位;冲突或重复时原样返回。 */
 export function applyShortcut(
   bindings: ShortcutBindings,
   action: ShortcutAction,
   accelerator: string | null,
+  replacing: string | null = null,
 ): { bindings: ShortcutBindings; conflict: ShortcutAction[] } {
   const canonical = accelerator === null ? null : canonicalize(accelerator);
   if (accelerator !== null && canonical === null) {
     return { bindings, conflict: [] };
   }
-  if (canonical !== null) {
-    const conflict: ShortcutAction[] = [];
-    for (const def of SHORTCUT_DEFINITIONS) {
-      if (def.id === action) continue;
-      if (canonicalize(bindings[def.id] ?? null) === canonical) conflict.push(def.id);
-    }
-    if (conflict.length > 0) return { bindings, conflict };
+  if (canonical === null) return { bindings, conflict: [] };
+  const conflict = findOwners(bindings, action, canonical);
+  if (conflict.length > 0) return { bindings, conflict };
+  const current = bindings[action] ?? [];
+  if (current.some((item) => canonicalize(item) === canonical)) return { bindings, conflict: [] };
+  const next = [...current];
+  if (replacing === null) {
+    next.push(canonical);
+  } else {
+    const previous = canonicalize(replacing);
+    const index = previous ? current.findIndex((item) => canonicalize(item) === previous) : -1;
+    if (index < 0) return { bindings, conflict: [] };
+    next[index] = canonical;
   }
-  if ((bindings[action] ?? null) === canonical) return { bindings, conflict: [] };
-  return { bindings: { ...bindings, [action]: canonical }, conflict: [] };
+  return { bindings: { ...bindings, [action]: next }, conflict: [] };
+}
+
+/** 从动作的键位列表里移除一个键位;移除最后一个即解绑 */
+export function removeShortcut(
+  bindings: ShortcutBindings,
+  action: ShortcutAction,
+  accelerator: string,
+): ShortcutBindings {
+  const canonical = canonicalize(accelerator);
+  if (!canonical) return bindings;
+  const current = bindings[action] ?? [];
+  const next = current.filter((item) => canonicalize(item) !== canonical);
+  if (next.length === current.length) return bindings;
+  return { ...bindings, [action]: next };
 }

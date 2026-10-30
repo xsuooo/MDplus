@@ -16,7 +16,7 @@ export async function pasteSourceImage(
   event: ImagePasteEvent,
   input: SourceInput,
   save: (file: File) => Promise<string>,
-  onChange: (text: string) => void,
+  onChange: (text: string, caret: number) => void,
   isCurrent: () => boolean,
 ): Promise<void> {
   const file = firstClipboardImage(event.clipboardData);
@@ -30,8 +30,8 @@ export async function pasteSourceImage(
     const reference = `![](${url})`;
     const text = value.slice(0, selectionStart) + reference + value.slice(selectionEnd);
     input.value = text;
-    onChange(text);
     const caret = selectionStart + reference.length;
+    onChange(text, caret);
     input.setSelectionRange(caret, caret);
   } catch (error) {
     // App reports the save error; leave the text and selection untouched.

@@ -1,4 +1,5 @@
 import { memo, useState, useEffect, useRef } from 'react';
+import { isComposingEvent } from '../lib/shortcuts';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   IconBrand,
@@ -86,6 +87,7 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
       }
     };
     const handleKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || isComposingEvent(e)) return;
       if (e.key === 'Escape') {
         e.preventDefault();
         setExportMenuOpen(false);
@@ -132,11 +134,11 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
         <button
           className="toolbar-btn toolbar-btn-labeled"
           onClick={onSave}
-          title={activeIsNew ? '另存为 (Ctrl+S)' : '保存 (Ctrl+S)'}
+          title={activeIsNew ? '保存 (Ctrl+S) — 首次保存时选择位置' : '保存 (Ctrl+S)'}
           disabled={!hasActiveTab || saving}
         >
           <IconSave size={16} />
-          <span className="toolbar-btn-label">{activeIsNew ? '另存为' : '保存'}</span>
+          <span className="toolbar-btn-label">保存</span>
         </button>
         <button
           className="toolbar-btn toolbar-btn-secondary"

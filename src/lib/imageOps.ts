@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { join, dirname } from '@tauri-apps/api/path';
-import { rewriteImageReferences, type PendingImageReference } from './imagePaths';
+import { getImageUrls, rewriteImageReferences, type PendingImageReference } from './imagePaths';
 import { basename, fileMtime, readImageFile } from './fileOps';
 
 interface PendingImage extends PendingImageReference {
@@ -59,9 +59,6 @@ function bytesToDataUrl(bytes: Uint8Array, mime: string): string {
   return `data:${mime};base64,${btoa(binary)}`;
 }
 
-/** 匹配 Markdown 图片引用中的目标 URL,只捕获相对路径(不含 http/data/file/绝对路径)。 */
-const IMAGE_URL_RE = /!\[[^\]]*\]\(([^)\s]+)\)/g;
-
 function isExternalUrl(url: string): boolean {
   return /^(?:mdplus-image:|https?:|data:|file:|[a-zA-Z]:[\\/]|\/|\/\/)/.test(url);
 }
@@ -110,10 +107,16 @@ export async function migratePendingImages(
 ): Promise<ImageMigration> {
   const pending = getPendingImages(tabId);
   const updates: ImageMigration['updates'] = [];
+  const urls = new Set(getImageUrls(markdown));
+  const knownTokens = new Set(pending.map((image) => image.placeholder));
+  for (const url of urls) {
+    if (/^mdplus-image:/i.test(url) && !knownTokens.has(url)) {
+      throw new Error(`图片数据已丢失,无法保存: ${url}`);
+    }
+  }
   if (pending.length === 0) return { markdown, updates };
 
   const dir = await dirname(targetFilePath);
-  const urls = new Set(Array.from(markdown.matchAll(IMAGE_URL_RE), (match) => match[1]));
 
   const references: PendingImageReference[] = [];
   let assetsDirReady = false;
@@ -207,10 +210,9 @@ export async function loadImageReferences(
 ): Promise<string> {
   const pending = getPendingImages(tabId);
   const seen = new Set(pending.map((image) => image.relativePath));
-  let result = markdown;
+  const references: PendingImageReference[] = [];
 
-  for (const match of markdown.matchAll(IMAGE_URL_RE)) {
-    const url = match[1];
+  for (const url of getImageUrls(markdown)) {
     if (isExternalUrl(url)) continue;
     const relativePath = url.replace(/^\.\//, '');
     // 同一引用只处理一次,避免重复读文件与重复登记。
@@ -240,10 +242,10 @@ export async function loadImageReferences(
       data: bytes,
       source: { url, absolutePath: assetPath },
     });
-    result = rewriteImageReferences(result, [{ placeholder: url, relativePath: placeholder }]);
+    references.push({ placeholder: url, relativePath: placeholder });
   }
 
-  return result;
+  return rewriteImageReferences(markdown, references);
 }
 
 /** 粘贴图片:返回短 token,显示数据留在缓存,保存/另存为统一迁移。 */

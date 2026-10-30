@@ -13,7 +13,9 @@
   --font-sans:
     -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
     "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, "SF Mono", monospace;
+  --font-mono:
+    "Cascadia Mono", Consolas, "SF Mono", "Microsoft YaHei UI", "Microsoft YaHei",
+    "PingFang SC", "Segoe UI Emoji", monospace;
 }
 
 html[data-theme="light"] {
@@ -998,6 +1000,7 @@ textarea {
   outline: none;
   background: transparent;
   font-family: var(--font-mono);
+  font-variant-ligatures: none;
   font-size: var(--editor-font-size, 16px);
   line-height: 1.7;
   padding: 20px 32px;
@@ -1317,6 +1320,7 @@ body.dragging::after {
 
 .milkdown .ProseMirror code {
   font-family: var(--font-mono);
+  font-variant-ligatures: none;
   font-size: 0.88em;
   background: var(--code-bg);
   color: var(--code-text);
@@ -1371,17 +1375,19 @@ body.dragging::after {
 
 /* 任务清单 */
 .milkdown .ProseMirror li:has(> .md-task-checkbox) {
+  position: relative;
   list-style: none;
   margin-left: -1.5em;
-  padding-left: 0.2em;
+  padding-left: 1.6em;
 }
 .milkdown .ProseMirror .md-task-checkbox {
+  position: absolute;
+  left: 0.1em;
+  top: calc((1.8em - 15px) / 2);
   accent-color: var(--accent);
   width: 15px;
   height: 15px;
-  margin-right: 0.5em;
-  margin-left: 0.1em;
-  vertical-align: -2px;
+  margin: 0;
   cursor: pointer;
   flex-shrink: 0;
 }
@@ -1454,7 +1460,16 @@ body.dragging::after {
 .md-mermaid-holder svg {
   max-width: 100%;
   height: auto;
-  animation: fadeIn 0.45s ease;
+}
+.md-mermaid-preview {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+.md-mermaid-preview-pending {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
 }
 .md-mermaid-holder:hover::after {
   content: "点击编辑";
@@ -1469,7 +1484,7 @@ body.dragging::after {
   border: 1px solid var(--border);
 }
 
-.md-mermaid-node.loading .md-mermaid-holder::before {
+.md-mermaid-node.loading .md-mermaid-holder:empty::before {
   content: "渲染中…";
   color: var(--text-muted);
   font-size: 13px;
@@ -1495,6 +1510,7 @@ body.dragging::after {
   outline: none;
   background: var(--bg);
   font-family: var(--font-mono);
+  font-variant-ligatures: none;
   font-size: 13px;
   line-height: 1.6;
   padding: 12px;
@@ -2164,12 +2180,80 @@ body.dragging::after {
   font-style: italic;
 }
 
+.shortcut-kbd-edit {
+  cursor: pointer;
+}
+
+.shortcut-kbd-edit kbd {
+  font: inherit;
+}
+
+.shortcut-kbd-edit:hover,
+.shortcut-kbd-edit:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.shortcut-kbd-edit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .shortcut-kbd-capturing {
   font-family: var(--font-sans);
   font-style: normal;
   color: var(--accent-text);
   border-color: var(--accent);
   background: var(--accent-soft);
+}
+
+.shortcut-recording-hint {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.shortcut-kbd-list {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  vertical-align: middle;
+}
+
+.shortcut-kbd-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.shortcut-kbd-remove {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.shortcut-kbd-remove:hover {
+  background: var(--danger-soft, rgba(179, 38, 30, 0.12));
+  color: var(--danger);
+}
+
+.shortcut-hint {
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
 }
 
 .shortcut-conflict {

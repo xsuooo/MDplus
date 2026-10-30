@@ -50,7 +50,7 @@ describe('source image paste', () => {
     expect(event.preventDefault).toHaveBeenCalledOnce();
     expect(save).toHaveBeenCalledOnce();
     expect(save).toHaveBeenCalledWith(image);
-    expect(change).toHaveBeenCalledWith('before ![](mdplus-image:abc) after');
+    expect(change).toHaveBeenCalledWith('before ![](mdplus-image:abc) after', 28);
     expect(field.value).toBe('before ![](mdplus-image:abc) after');
     expect(field.setSelectionRange).toHaveBeenCalledWith(28, 28);
   });

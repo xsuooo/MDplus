@@ -46,3 +46,6 @@ icon-preview
 *.njsproj
 *.sln
 *.sw?
+
+# 本地审计与验收日志（不随仓库分发）
+.audit/

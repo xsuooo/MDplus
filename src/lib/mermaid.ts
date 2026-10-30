@@ -1,4 +1,5 @@
 import { $view } from '@milkdown/kit/utils';
+import { isComposingEvent } from './shortcuts';
 import { codeBlockSchema } from '@milkdown/kit/preset/commonmark';
 import type { EditorView, NodeViewConstructor } from '@milkdown/prose/view';
 import type { Node as PMNode } from '@milkdown/prose/model';
@@ -53,6 +54,7 @@ const mermaidView: NodeViewConstructor = (node: PMNode, view: EditorView, getPos
 
   let currentCode = node.textContent;
   let isDestroyed = false;
+  let isEditing = false;
   let renderToken = 0;
 
   /** 当前主题,mermaid 也跟随 */
@@ -66,32 +68,56 @@ const mermaidView: NodeViewConstructor = (node: PMNode, view: EditorView, getPos
     const token = ++renderToken;
     if (isDestroyed) return;
     dom.classList.add('loading');
-    holder.className = 'md-mermaid-holder';
-    holder.innerHTML = '';
-    holder.onclick = null;
+    let preview: HTMLDivElement | undefined;
 
     try {
       const { default: mermaid } = await import('mermaid');
+      if (isDestroyed || token !== renderToken) return;
       // sandbox 模式:渲染结果包进无 allow-scripts/allow-same-origin 的 iframe,
       // 图中 click 指令等 javascript: 链接无法执行,也无法访问 Tauri IPC
-      mermaid.initialize({ startOnLoad: false, securityLevel: 'sandbox', theme: diagramTheme() });
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: 'sandbox',
+        theme: diagramTheme(),
+        fontFamily: getComputedStyle(dom).getPropertyValue('--font-sans').trim() || 'sans-serif',
+      });
       const id = `md-mmd-${Math.random().toString(36).slice(2, 9)}`;
       const { svg } = await mermaid.render(id, code);
       if (isDestroyed || token !== renderToken) return;
-      holder.innerHTML = svg;
-      holder.onclick = () => showEditor(holder, code);
+      // Load the replacement invisibly without collapsing the current diagram.
+      preview = document.createElement('div');
+      preview.className = 'md-mermaid-preview md-mermaid-preview-pending';
+      preview.innerHTML = svg;
+      const frame = preview.querySelector('iframe');
+      const ready = frame ? new Promise<void>((resolve) => {
+        frame.addEventListener('load', () => resolve(), { once: true });
+      }) : Promise.resolve();
+      holder.appendChild(preview);
+      await ready;
+      if (isDestroyed || token !== renderToken) {
+        preview.remove();
+        return;
+      }
+      preview.classList.remove('md-mermaid-preview-pending');
+      holder.className = 'md-mermaid-holder';
+      holder.replaceChildren(preview);
+      holder.onclick = () => showEditor(holder, currentCode);
       dom.classList.remove('loading');
     } catch (err) {
+      preview?.remove();
       if (isDestroyed || token !== renderToken) return;
       holder.textContent = `⚠ Mermaid 渲染失败:${errorMessage(err)}`;
       holder.className = 'md-mermaid-holder md-mermaid-error';
-      holder.onclick = () => showEditor(holder, code);
+      holder.onclick = () => showEditor(holder, currentCode);
       dom.classList.remove('loading');
     }
   }
 
   /** 显示源码编辑区 */
   function showEditor(holder: HTMLElement, code: string): void {
+    isEditing = true;
+    renderToken += 1;
+    dom.classList.remove('loading');
     holder.onclick = null;
     const ta = document.createElement('textarea');
     ta.className = 'md-mermaid-textarea';
@@ -112,30 +138,32 @@ const mermaidView: NodeViewConstructor = (node: PMNode, view: EditorView, getPos
     holder.appendChild(ta);
 
     const commit = (): void => {
+      if (isDestroyed || !isEditing) return;
+      isEditing = false;
       const value = ta.value;
+      const changed = value !== currentCode;
+      currentCode = value;
       const pos = getPos();
       // 内容有变化才 dispatch(避免 blur 产生无意义的撤销历史);
       // pos 为 null 说明节点已销毁/替换,直接跳过写回
       if (pos != null) {
         const nodeAt = view.state.doc.nodeAt(pos);
-        if (nodeAt && nodeAt.type.name === 'code_block' && value !== currentCode) {
-          const tr = view.state.tr.replaceWith(
-            pos + 1,
-            pos + nodeAt.nodeSize - 1,
-            view.state.schema.text(value),
-          );
+        if (nodeAt && nodeAt.type.name === 'code_block' && changed) {
+          const tr = view.state.tr.insertText(value, pos + 1, pos + nodeAt.nodeSize - 1);
           view.dispatch(tr);
         }
       }
       // 无论内容是否变化,都退出编辑态并重新渲染
-      currentCode = value;
       void renderDiagram(value);
     };
     btn.addEventListener('mousedown', (e) => e.preventDefault());
     btn.addEventListener('click', commit);
     ta.addEventListener('blur', commit);
     ta.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') ta.blur();
+      if (e.key === 'Escape' && !e.defaultPrevented && !isComposingEvent(e)) {
+        e.preventDefault();
+        ta.blur();
+      }
     });
     ta.focus();
   }
@@ -143,7 +171,7 @@ const mermaidView: NodeViewConstructor = (node: PMNode, view: EditorView, getPos
   void renderDiagram(currentCode);
 
   // 注册到主题刷新集合,销毁时移除
-  const renderer = () => void renderDiagram(currentCode);
+  const renderer = () => { if (!isEditing) void renderDiagram(currentCode); };
   activeRenderers.add(renderer);
 
   return {

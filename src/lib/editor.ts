@@ -4,6 +4,7 @@ import {
   rootCtx,
   defaultValueCtx,
   parserCtx,
+  serializerCtx,
   editorViewCtx,
 } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
@@ -13,11 +14,11 @@ import {
   undoDepth,
   redoDepth,
 } from '@milkdown/prose/history';
-import { TextSelection } from '@milkdown/prose/state';
+import { Plugin, TextSelection } from '@milkdown/prose/state';
 import { commonmark, imageSchema } from '@milkdown/kit/preset/commonmark';
 import { gfm } from '@milkdown/kit/preset/gfm';
 import { history } from '@milkdown/kit/plugin/history';
-import { listener, listenerCtx } from '@milkdown/kit/plugin/listener';
+
 import { $prose, $view, getMarkdown as utilsGetMarkdown } from '@milkdown/kit/utils';
 import { math } from '@milkdown/plugin-math';
 import { prism } from '@milkdown/plugin-prism';
@@ -27,6 +28,7 @@ import { searchPlugin } from './search';
 import { computeStats } from './stats';
 import { taskListPlugin } from './tasklist';
 import { firstClipboardImage } from './sourcePaste';
+import { configureMarkdownSchemas } from './markdownSchemas';
 import type { EditorUpdate, OutlineItem } from './types';
 
 /** 编辑器更新回调 */
@@ -64,27 +66,27 @@ export function createEditor(root: HTMLElement, content: string, callbacks: Edit
     .config((ctx) => {
       ctx.set(rootCtx, root);
       ctx.set(defaultValueCtx, content);
-
-      let lastOutline: OutlineItem[] = [];
-
-      ctx.get(listenerCtx)
-        .updated((_ctx, doc) => {
-          lastOutline = extractOutline(doc);
-        })
-        .markdownUpdated((ctx, markdown) => {
-          const view = ctx.get(editorViewCtx);
-          callbacks.onUpdate({
-            markdown,
-            outline: lastOutline,
-            stats: computeStats(markdown),
-            ...historyState(view.state),
-          });
-        });
     })
+    .config(configureMarkdownSchemas)
     .use(commonmark)
     .use(gfm)
     .use(history)
-    .use(listener)
+    // Milkdown 的 listener 会防抖 200ms，不能作为保存/关闭的内容源。
+    // view.update 在事务提交后同步执行；仅 UI 渲染仍由 App 节流。
+    .use($prose((ctx) => new Plugin({
+      view: () => ({
+        update: (view, previous) => {
+          if (view.state.doc.eq(previous.doc)) return;
+          const markdown = ctx.get(serializerCtx)(view.state.doc);
+          callbacks.onUpdate({
+            markdown,
+            outline: extractOutline(view.state.doc),
+            stats: computeStats(markdown),
+            ...historyState(view.state),
+          });
+        },
+      }),
+    })))
     .use(math)
     .use(prism)
     .use(nord as unknown as import('@milkdown/kit/ctx').MilkdownPlugin)

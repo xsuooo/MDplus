@@ -358,6 +358,35 @@ where
         .collect()
 }
 
+/// 禁用浏览器查找、刷新、打印、开发工具加速键,保留文本编辑快捷键。
+/// 不设置 AcceleratorKeyPressed.Handled:它会连同页面键盘事件一起吞掉。
+#[cfg(windows)]
+fn configure_browser_accelerator_keys(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings3;
+    use windows_core::Interface;
+
+    window.with_webview(|webview| {
+        let controller = webview.controller();
+        // 读回一次实际状态,失败时至少能在日志里看出来,不至于静默失效
+        let outcome = unsafe {
+            (|| -> windows_core::Result<bool> {
+                let core = controller.CoreWebView2()?;
+                let settings = core.Settings()?;
+                let settings3: ICoreWebView2Settings3 = settings.cast()?;
+                settings3.SetAreBrowserAcceleratorKeysEnabled(false)?;
+                let mut enabled = windows_core::BOOL(0);
+                settings3.AreBrowserAcceleratorKeysEnabled(&mut enabled)?;
+                Ok(enabled.as_bool())
+            })()
+        };
+        match outcome {
+            Ok(true) => eprintln!("[mdplus] WebView2 浏览器加速键仍为开启,功能键可能被宿主拦截"),
+            Ok(false) => eprintln!("[mdplus] WebView2 browser accelerator keys enabled=false"),
+            Err(err) => eprintln!("[mdplus] 关闭 WebView2 浏览器加速键失败: {err}"),
+        }
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Parse arguments before creating the webview so the hidden-window startup path has
@@ -371,6 +400,17 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .setup(|app| {
+            // 窗口在 setup 之前已由 tauri.conf.json 创建,这里把 WebView2 的宿主层
+            // 加速键关掉,前端才能收到 F11 这类裸功能键(详见函数注释)。
+            #[cfg(windows)]
+            if let Some(window) = app.get_webview_window("main") {
+                if let Err(err) = configure_browser_accelerator_keys(&window) {
+                    eprintln!("[mdplus] 配置 WebView2 加速键失败: {err}");
+                }
+            }
+            Ok(())
+        })
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             // 当尝试启动第二个实例时，将参数发送给第一个实例
             let md_files = markdown_files_from_args(args, |path| Path::new(path).exists());

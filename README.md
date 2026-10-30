@@ -2,6 +2,12 @@
 
 Windows 上的 Markdown 桌面编辑器，所见即所得。
 
+## 下载
+
+旧 v0.2.4 Release、标签及安装包已于 2026-10-30 撤下。当前分支保留此前的功能和安全更新，并包含本轮图片、列表、主题切换及字体修复，尚未重新发布安装包。
+
+历史版本见 [Releases](https://github.com/xsuooo/MDplus/releases)，不包含本轮修复。需要当前修复版时，请按下方开发说明从源码构建。
+
 ## 功能
 
 - 富文本编辑 + 源码模式随时切换
@@ -54,6 +60,13 @@ npm run tauri build
 ## 技术栈
 
 Tauri · React · TypeScript · Vite · Milkdown · Mermaid · KaTeX
+
+## 文档
+
+- [更新日志](CHANGELOG.md) —— 每个版本的变更、验收结论与已知限制
+- [维护说明](docs/update-notes.md) —— 图标生成、构建检查与常见问题排查
+- [文件关联](docs/file-association.md) —— `.md` 文件关联的实现原理与手动注册方法
+- [快捷键改造说明](docs/fn-key-shortcuts-plan.md) —— v0.2.4 功能键快捷入口的开发与测试记录
 
 ## 许可证
 
