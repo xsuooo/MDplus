@@ -1,5 +1,7 @@
 # MDPlus 临时/审计文件清理与 v0.2.4 发布 Runbook
 
+> 历史流程记录，不作为当前发布或删除授权。当前状态见 [README](../../README.md)，交付与回退统一使用 [Windows 交付入口](windows-delivery.md)。下文保留当时的参数及结论。
+
 > 适用仓库：`D:\My Project\MDplus`（GitHub `xsuooo/MDplus`，public，默认分支 `agent/bootstrap`）
 > 目标环境：Windows 11 x64 · PowerShell 7 · Git for Windows · GitHub CLI 已登录（`xsuooo`，scope 含 `repo`/`workflow`）
 > 编制时间：2026-10-29 · 基线 HEAD：`9a2fae15a26d1b3d15868c6c5be6a18440786d18`（`docs: record completed installer acceptance`）

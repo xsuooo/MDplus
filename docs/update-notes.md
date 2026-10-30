@@ -2,6 +2,8 @@
 
 图标生成、构建检查与常见问题排查。文件关联的实现原理和使用方法见 [file-association.md](file-association.md)。
 
+当前版本和验收状态以 [README](../README.md) 为准；安装包构建、导出、安装和回退只使用 [Windows 交付入口](ops/windows-delivery.md)，不要从工作区直接运行低完整性构建包。
+
 ## 应用图标
 
 ### 图形来源

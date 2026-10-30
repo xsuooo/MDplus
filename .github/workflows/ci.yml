@@ -34,6 +34,12 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - name: Check Windows delivery scripts (PowerShell 7)
+        shell: pwsh
+        run: ./scripts/windows/test-delivery.ps1
+      - name: Check Windows delivery scripts (Windows PowerShell)
+        shell: powershell
+        run: ./scripts/windows/test-delivery.ps1
       - name: Check formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
       - name: Run tests
