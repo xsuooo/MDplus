@@ -5,7 +5,7 @@ import '../../src/styles/global.css';
 
 export const mermaidCases = [
   'mermaid-clear-preview', 'mermaid-clear-blur', 'mermaid-clear-escape', 'mermaid-edit-preview',
-  'mermaid-theme-stable', 'mermaid-theme-editing',
+  'mermaid-theme-stable', 'mermaid-theme-editing', 'mermaid-live-draft',
 ] as const;
 export type MermaidCase = typeof mermaidCases[number];
 
@@ -32,10 +32,10 @@ export async function runMermaidCommitRegression(testCase: MermaidCase): Promise
   const onError = (event: ErrorEvent) => errors.push(event.message);
   await editor.create();
   try {
-    await until(() => root.querySelector<HTMLElement>('.md-mermaid-holder')?.onclick);
+    await until(() => root.querySelector('.md-mermaid-preview img') && !root.querySelector('.md-mermaid-node.loading'));
     if (testCase === 'mermaid-theme-stable') {
       const holder = root.querySelector<HTMLElement>('.md-mermaid-holder')!;
-      const originalFrame = holder.querySelector('iframe');
+      const originalFrame = holder.querySelector('.md-mermaid-preview img');
       check(originalFrame, 'Sandbox frame is missing');
       const height = holder.getBoundingClientRect().height;
       const heights: number[] = [];
@@ -43,26 +43,34 @@ export async function runMermaidCommitRegression(testCase: MermaidCase): Promise
       observer.observe(holder);
       try {
         for (const theme of ['dark', 'light', 'dark', 'light']) {
-          const previousFrame = holder.querySelector('iframe');
+          const previousFrame = holder.querySelector('.md-mermaid-preview img');
           document.documentElement.dataset.theme = theme;
           refreshMermaidTheme();
           check(previousFrame?.isConnected, 'Theme refresh removed the visible diagram before its replacement was ready');
           await until(() => !holder.parentElement!.classList.contains('loading'));
-          const frame = holder.querySelector('iframe');
+          const frame = holder.querySelector<HTMLImageElement>('.md-mermaid-preview img');
           check(frame && frame !== previousFrame, 'Theme refresh did not replace the diagram');
-          check(frame.hasAttribute('sandbox') && !frame.sandbox.contains('allow-scripts')
-            && !frame.sandbox.contains('allow-same-origin'), 'Diagram sandbox was weakened');
+          check(frame.src.startsWith('data:image/svg+xml') && frame.naturalWidth > 0, 'Diagram stopped using decoded inert SVG images');
         }
         check(heights.every((value) => Math.abs(value - height) <= 1), `Diagram height jumped: ${height} => ${heights}`);
-        return `${testCase}: stable sandbox frame height through four theme changes`;
+        return `${testCase}: stable inert image height through four theme changes`;
       } finally {
         observer.disconnect();
       }
     }
-    root.querySelector<HTMLElement>('.md-mermaid-holder')!.click();
+    root.querySelector<HTMLElement>('.md-mermaid-edit')!.click();
     const textarea = root.querySelector<HTMLTextAreaElement>('.md-mermaid-textarea');
     check(textarea, 'Mermaid source editor did not open');
     check(textarea.value === original, 'Fixture did not start with a nonempty diagram');
+    if (testCase === 'mermaid-live-draft') {
+      textarea.value = 'graph TD\nA-->UnsavedDraft';
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      check(editor.action((ctx) => ctx.get(editorViewCtx).state.doc.firstChild!.textContent) === textarea.value,
+        'Save/recovery would read old Mermaid source before blur');
+      await refreshMermaidTheme();
+      check(textarea.isConnected && document.activeElement === textarea, 'Live draft update replaced the focused editor');
+      return `${testCase}: save and recovery see live source without leaving edit mode`;
+    }
     if (testCase === 'mermaid-theme-editing') {
       textarea.value = 'graph TD\nA-->Draft';
       document.documentElement.dataset.theme = 'dark';

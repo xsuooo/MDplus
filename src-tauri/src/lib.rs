@@ -1,4 +1,6 @@
 // MDPlus - Tauri backend commands
+mod recovery;
+mod update_guard;
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -389,6 +391,9 @@ fn configure_browser_accelerator_keys(window: &tauri::WebviewWindow) -> tauri::R
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if let Some(code) = update_guard::run_if_requested() {
+        std::process::exit(code);
+    }
     // Parse arguments before creating the webview so the hidden-window startup path has
     // the file list available before React mounts.
     let args: Vec<String> = std::env::args().collect();
@@ -446,7 +451,12 @@ pub fn run() {
             read_image_file,
             create_directory,
             take_startup_files,
-            take_pending_open_files
+            take_pending_open_files,
+            recovery::cache_recovery_image,
+            recovery::write_recovery_snapshot,
+            recovery::list_recovery_snapshots,
+            recovery::read_recovery_snapshot,
+            recovery::delete_recovery_snapshot
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

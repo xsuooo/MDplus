@@ -1,0 +1,60 @@
+/* Offline regular and emphasis faces; full notices ship in public/font-licenses. */
+@font-face {
+  font-family: "MDPlus JetBrains Mono";
+  src: url("../assets/fonts/JetBrainsMono.woff2") format("woff2");
+  font-weight: 100 800;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "MDPlus Sarasa Gothic SC";
+  src: url("../assets/fonts/SarasaGothicSC-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "MDPlus Sarasa Gothic SC";
+  src: url("../assets/fonts/SarasaGothicSC-SemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "MDPlus Fira Code";
+  src: url("../assets/fonts/FiraCode.woff2") format("woff2");
+  font-weight: 300 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "MDPlus LXGW WenKai";
+  src: url("../assets/fonts/LXGWWenKai.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "MDPlus LXGW WenKai";
+  src: url("../assets/fonts/LXGWWenKai-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "MDPlus Cascadia Code";
+  src: url("../assets/fonts/CascadiaCode.ttf") format("truetype");
+  font-weight: 200 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "MDPlus MiSans";
+  src: url("../assets/fonts/MiSans-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "MDPlus MiSans";
+  src: url("../assets/fonts/MiSans-Semibold.woff2") format("woff2");
+  font-weight: 600;
+  font-display: swap;
+}

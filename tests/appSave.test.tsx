@@ -30,8 +30,8 @@ vi.mock('react', async (importOriginal) => {
     useState: (initial: unknown) => {
       const index = mocks.useStateIndex++;
       // 索引对应 App 里 useState 的声明顺序:0=tabs, 1=activeId, 2=主题, 3=源码模式,
-      // 4=搜索, 5=大纲开关, 6=大纲宽度, 7=新建弹窗, 8=最近菜单, 9=最近文件, 10=待关闭标签。
-      const PENDING_CLOSE_TAB_INDEX = 10;
+      // 4=媒体预览, 5=搜索, 6=大纲开关, 7=大纲宽度, 8=新建弹窗, 9=最近菜单, 10=最近文件, 11=待关闭标签。
+      const PENDING_CLOSE_TAB_INDEX = 11;
       const value = index === 0 ? [mocks.initialTab] : index === 1 ? 'tab' :
         index === PENDING_CLOSE_TAB_INDEX ? mocks.initialTab
           : typeof initial === 'function' ? initial() : initial;
@@ -46,6 +46,7 @@ vi.mock('react', async (importOriginal) => {
       return ref;
     },
     useEffect: () => {},
+    useLayoutEffect: () => {},
   };
 });
 vi.mock('../src/components/Toolbar', () => ({
@@ -142,7 +143,7 @@ describe('App save entry points', () => {
     mocks.toolbar[action]();
     await settle();
     expect(mocks.commitImageMigration).toHaveBeenCalledTimes(1);
-    expect(mocks.setMarkdown).toHaveBeenCalledWith(expect.anything(), '![](./assets/pic.png)');
+    expect(mocks.setMarkdown).toHaveBeenCalledWith(expect.anything(), '![](./assets/pic.png)', false);
     expect(mocks.commitImageMigration.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.setMarkdown.mock.invocationCallOrder[0]);
     expect(tabState().dirty).toBe(false);

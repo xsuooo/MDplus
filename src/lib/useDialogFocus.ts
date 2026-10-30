@@ -18,7 +18,7 @@ export function useDialogFocus<T extends HTMLElement>(onClose: () => void) {
 
     const focusable = () => Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
     const first = focusable()[0];
-    (first ?? dialog).focus();
+    (first ?? dialog).focus({ preventScroll: true });
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isComposingEvent(event)) return;
@@ -50,7 +50,7 @@ export function useDialogFocus<T extends HTMLElement>(onClose: () => void) {
     dialog.addEventListener('keydown', onKeyDown);
     return () => {
       dialog.removeEventListener('keydown', onKeyDown);
-      if (previousFocus.current?.isConnected) previousFocus.current.focus();
+      if (previousFocus.current?.isConnected) previousFocus.current.focus({ preventScroll: true });
     };
   }, []);
 

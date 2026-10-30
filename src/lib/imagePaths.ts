@@ -134,12 +134,12 @@ function encodeDestination(url: string, literal: boolean): string {
 }
 
 /** 按源区间改写 destination;仅在共用定义时展开图片引用,保留普通链接。 */
-export function rewriteImageReferences(markdown: string, references: PendingImageReference[]): string {
-  if (references.length === 0) return markdown;
+function imageReferenceEdits(markdown: string, references: PendingImageReference[]) {
+  if (references.length === 0) return [];
   const replacements = new Map(references.map((reference) => [reference.placeholder, reference.relativePath]));
-  return imageDestinations(markdown).reduceRight((result, destination) => {
+  return imageDestinations(markdown).flatMap((destination) => {
     const replacement = replacements.get(destination.url);
-    if (replacement === undefined || replacement === destination.url) return result;
+    if (replacement === undefined || replacement === destination.url) return [];
     let encoded = encodeDestination(replacement, destination.literal);
     if (destination.referenceTitle !== undefined) {
       // 解码后的换行和表格分隔符必须仍是字符引用，不能变成新的 Markdown 结构。
@@ -148,6 +148,22 @@ export function rewriteImageReferences(markdown: string, references: PendingImag
         .replace(/[\\"]/g, '\\$&');
       encoded = `(${encoded}${title ? ` "${title}"` : ''})`;
     }
-    return result.slice(0, destination.start) + encoded + result.slice(destination.end);
-  }, markdown);
+    return [{ start: destination.start, end: destination.end, text: encoded }];
+  });
+}
+
+export function rewriteImageReferences(markdown: string, references: PendingImageReference[]): string {
+  return imageReferenceEdits(markdown, references).reduceRight((text, edit) =>
+    text.slice(0, edit.start) + edit.text + text.slice(edit.end), markdown);
+}
+
+/** Rebase a selection through individual image URL replacements, not one large diff. */
+export function mapImageOffset(markdown: string, references: PendingImageReference[], offset: number): number {
+  let delta = 0;
+  for (const edit of imageReferenceEdits(markdown, references)) {
+    if (offset <= edit.start) break;
+    if (offset < edit.end) return edit.start + delta + Math.min(offset - edit.start, edit.text.length);
+    delta += edit.text.length - (edit.end - edit.start);
+  }
+  return Math.max(0, offset + delta);
 }

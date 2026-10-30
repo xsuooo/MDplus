@@ -69,8 +69,18 @@ function rememberPendingImage(tabId: string, image: PendingImage): void {
   pendingImages.set(tabId, images);
 }
 
-function getPendingImages(tabId: string): PendingImage[] {
+export function getPendingImages(tabId: string): PendingImage[] {
   return [...(pendingImages.get(tabId) ?? [])];
+}
+
+export function restorePendingImages(tabId: string, images: {
+  placeholder: string; filename: string; data: number[]; mime: string;
+}[]): void {
+  pendingImages.set(tabId, images.map((image) => ({
+    ...image,
+    relativePath: `./assets/${image.filename}`,
+    preview: bytesToDataUrl(new Uint8Array(image.data), image.mime),
+  })));
 }
 
 export function clearPendingImages(tabId: string): void {
@@ -84,6 +94,7 @@ export function resolveImageSource(tabId: string, url: string): string {
 
 interface ImageMigration {
   markdown: string;
+  references: PendingImageReference[];
   updates: { image: PendingImage; filename: string; source: { url: string; absolutePath: string } }[];
 }
 
@@ -114,7 +125,7 @@ export async function migratePendingImages(
       throw new Error(`图片数据已丢失,无法保存: ${url}`);
     }
   }
-  if (pending.length === 0) return { markdown, updates };
+  if (pending.length === 0) return { markdown, updates, references: [] };
 
   const dir = await dirname(targetFilePath);
 
@@ -163,7 +174,7 @@ export async function migratePendingImages(
     });
   }
 
-  return { markdown: rewriteImageReferences(markdown, references), updates };
+  return { markdown: rewriteImageReferences(markdown, references), updates, references };
 }
 
 /**

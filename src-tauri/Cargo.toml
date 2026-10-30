@@ -1,6 +1,6 @@
 [package]
 name = "mdplus"
-version = "0.2.4"
+version = "0.2.5-phase6.2"
 description = "简洁好用的 Markdown 编辑器"
 authors = ["MDPlus"]
 edition = "2021"
@@ -30,7 +30,7 @@ infer = "0.19"
 quick-xml = "0.41"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
 # 关闭 WebView2 的浏览器加速键,让 F1–F12 等按键能到达页面 JS。
 # 版本必须与 tauri 传递依赖里的实例一致(webview2-com-sys 0.38 依赖 windows-core 0.61),
 # 否则 PlatformWebview::controller() 返回的类型来自另一个 crate 实例,编译期类型不匹配。

@@ -2,6 +2,9 @@ import { memo, useLayoutEffect, useRef, useState, type ClipboardEvent, type Keyb
 import { pasteSourceImage } from '../lib/sourcePaste';
 import { isComposingEvent } from '../lib/shortcuts';
 import { IconCode } from './icons';
+import { mapTextOffset } from '../lib/textPosition';
+import { mapSourceScroll } from '../lib/sourcePosition';
+import { mapImageOffset, rewriteImageReferences, type PendingImageReference } from '../lib/imagePaths';
 
 interface SourceEditorProps {
   tabId: string;
@@ -9,6 +12,9 @@ interface SourceEditorProps {
   onChange: (text: string) => void;
   onClose: () => void;
   onImagePaste?: (tabId: string, file: File) => Promise<string>;
+  active?: boolean;
+  onRegister?: (tabId: string, input: HTMLTextAreaElement | null) => void;
+  imageRewrites?: PendingImageReference[];
 }
 
 interface Snapshot {
@@ -27,7 +33,9 @@ const COALESCE_MS = 400;
  *
  * 本地草稿区分父组件回声和外部替换,文本输入与程序化图片粘贴共用撤销栈。
  */
-export const SourceEditor = memo(function SourceEditor({ tabId, value, onChange, onClose, onImagePaste }: SourceEditorProps) {
+export const SourceEditor = memo(function SourceEditor({
+  tabId, value, onChange, onClose, onImagePaste, active = true, onRegister, imageRewrites,
+}: SourceEditorProps) {
   const generation = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [draft, setDraft] = useState(value);
@@ -40,24 +48,65 @@ export const SourceEditor = memo(function SourceEditor({ tabId, value, onChange,
   const lastInputType = useRef('');
   const selectionRef = useRef({ start: 0, end: 0 });
   const pendingSelection = useRef<{ start: number; end: number } | null>(null);
+  const scroll = useRef({ top: 0, left: 0 });
+  const direction = useRef<'forward' | 'backward' | 'none'>('none');
+  const lastRewrites = useRef(imageRewrites);
+  const restoreScroll = useRef(false);
+
+  useLayoutEffect(() => {
+    onRegister?.(tabId, textareaRef.current);
+    return () => onRegister?.(tabId, null);
+  }, [tabId, onRegister]);
 
   useLayoutEffect(() => {
     generation.current += 1;
     return () => { generation.current += 1; };
-  }, [tabId, value]);
+  }, [tabId, value, active]);
 
   // 外部修改(切换标签、Milkdown 同步、磁盘重载)才回灌到本地草稿
   useLayoutEffect(() => {
+    const references = imageRewrites !== lastRewrites.current ? imageRewrites : undefined;
+    lastRewrites.current = imageRewrites;
+    if (references) {
+      const rebase = (snapshot: Snapshot): Snapshot => ({
+        text: rewriteImageReferences(snapshot.text, references),
+        start: mapImageOffset(snapshot.text, references, snapshot.start),
+        end: mapImageOffset(snapshot.text, references, snapshot.end),
+      });
+      history.current = history.current.map(rebase);
+      future.current = future.current.map(rebase);
+    }
     if (value === pushed.current) return;
+    const before = pushed.current;
+    const input = textareaRef.current;
+    const selection = input ? { start: input.selectionStart, end: input.selectionEnd } : selectionRef.current;
+    if (input) {
+      scroll.current = { top: input.scrollTop, left: input.scrollLeft };
+      direction.current = input.selectionDirection ?? 'none';
+    }
+    const map = (offset: number) => references
+      ? mapImageOffset(before, references, offset) : mapTextOffset(before, value, offset);
+    if (input && active) scroll.current.top = mapSourceScroll(input, before, value, map);
+    pendingSelection.current = {
+      start: map(selection.start), end: map(selection.end),
+    };
     pushed.current = value;
     setDraft(value);
-    history.current = [];
-    future.current = [];
+    if (!references) { history.current = []; future.current = []; }
     lastPushAt.current = 0;
     lastInputType.current = '';
-    pendingSelection.current = null;
-    selectionRef.current = { start: 0, end: 0 };
-  }, [value]);
+    restoreScroll.current = true;
+  }, [value, imageRewrites]);
+
+  useLayoutEffect(() => {
+    if (!active) return;
+    const el = textareaRef.current;
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    el.setSelectionRange(selectionRef.current.start, selectionRef.current.end, direction.current);
+    el.scrollTop = scroll.current.top;
+    el.scrollLeft = scroll.current.left;
+  }, [active]);
 
   // 撤销后把光标放回快照位置
   useLayoutEffect(() => {
@@ -65,8 +114,13 @@ export const SourceEditor = memo(function SourceEditor({ tabId, value, onChange,
     const target = pendingSelection.current;
     if (!el || !target) return;
     pendingSelection.current = null;
-    el.setSelectionRange(target.start, target.end);
+    el.setSelectionRange(target.start, target.end, direction.current);
     selectionRef.current = target;
+    if (restoreScroll.current) {
+      el.scrollTop = scroll.current.top;
+      el.scrollLeft = scroll.current.left;
+      restoreScroll.current = false;
+    }
   }, [draft]);
 
   const currentSnapshot = (): Snapshot => ({
@@ -147,6 +201,7 @@ export const SourceEditor = memo(function SourceEditor({ tabId, value, onChange,
   const rememberSelection = () => {
     const el = textareaRef.current;
     if (!el) return;
+    direction.current = el.selectionDirection ?? 'none';
     if (selectionRef.current.start !== el.selectionStart || selectionRef.current.end !== el.selectionEnd) {
       lastPushAt.current = 0;
       selectionRef.current = { start: el.selectionStart, end: el.selectionEnd };
@@ -165,7 +220,7 @@ export const SourceEditor = memo(function SourceEditor({ tabId, value, onChange,
   };
 
   return (
-    <div className="source-editor" aria-label="Markdown 源码编辑">
+    <div className="source-editor" hidden={!active} aria-label="Markdown 源码编辑">
       <div className="source-editor-head">
         <div className="source-editor-title"><IconCode size={15} /> <span>源码模式</span></div>
         <button className="source-editor-close" onClick={onClose} title="返回编辑模式" aria-label="返回编辑模式">
@@ -193,12 +248,15 @@ export const SourceEditor = memo(function SourceEditor({ tabId, value, onChange,
           lastPushAt.current = 0;
         }}
         onSelect={rememberSelection}
+        onBlur={rememberSelection}
+        onScroll={(event) => {
+          if (active) scroll.current = { top: event.currentTarget.scrollTop, left: event.currentTarget.scrollLeft };
+        }}
         onKeyUp={rememberSelection}
         onMouseUp={rememberSelection}
         onPaste={handlePaste}
         spellCheck={false}
         aria-label="Markdown 源码"
-        autoFocus
       />
     </div>
   );

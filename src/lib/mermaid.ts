@@ -4,22 +4,27 @@ import { codeBlockSchema } from '@milkdown/kit/preset/commonmark';
 import type { EditorView, NodeViewConstructor } from '@milkdown/prose/view';
 import type { Node as PMNode } from '@milkdown/prose/model';
 import { errorMessage } from './errors';
+import { NodeSelection } from '@milkdown/prose/state';
+import type { MediaPreview } from './media';
+import { renderDiagramMedia } from './diagramRender';
+import { normalizeBodyFont } from './editorFont';
 
 /** 当前存活视图的重渲染器集合,用于主题切换时让已渲染图表跟随重绘 */
-const activeRenderers = new Set<() => void>();
+const activeRenderers = new Set<() => Promise<void>>();
 
 /** 主题变化时,让所有已渲染的 mermaid 图表按新主题重绘 */
-export function refreshMermaidTheme(): void {
-  activeRenderers.forEach((fn) => fn());
+export async function refreshMermaidTheme(): Promise<void> {
+  await Promise.all([...activeRenderers].map((render) => render()));
 }
 
 /**
  * Mermaid 图表渲染插件。
  * Milkdown 的 $view 对返回 null 不回退默认视图,因此这里接管所有代码块:
- *  - language 为 mermaid 时渲染为实时图表(点击可编辑源码);
+ *  - language 为 mermaid 时渲染为图表，选中、查看与编辑分别操作;
  *  - 其它语言渲染为普通可编辑代码块。
  */
-const mermaidView: NodeViewConstructor = (node: PMNode, view: EditorView, getPos: () => number | undefined) => {
+const mermaidView = (onPreview?: (media: MediaPreview) => void): NodeViewConstructor =>
+  (node: PMNode, view: EditorView, getPos: () => number | undefined) => {
   const lang = String(node.attrs.language ?? '').toLowerCase();
 
   /* ---------- 非 mermaid:普通代码块 ---------- */
@@ -51,64 +56,112 @@ const mermaidView: NodeViewConstructor = (node: PMNode, view: EditorView, getPos
   contentPre.appendChild(contentCode);
   dom.appendChild(holder);
   dom.appendChild(contentPre);
+  const controls = document.createElement('div');
+  controls.className = 'md-media-controls';
+  controls.contentEditable = 'false';
+  const edit = document.createElement('button');
+  edit.type = 'button'; edit.className = 'md-mermaid-edit';
+  edit.textContent = '编辑图表';
+  const enlarge = document.createElement('button');
+  enlarge.type = 'button'; enlarge.className = 'md-mermaid-enlarge';
+  enlarge.textContent = '放大查看'; enlarge.setAttribute('aria-label', '放大查看图表');
+  enlarge.disabled = true;
+  controls.append(edit, enlarge); dom.append(controls);
 
   let currentCode = node.textContent;
   let isDestroyed = false;
   let isEditing = false;
   let renderToken = 0;
+  let finishPendingLoad: (() => void) | undefined;
+  let media: MediaPreview | undefined;
+  let layout: { identity: string; width: number; height: number } | undefined;
+  let sourceInput: HTMLTextAreaElement | undefined;
+  const select = () => {
+    const pos = getPos();
+    if (pos == null || view.isDestroyed) return;
+    view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos)));
+    view.focus();
+  };
+  holder.onclick = (event) => { if (!isEditing) { event.stopPropagation(); select(); } };
+  controls.addEventListener('mousedown', (event) => event.preventDefault());
+  edit.onclick = () => { select(); showEditor(holder, currentCode); };
+  enlarge.onclick = () => { select(); if (media) onPreview?.(media); };
 
   /** 当前主题,mermaid 也跟随 */
-  function diagramTheme(): 'dark' | 'default' {
+  function diagramTheme(): 'dark' | 'light' {
     const theme = document.documentElement.dataset.theme;
-    return theme === 'dark' ? 'dark' : 'default';
+    return theme === 'dark' ? 'dark' : 'light';
   }
 
   /** 异步渲染图表 */
-  async function renderDiagram(code: string): Promise<void> {
+  async function renderDiagram(code: string, fade = false): Promise<void> {
     const token = ++renderToken;
+    finishPendingLoad?.();
     if (isDestroyed) return;
     dom.classList.add('loading');
     let preview: HTMLDivElement | undefined;
 
     try {
-      const { default: mermaid } = await import('mermaid');
+      // The constructor starts rendering before ProseMirror attaches this node.
+      // Read inherited font settings only after it belongs to its actual tab.
+      await Promise.resolve();
       if (isDestroyed || token !== renderToken) return;
-      // sandbox 模式:渲染结果包进无 allow-scripts/allow-same-origin 的 iframe,
-      // 图中 click 指令等 javascript: 链接无法执行,也无法访问 Tauri IPC
-      mermaid.initialize({
-        startOnLoad: false,
-        securityLevel: 'sandbox',
-        theme: diagramTheme(),
-        fontFamily: getComputedStyle(dom).getPropertyValue('--font-sans').trim() || 'sans-serif',
-      });
-      const id = `md-mmd-${Math.random().toString(36).slice(2, 9)}`;
-      const { svg } = await mermaid.render(id, code);
+      const font = normalizeBodyFont(dom.closest<HTMLElement>('[data-body-font]')?.dataset.bodyFont);
+      const nextMedia = await renderDiagramMedia(code, diagramTheme(), font);
       if (isDestroyed || token !== renderToken) return;
+      // Mermaid themes can differ by a few border pixels. Only content/font
+      // changes may resize the document; a color change retains its layout box.
+      const identity = `${font}\0${code}`;
+      if (layout?.identity === identity) {
+        nextMedia.width = layout.width; nextMedia.height = layout.height;
+      } else layout = { identity, width: nextMedia.width, height: nextMedia.height };
       // Load the replacement invisibly without collapsing the current diagram.
       preview = document.createElement('div');
       preview.className = 'md-mermaid-preview md-mermaid-preview-pending';
-      preview.innerHTML = svg;
-      const frame = preview.querySelector('iframe');
-      const ready = frame ? new Promise<void>((resolve) => {
-        frame.addEventListener('load', () => resolve(), { once: true });
-      }) : Promise.resolve();
+      const image = document.createElement('img');
+      image.src = nextMedia.src; image.draggable = false;
+      image.alt = 'Mermaid 图表预览';
+      image.style.width = `${nextMedia.width}px`;
+      image.style.aspectRatio = `${nextMedia.width} / ${nextMedia.height}`;
+      preview.append(image);
+      const ready = new Promise<void>((resolve, reject) => {
+        const cleanup = () => {
+          image.removeEventListener('load', finish);
+          image.removeEventListener('error', fail);
+          if (finishPendingLoad === finish) finishPendingLoad = undefined;
+        };
+        const finish = () => { cleanup(); resolve(); };
+        const fail = () => { cleanup(); reject(new Error('图表图像无法解码')); };
+        finishPendingLoad = finish;
+        image.addEventListener('load', finish, { once: true });
+        image.addEventListener('error', fail, { once: true });
+      });
       holder.appendChild(preview);
       await ready;
       if (isDestroyed || token !== renderToken) {
         preview.remove();
         return;
       }
+      if (fade && holder.querySelector('.md-mermaid-preview:not(.md-mermaid-preview-pending)')
+        && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        preview.classList.add('md-mermaid-preview-revealing');
+        await preview.animate([{ opacity: 0 }, { opacity: 1 }],
+          { duration: 160, easing: 'ease-out', fill: 'forwards' }).finished.catch(() => {});
+        if (isDestroyed || token !== renderToken) { preview.remove(); return; }
+        preview.classList.remove('md-mermaid-preview-revealing');
+      }
       preview.classList.remove('md-mermaid-preview-pending');
       holder.className = 'md-mermaid-holder';
       holder.replaceChildren(preview);
-      holder.onclick = () => showEditor(holder, currentCode);
+      media = nextMedia;
+      enlarge.disabled = !onPreview;
       dom.classList.remove('loading');
     } catch (err) {
       preview?.remove();
       if (isDestroyed || token !== renderToken) return;
-      holder.textContent = `⚠ Mermaid 渲染失败:${errorMessage(err)}`;
+      media = undefined; enlarge.disabled = true;
+      holder.textContent = `图表无法预览。请点击“编辑图表”修正源码。\n${errorMessage(err)}`;
       holder.className = 'md-mermaid-holder md-mermaid-error';
-      holder.onclick = () => showEditor(holder, currentCode);
       dom.classList.remove('loading');
     }
   }
@@ -116,11 +169,15 @@ const mermaidView: NodeViewConstructor = (node: PMNode, view: EditorView, getPos
   /** 显示源码编辑区 */
   function showEditor(holder: HTMLElement, code: string): void {
     isEditing = true;
+    controls.hidden = true;
     renderToken += 1;
+    finishPendingLoad?.();
     dom.classList.remove('loading');
-    holder.onclick = null;
+    holder.className = 'md-mermaid-holder md-mermaid-editing';
     const ta = document.createElement('textarea');
+    sourceInput = ta;
     ta.className = 'md-mermaid-textarea';
+    ta.setAttribute('aria-label', 'Mermaid 图表源码');
     ta.value = code;
     const bar = document.createElement('div');
     bar.className = 'md-mermaid-bar';
@@ -137,9 +194,8 @@ const mermaidView: NodeViewConstructor = (node: PMNode, view: EditorView, getPos
     holder.appendChild(bar);
     holder.appendChild(ta);
 
-    const commit = (): void => {
+    const write = (): void => {
       if (isDestroyed || !isEditing) return;
-      isEditing = false;
       const value = ta.value;
       const changed = value !== currentCode;
       currentCode = value;
@@ -148,14 +204,23 @@ const mermaidView: NodeViewConstructor = (node: PMNode, view: EditorView, getPos
       // pos 为 null 说明节点已销毁/替换,直接跳过写回
       if (pos != null) {
         const nodeAt = view.state.doc.nodeAt(pos);
-        if (nodeAt && nodeAt.type.name === 'code_block' && changed) {
+        if (nodeAt?.type.name === 'code_block' && String(nodeAt.attrs.language).toLowerCase() === 'mermaid' && changed) {
           const tr = view.state.tr.insertText(value, pos + 1, pos + nodeAt.nodeSize - 1);
           view.dispatch(tr);
         }
       }
-      // 无论内容是否变化,都退出编辑态并重新渲染
-      void renderDiagram(value);
     };
+    const commit = (): void => {
+      if (isDestroyed || !isEditing) return;
+      write();
+      isEditing = false;
+      sourceInput = undefined;
+      controls.hidden = false;
+      // 无论内容是否变化,都退出编辑态并重新渲染
+      void renderDiagram(currentCode);
+    };
+    // Save/recovery must see the draft even when Ctrl+S never blurs this textarea.
+    ta.addEventListener('input', write);
     btn.addEventListener('mousedown', (e) => e.preventDefault());
     btn.addEventListener('click', commit);
     ta.addEventListener('blur', commit);
@@ -171,7 +236,7 @@ const mermaidView: NodeViewConstructor = (node: PMNode, view: EditorView, getPos
   void renderDiagram(currentCode);
 
   // 注册到主题刷新集合,销毁时移除
-  const renderer = () => { if (!isEditing) void renderDiagram(currentCode); };
+  const renderer = () => isEditing ? Promise.resolve() : renderDiagram(currentCode, true);
   activeRenderers.add(renderer);
 
   return {
@@ -182,17 +247,20 @@ const mermaidView: NodeViewConstructor = (node: PMNode, view: EditorView, getPos
       if (String(node.attrs.language ?? '').toLowerCase() !== 'mermaid') return false;
       if (node.textContent !== currentCode) {
         currentCode = node.textContent;
-        void renderDiagram(currentCode);
+        if (isEditing && sourceInput) sourceInput.value = currentCode;
+        else void renderDiagram(currentCode);
       }
       return true;
     },
     ignoreMutation: () => true,
-    stopEvent: () => true,
+    stopEvent: (event) => event.target instanceof Element
+      && !!event.target.closest('.md-media-controls, .md-mermaid-textarea, .md-mermaid-bar'),
     destroy: () => {
       isDestroyed = true;
+      finishPendingLoad?.();
       activeRenderers.delete(renderer);
     },
   };
 };
 
-export const mermaidPlugin = $view(codeBlockSchema.node, () => mermaidView);
+export const mermaidPlugin = (onPreview?: (media: MediaPreview) => void) => $view(codeBlockSchema.node, () => mermaidView(onPreview));

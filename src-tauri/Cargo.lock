@@ -1944,7 +1944,7 @@ dependencies = [
 
 [[package]]
 name = "mdplus"
-version = "0.2.4"
+version = "0.2.5-phase6.2"
 dependencies = [
  "encoding_rs",
  "infer",

@@ -40,13 +40,16 @@ vi.mock('react', async (original) => {
 });
 
 import { SourceEditor } from '../src/components/SourceEditor';
+import type { PendingImageReference } from '../src/lib/imagePaths';
 
 function mount(initial = 'abc', saveImage = vi.fn(async () => 'image.png')) {
   let value = initial;
+  let imageRewrites: PendingImageReference[] | undefined;
   let field: ReactElement<any> & { ref: { current: unknown } };
   const changes = vi.fn();
   const input = {
     value, selectionStart: 0, selectionEnd: 0, isConnected: true,
+    focus: vi.fn(), scrollTop: 0, scrollLeft: 0, selectionDirection: 'none',
     setSelectionRange(start: number, end: number) {
       this.selectionStart = start;
       this.selectionEnd = end;
@@ -58,7 +61,7 @@ function mount(initial = 'abc', saveImage = vi.fn(async () => 'image.png')) {
       hooks.cursor = 0;
       const tree = SourceEditor({
         tabId: 'tab', value, onChange: (next) => { value = next; changes(next); },
-        onClose: vi.fn(), onImagePaste: saveImage,
+        onClose: vi.fn(), onImagePaste: saveImage, imageRewrites,
       }) as ReactElement<{ children: ReactElement[] }>;
       field = tree.props.children.find((child) => child.type === 'textarea')! as typeof field;
       input.value = field.props.value;
@@ -91,6 +94,7 @@ function mount(initial = 'abc', saveImage = vi.fn(async () => 'image.png')) {
       render();
     },
     external(text: string) { value = text; render(); },
+    migrate(text: string, references: PendingImageReference[]) { imageRewrites = references; value = text; render(); },
     async paste() {
       field.props.onPaste({
         currentTarget: input, preventDefault: vi.fn(),
@@ -226,5 +230,28 @@ describe('SourceEditor history', () => {
     editor.external('disk content');
     editor.key('z');
     expect(editor.input.value).toBe('disk content');
+  });
+
+  it('rebases source selections and undo history through image migration', () => {
+    const original = '![](mdplus-image:one)\n\n中文 text\n\n![](mdplus-image:two)';
+    const editor = mount(original);
+    editor.change(original + ' edit');
+    const at = editor.input.value.indexOf('中文');
+    editor.select(at, at + 2);
+    const references = [{ placeholder: 'mdplus-image:one', relativePath: './assets/one.png' },
+      { placeholder: 'mdplus-image:two', relativePath: './assets/two.png' }];
+    const migrated = (original + ' edit').replace('mdplus-image:one', './assets/one.png').replace('mdplus-image:two', './assets/two.png');
+    editor.migrate(migrated, references);
+    expect(editor.input.value.slice(editor.input.selectionStart, editor.input.selectionEnd)).toBe('中文');
+    editor.key('z');
+    expect(editor.input.value).not.toContain('mdplus-image:');
+    expect(editor.input.value).not.toContain(' edit');
+  });
+
+  it('maps the actual DOM selection even before its selection event was delivered', () => {
+    const editor = mount('prefix current suffix');
+    editor.input.setSelectionRange(15, 21);
+    editor.external('prefix longer current suffix');
+    expect(editor.input.value.slice(editor.input.selectionStart, editor.input.selectionEnd)).toBe('suffix');
   });
 });

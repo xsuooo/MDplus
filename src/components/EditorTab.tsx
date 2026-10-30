@@ -4,6 +4,7 @@ import type { Editor } from '@milkdown/kit/core';
 import { createEditor, getCurrentState } from '../lib/editor';
 import { resolveImageSource } from '../lib/imageOps';
 import type { Tab, EditorUpdate } from '../lib/types';
+import type { MediaPreview } from '../lib/media';
 
 interface EditorTabProps {
   tab: Tab;
@@ -11,6 +12,7 @@ interface EditorTabProps {
   onUpdate: (id: string, update: EditorUpdate, isInitial?: boolean) => void;
   onRegister: (id: string, editor: Editor | null) => void;
   onImagePaste?: (tabId: string, file: File) => Promise<string>;
+  onMediaPreview?: (media: MediaPreview) => void;
 }
 
 /**
@@ -26,7 +28,9 @@ export const EditorTab = memo(function EditorTab(props: EditorTabProps) {
   );
 });
 
-function EditorTabInner({ tab, active, onUpdate, onRegister, onImagePaste }: EditorTabProps) {
+function EditorTabInner({ tab, active, onUpdate, onRegister, onImagePaste, onMediaPreview }: EditorTabProps) {
+  const previewRef = useRef(onMediaPreview);
+  previewRef.current = onMediaPreview;
   const onUpdateRef = useRef(onUpdate);
   onUpdateRef.current = onUpdate;
   const onRegisterRef = useRef(onRegister);
@@ -48,6 +52,7 @@ function EditorTabInner({ tab, active, onUpdate, onRegister, onImagePaste }: Edi
       createEditor(root, initialContentRef.current, {
         onUpdate: (u) => onUpdateRef.current(tabIdRef.current, u),
         resolveImageSource: (url) => resolveImageSource(tabIdRef.current, url),
+        onMediaPreview: (media) => previewRef.current?.(media),
         captureImagePaste: () => {
           const current = activity.current;
           return () => activity.current === current;

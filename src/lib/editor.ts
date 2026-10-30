@@ -14,8 +14,9 @@ import {
   undoDepth,
   redoDepth,
 } from '@milkdown/prose/history';
-import { Plugin, TextSelection } from '@milkdown/prose/state';
-import { commonmark, imageSchema } from '@milkdown/kit/preset/commonmark';
+import { Plugin, PluginKey, Selection } from '@milkdown/prose/state';
+import { commonmark, imageSchema, headingIdGenerator } from '@milkdown/kit/preset/commonmark';
+import { Transform } from '@milkdown/prose/transform';
 import { gfm } from '@milkdown/kit/preset/gfm';
 import { history } from '@milkdown/kit/plugin/history';
 
@@ -29,14 +30,19 @@ import { computeStats } from './stats';
 import { taskListPlugin } from './tasklist';
 import { firstClipboardImage } from './sourcePaste';
 import { configureMarkdownSchemas } from './markdownSchemas';
+import { imageLayoutPlugin } from './imageLayout';
+import { imageView } from './imageView';
+import type { MediaPreview } from './media';
 import type { EditorUpdate, OutlineItem } from './types';
 
+const synchronization = new PluginKey<boolean>('mdplus-synchronization');
 /** 编辑器更新回调 */
 export interface EditorCallbacks {
   onUpdate: (update: EditorUpdate) => void;
   onImagePaste?: (file: File) => Promise<string>;
   resolveImageSource?: (url: string) => string;
   captureImagePaste?: () => () => boolean;
+  onMediaPreview?: (media: MediaPreview) => void;
 }
 
 /** 从 ProseMirror doc 提取标题大纲 */
@@ -74,8 +80,14 @@ export function createEditor(root: HTMLElement, content: string, callbacks: Edit
     // Milkdown 的 listener 会防抖 200ms，不能作为保存/关闭的内容源。
     // view.update 在事务提交后同步执行；仅 UI 渲染仍由 App 节流。
     .use($prose((ctx) => new Plugin({
+      key: synchronization,
+      state: {
+        init: () => false,
+        apply: (transaction) => transaction.getMeta(synchronization) === true,
+      },
       view: () => ({
         update: (view, previous) => {
+          if (synchronization.getState(view.state)) return;
           if (view.state.doc.eq(previous.doc)) return;
           const markdown = ctx.get(serializerCtx)(view.state.doc);
           callbacks.onUpdate({
@@ -90,30 +102,12 @@ export function createEditor(root: HTMLElement, content: string, callbacks: Edit
     .use(math)
     .use(prism)
     .use(nord as unknown as import('@milkdown/kit/ctx').MilkdownPlugin)
-    .use(mermaidPlugin)
+    .use(mermaidPlugin(callbacks.onMediaPreview))
     .use($prose(() => searchPlugin))
+    .use($prose(() => imageLayoutPlugin))
     .use($prose(() => taskListPlugin));
 
-  if (callbacks.resolveImageSource) {
-    editor.use($view(imageSchema.node, () => (node) => {
-      const dom = document.createElement('img');
-      const render = (image: typeof node) => {
-        // Keep document URLs relative; only the rendered image uses cached bytes.
-        dom.src = callbacks.resolveImageSource!(image.attrs.src);
-        dom.alt = image.attrs.alt ?? '';
-        dom.title = image.attrs.title ?? '';
-      };
-      render(node);
-      return {
-        dom,
-        update: (next) => {
-          if (next.type !== node.type) return false;
-          render(next);
-          return true;
-        },
-      };
-    }));
-  }
+  editor.use($view(imageSchema.node, () => imageView(callbacks.resolveImageSource ?? ((src) => src), callbacks.onMediaPreview)));
 
   // 添加图片粘贴支持
   if (callbacks.onImagePaste) {
@@ -177,19 +171,48 @@ export function getCurrentState(editor: Editor): EditorUpdate {
   return { markdown, outline, stats: computeStats(markdown), canUndo, canRedo };
 }
 
-/** 用 Markdown 字符串替换整个文档内容(用于外部重新加载 / 源码模式切换) */
-export function setMarkdown(editor: Editor, markdown: string): void {
+/** 局部同步 Markdown，不抢焦点；调用方接收派生状态，避免把同步当成新输入。 */
+export function setMarkdown(editor: Editor, markdown: string, addToHistory = true): EditorUpdate {
   editor.action((ctx: Ctx) => {
     const parser = ctx.get(parserCtx);
     const view = ctx.get(editorViewCtx);
-    const doc = parser(markdown);
-    if (!doc) return;
-    const tr = view.state.tr.replaceWith(0, view.state.doc.content.size, doc.content);
-    // 光标定位到新文档开头(不能复用旧文档的 selection)
-    tr.setSelection(TextSelection.atStart(tr.doc));
+    const parsed = parser(markdown);
+    if (!parsed) return;
+    const normalized = new Transform(parsed);
+    const headingId = ctx.get(headingIdGenerator.key);
+    parsed.descendants((node, pos) => {
+      if (node.type.name === 'heading') normalized.setNodeMarkup(pos, undefined, { ...node.attrs, id: headingId(node) });
+    });
+    const doc = normalized.doc;
+    if (doc.eq(view.state.doc)) return;
+    const scroller = view.dom.closest<HTMLElement>('.milkdown-container');
+    const top = scroller?.scrollTop;
+    const left = scroller?.scrollLeft;
+    // Saving pasted images changes attributes, not document structure or selection.
+    let tr = view.state.tr;
+    view.state.doc.descendants((node, pos) => {
+      if (node.type.name !== 'image') return;
+      const next = doc.nodeAt(pos);
+      if (next?.type === node.type && !next.eq(node)) tr.setNodeMarkup(pos, undefined, next.attrs, next.marks);
+    });
+    if (tr.doc.eq(doc)) {
+      tr.setSelection(Selection.fromJSON(tr.doc, view.state.selection.toJSON()));
+    } else {
+      const start = view.state.doc.content.findDiffStart(doc.content);
+      const end = view.state.doc.content.findDiffEnd(doc.content);
+      if (start == null || !end) return;
+      const overlap = start - Math.min(end.a, end.b);
+      if (overlap > 0) { end.a += overlap; end.b += overlap; }
+      tr = view.state.tr.replace(start, end.a, doc.slice(start, end.b));
+    }
+    tr.setMeta(synchronization, true).setMeta('addToHistory', addToHistory);
     view.dispatch(tr);
-    view.focus();
+    if (scroller && top !== undefined && left !== undefined) {
+      scroller.scrollTop = top;
+      scroller.scrollLeft = left;
+    }
   });
+  return getCurrentState(editor);
 }
 
 /** 撤销 */

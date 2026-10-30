@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
@@ -10,6 +10,9 @@ import { Toolbar } from './components/Toolbar';
 import { TabBar } from './components/TabBar';
 import { OutlinePanel } from './components/OutlinePanel';
 import { StatusBar } from './components/StatusBar';
+import { RecoveryModal } from './components/RecoveryModal';
+import { MediaViewer } from './components/MediaViewer';
+import type { MediaPreview } from './lib/media';
 import { EditorTab } from './components/EditorTab';
 import { SearchBar } from './components/SearchBar';
 import { NewFileModal } from './components/NewFileModal';
@@ -18,8 +21,9 @@ import { CloseConfirmModal } from './components/CloseConfirmModal';
 import { RecentMenu } from './components/RecentMenu';
 import { SourceEditor } from './components/SourceEditor';
 import { readFile, writeFile, fileMtime, pickOpenFile, pickSaveFile, basename } from './lib/fileOps';
-import { clearPendingImages, commitImageMigration, migratePendingImages, saveImage, loadImageReferences } from './lib/imageOps';
-import { exportHTML, exportPDF } from './lib/export';
+import { clearPendingImages, commitImageMigration, migratePendingImages, saveImage, loadImageReferences, resolveImageSource } from './lib/imageOps';
+import { captureExport, exportHTML, exportPDF } from './lib/export';
+import { refreshMermaidTheme } from './lib/mermaid';
 import { IconBrand } from './components/icons';
 import {
   getRecentFiles,
@@ -46,15 +50,21 @@ import {
 } from './lib/shortcuts';
 import { getTemplate } from './lib/templates';
 import { setMarkdown, undo, redo } from './lib/editor';
+import { rebaseSourcePlace, renderedPlace, restoreRendered, restoreSource, sourcePlace, toRendered, toSource,
+  type ModeExchange, type RenderedPlace, type SourcePlace } from './lib/editorPosition';
+import type { PendingImageReference } from './lib/imagePaths';
 import { computeStats } from './lib/stats';
 import { showMessage, confirmDialog } from './lib/dialog';
-import { refreshMermaidTheme } from './lib/mermaid';
+import { applyTheme } from './lib/theme';
 import { errorMessage } from './lib/errors';
 import { startupView } from './lib/startup';
 import { bindEditorZoomControls, nextEditorZoom, readEditorZoom, writeEditorZoom } from './lib/editorZoom';
 import { clampToVisibleDisplays, windowStateToPersist, type DisplayWorkArea } from './lib/windowState';
 import { readOutlineWidth, writeOutlineWidth } from './lib/outlineWidth';
 import { cycleTabIndex, type TabWheelDirection } from './lib/tabWheel';
+import { BODY_FONTS, CODE_FONTS, readBodyFont, readCodeFont, writeBodyFont, writeCodeFont, type BodyFont, type CodeFont } from './lib/editorFont';
+import { clearRecovery, listRecovery, protectPastedImage, restoreRecovery, scheduleRecovery,
+  type RecoveryEntry, type RecoveryStatus } from './lib/recovery';
 import type { RecentFile, Tab, ThemeMode, EditorUpdate } from './lib/types';
 import './styles/global.css';
 
@@ -91,6 +101,8 @@ export default function App() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [themeMode, setThemeModeState] = useState<ThemeMode>('light');
   const [sourceMode, setSourceMode] = useState(false);
+  const [mediaPreview, setMediaPreview] = useState<MediaPreview | null>(null);
+  useEffect(() => { setMediaPreview(null); }, [activeId, sourceMode]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [outlineWidth, setOutlineWidth] = useState(readOutlineWidth);
@@ -98,7 +110,6 @@ export default function App() {
   const [recentMenuOpen, setRecentMenuOpen] = useState(false);
   const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
   const [pendingCloseTab, setPendingCloseTab] = useState<Tab | null>(null);
-  const [sourceText, setSourceText] = useState('');
   const [fileDialogBusy, setFileDialogBusy] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [startupResolved, setStartupResolved] = useState(() => !isTauri());
@@ -106,6 +117,14 @@ export default function App() {
   // 快捷键表先用默认值渲染,启动后由已保存的绑定覆盖,避免首帧闪断
   const [shortcuts, setShortcuts] = useState<ShortcutBindings>(DEFAULT_SHORTCUTS);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [codeFont, setCodeFont] = useState(readCodeFont);
+  const [recoveryEntries, setRecoveryEntries] = useState<RecoveryEntry[]>([]);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const [recoveryStates, setRecoveryStates] = useState<Record<string, RecoveryStatus>>({});
+  const [bodyFont, setBodyFont] = useState(readBodyFont);
+  const [exporting, setExporting] = useState(false);
+  const exportBusy = useRef(false);
+  useEffect(() => { void refreshMermaidTheme(); }, [bodyFont]);
 
   // 编辑器实例注册表,避免每次输入都重渲染
   const editorRegistry = useRef<Record<string, Editor | null>>({});
@@ -134,6 +153,150 @@ export default function App() {
 
   const editorAreaRef = useRef<HTMLElement | null>(null);
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeId) ?? null, [tabs, activeId]);
+  const sourceRegistry = useRef<Record<string, HTMLTextAreaElement | null>>({});
+  const sourceRewrites = useRef<Record<string, PendingImageReference[]>>({});
+  const positions = useRef<Record<string, { sourceMode?: boolean; source?: SourcePlace; rendered?: RenderedPlace; exchange?: ModeExchange }>>({});
+  const enteringSource = useRef(false);
+  const fontPosition = useRef<{ id: string; source?: SourcePlace; rendered?: RenderedPlace } | null>(null);
+  const syncEditor = useCallback((id: string, markdown: string, history = true) => {
+    const editor = editorRegistry.current[id];
+    if (!editor) return;
+    const update = setMarkdown(editor, markdown, history);
+    if (update) tabMirror.current[id] = { ...update, markdown, stats: computeStats(markdown) };
+  }, []);
+  const rememberActive = useCallback(() => {
+    const { activeId: id, sourceMode: source } = currentView.current;
+    if (!id) return;
+    const saved = positions.current[id] ??= {};
+    saved.sourceMode = source;
+    const input = sourceRegistry.current[id];
+    const editor = editorRegistry.current[id];
+    if (source && input) saved.source = sourcePlace(input);
+    else if (editor) saved.rendered = renderedPlace(editor);
+  }, []);
+  const selectTab = useCallback((id: string | null) => {
+    if (currentView.current.activeId === id) return;
+    rememberActive();
+    setActiveId(id);
+    setSourceMode(id ? positions.current[id]?.sourceMode ?? false : false);
+  }, [rememberActive]);
+  const registerSource = useCallback((id: string, input: HTMLTextAreaElement | null) => {
+    sourceRegistry.current[id] = input;
+  }, []);
+  const captureFontPosition = useCallback(() => {
+    rememberActive();
+    const { activeId: id, sourceMode: source } = currentView.current;
+    if (id) {
+      const saved = positions.current[id];
+      fontPosition.current = { id, source: source ? saved?.source : undefined, rendered: source ? undefined : saved?.rendered };
+    }
+  }, [rememberActive]);
+  const changeBodyFont = useCallback((font: BodyFont) => {
+    if (font === bodyFont) return;
+    captureFontPosition(); setBodyFont(font);
+  }, [bodyFont, captureFontPosition]);
+  const changeCodeFont = useCallback((font: CodeFont) => {
+    if (font === codeFont) return;
+    captureFontPosition(); setCodeFont(font);
+  }, [codeFont, captureFontPosition]);
+
+  useLayoutEffect(() => {
+    const body = BODY_FONTS.find((font) => font.id === bodyFont)!;
+    const code = CODE_FONTS.find((font) => font.id === codeFont)!;
+    // Dialogs, drag overlays and the error fallback share these document-wide roles.
+    const style = document.documentElement.style;
+    style.setProperty('--font-body', `${body.family}, var(--font-sans)`);
+    style.setProperty('--body-strong-weight', String(body.strongWeight));
+    style.setProperty('--font-code', `${code.family}, var(--font-mono)`);
+  }, [bodyFont, codeFont]);
+
+  useLayoutEffect(() => {
+    const saved = fontPosition.current;
+    fontPosition.current = null;
+    if (!saved || saved.id !== activeId) return;
+    const restore = () => {
+      const input = sourceRegistry.current[saved.id];
+      const editor = editorRegistry.current[saved.id];
+      if (input && saved.source) restoreSource(input, saved.source);
+      if (editor && saved.rendered) restoreRendered(editor, saved.rendered);
+    };
+    restore();
+    let cancelled = false;
+    const cancel = () => { cancelled = true; };
+    for (const event of ['wheel', 'keydown', 'pointerdown', 'input']) window.addEventListener(event, cancel, true);
+    const body = BODY_FONTS.find((font) => font.id === bodyFont)!;
+    const families = [body.family, ...CODE_FONTS.find((font) => font.id === codeFont)!.family.split(', ')];
+    void Promise.allSettled([...families.map((family) => document.fonts.load(`400 16px ${family}`, '中文 Mixed')),
+      document.fonts.load(`${body.strongWeight} 16px ${body.family}`, '中文 Bold')])
+      .then(() => { if (!cancelled) restore(); });
+    return () => {
+      cancelled = true;
+      for (const event of ['wheel', 'keydown', 'pointerdown', 'input']) window.removeEventListener(event, cancel, true);
+    };
+  }, [bodyFont, codeFont, activeId, sourceMode]);
+
+  useLayoutEffect(() => {
+    if (!activeId) return;
+    const input = sourceRegistry.current[activeId];
+    const editor = editorRegistry.current[activeId];
+    const saved = positions.current[activeId] ??= {};
+    const markdown = tabMirror.current[activeId]?.markdown ?? activeTab?.markdown ?? '';
+    if (sourceMode && input) {
+      if (enteringSource.current && editor) {
+        // The source component first applies any newer rendered draft in its layout effect.
+        queueMicrotask(() => {
+          if (currentView.current.activeId !== activeId || !currentView.current.sourceMode || !input.isConnected) return;
+          toSource(editor, markdown, input, saved.exchange);
+          saved.exchange = { markdown, source: sourcePlace(input), rendered: renderedPlace(editor) };
+          saved.source = sourcePlace(input);
+        });
+      } else if (saved.source) restoreSource(input, saved.source);
+    } else if (editor) {
+      syncEditor(activeId, markdown);
+      if (saved.rendered) restoreRendered(editor, saved.rendered);
+    }
+    enteringSource.current = false;
+  }, [activeId, sourceMode]);
+  const recoveryInitialized = useRef(false);
+  const protectDraft = useCallback((tab: Tab) => {
+    scheduleRecovery({ ...tab, markdown: tabMirror.current[tab.id]?.markdown ?? tab.markdown }, (status) => {
+      if (tabsRef.current.some((current) => current.id === tab.id)) {
+        setRecoveryStates((previous) => ({ ...previous, [tab.id]: status }));
+      }
+    });
+  }, []);
+  const cleanRecovery = useCallback(async (id: string) => {
+    const generation = contentGenerations.current[id];
+    try {
+      await clearRecovery(id);
+      if (contentGenerations.current[id] === generation) {
+        setRecoveryStates((previous) => ({ ...previous, [id]: 'idle' }));
+      }
+      return true;
+    } catch {
+      setRecoveryStates((previous) => ({ ...previous, [id]: 'error' }));
+      return false;
+    }
+  }, []);
+
+  const refreshRecovery = useCallback(async () => {
+    try {
+      setRecoveryEntries(await listRecovery(tabsRef.current.map((tab) => tab.id)));
+    } catch {
+      await showMessage('无法读取恢复副本，请检查应用数据目录的可用空间和权限。未删除任何文档。', 'error');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isTauri() || recoveryInitialized.current) return;
+    recoveryInitialized.current = true;
+    void listRecovery().then((entries) => {
+      setRecoveryEntries(entries);
+      if (entries.length) setRecoveryOpen(true);
+    }).catch(() => {
+      void showMessage('无法读取恢复副本，请检查应用数据目录的可用空间和权限。', 'error');
+    });
+  }, []);
 
   useEffect(() => {
     const area = editorAreaRef.current;
@@ -145,6 +308,11 @@ export default function App() {
     writeEditorZoom(editorZoom);
   }, [editorZoom]);
 
+  useEffect(() => {
+    writeCodeFont(codeFont);
+  }, [codeFont]);
+  useEffect(() => { writeBodyFont(bodyFont); }, [bodyFont]);
+
   /* ---------- 主题与偏好初始化 ---------- */
   useEffect(() => {
     void getThemeMode().then(setThemeModeState);
@@ -153,18 +321,15 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
     const apply = () => {
-      const media = window.matchMedia('(prefers-color-scheme: dark)');
       const resolved = themeMode === 'system' ? (media.matches ? 'dark' : 'light') : themeMode;
-      document.documentElement.dataset.theme = resolved;
+      applyTheme(resolved);
     };
     apply();
     void setThemeMode(themeMode);
-    refreshMermaidTheme(); // 让已渲染的 mermaid 图表跟随主题重绘
-    const media = window.matchMedia('(prefers-color-scheme: dark)');
-    const listener = () => apply();
-    media.addEventListener('change', listener);
-    return () => media.removeEventListener('change', listener);
+    media.addEventListener('change', apply);
+    return () => media.removeEventListener('change', apply);
   }, [themeMode]);
 
   /* ---------- 最近打开初始化 ---------- */
@@ -197,30 +362,40 @@ export default function App() {
   }, []);
 
   const addTab = useCallback(
-    (init: { title: string; path: string | null; isNew: boolean; content: string; mtime?: number }, id: string = makeId()) => {
+    (init: { title: string; path: string | null; isNew: boolean; content: string; mtime?: number; recovered?: boolean }, id: string = makeId()) => {
       const tab: Tab = {
         id,
         title: init.title,
         path: init.path,
         isNew: init.isNew,
-        dirty: false,
+        dirty: !!init.recovered,
         externalMtime: init.mtime ?? 0,
         externalChanged: false,
         initialContent: init.content,
-        savedContent: init.content,
+        savedContent: init.recovered ? '' : init.content,
         markdown: init.content,
         stats: computeStats(init.content),
       };
       contentGenerations.current[id] = 0;
       tabsRef.current = [...tabsRef.current, tab];
       setTabs([...tabsRef.current]);
-      setActiveId(id);
+      selectTab(id);
       setSearchOpen(false);
       setSourceMode(false);
       return id;
     },
-    [],
+    [selectTab],
   );
+
+  const handleRestore = useCallback(async (id: string) => {
+    if (tabsRef.current.some((tab) => tab.id === id)) return;
+    const snapshot = await restoreRecovery(id);
+    addTab({ title: `${basename(snapshot.title).replace(/\.md$/i, '')} (恢复).md`,
+      path: null, isNew: true, content: snapshot.markdown, recovered: true }, id);
+    setRecoveryEntries((entries) => entries.filter((entry) => entry.id !== id));
+    setRecoveryOpen(false);
+    setRecoveryStates((previous) => ({ ...previous, [id]: 'protected' }));
+  }, [addTab]);
 
   const removeTab = useCallback((id: string) => {
     // 同步更新 tabsRef,确保关闭窗口流程里 onCloseRequested 能读到最新状态,
@@ -234,14 +409,17 @@ export default function App() {
     delete blockedExternalMtime.current[id];
     externalPrompts.current.delete(id);
     clearPendingImages(id);
+    delete positions.current[id];
+    delete sourceRegistry.current[id];
+    delete sourceRewrites.current[id];
     const timer = saveTimers.current[id];
     if (timer) clearTimeout(timer);
     delete saveTimers.current[id];
-    setActiveId((cur) => {
-      if (cur !== id) return cur;
-      const remaining = tabsRef.current.filter((t) => t.id !== id);
-      return remaining.length ? remaining[remaining.length - 1].id : null;
-    });
+    if (currentView.current.activeId === id) {
+      const next = tabsRef.current[tabsRef.current.length - 1];
+      setSourceMode(next ? positions.current[next.id]?.sourceMode ?? false : false);
+      setActiveId(next?.id ?? null);
+    }
   }, []);
 
   const closeTabRequest = useCallback(
@@ -249,13 +427,21 @@ export default function App() {
       // 从 tabsRef 读取,保证输入节流期间未落定到 state 的 dirty 也能被正确拦截
       const tab = tabsRef.current.find((t) => t.id === id);
       if (!tab) return;
-      if (tab.dirty) {
+      if (tab.dirty || (tab.isNew && !!tab.markdown.trim())) {
         setPendingCloseTab(tab);
       } else {
-        removeTab(id);
+        const generation = contentGenerations.current[id];
+        void cleanRecovery(id).then((clean) => {
+          const current = tabsRef.current.find((item) => item.id === id);
+          if (current && contentGenerations.current[id] !== generation) {
+            protectDraft(current);
+            setPendingCloseTab(current);
+          } else if (clean) removeTab(id);
+          else void showMessage('无法清理恢复副本，本次关闭已取消。请重试。', 'error');
+        });
       }
     },
-    [removeTab],
+    [removeTab, cleanRecovery, protectDraft],
   );
 
   // 关闭窗口流程:拦截 close 事件后,逐个确认未保存标签,全部处理完再真正关闭
@@ -297,7 +483,7 @@ export default function App() {
    * 获取标签页当前内容的权威镜像。
    * tabMirror 由编辑器事务回调(渲染模式)与 handleSourceChange(源码模式)同步更新,
    * 始终为最新内容;避免从编辑器实例读取时拿到源码模式下未同步的陈旧内容,
-   * 也避免 setTimeout 闭包捕获旧渲染的 sourceText 而丢最后一次输入。
+   * 避免定时器闭包中的旧内容丢失最后一次输入。
    */
   const resolveContent = useCallback((tab: Tab): string => {
     return tabMirror.current[tab.id]?.markdown ?? tab.markdown;
@@ -306,16 +492,25 @@ export default function App() {
   /**
    * 将图片迁移后的内容同步回编辑器实例、内容镜像与源码视图。
    * 仅在确认「写入期间没有新编辑」后调用;迁移未改变内容时直接返回。
-   * 源码模式下同步 setSourceText,避免另存为后 textarea 仍显示旧的 data URL 占位,
+   * 源码模式下同步内容镜像,避免另存为后 textarea 仍显示旧占位,
    * 否则下一次源码编辑会用过期文本覆写镜像、把迁移结果静默回退。
    */
   const applyMigratedContent = useCallback(
     (tabId: string, migratedContent: string, originalContent: string): void => {
       if (migratedContent === originalContent) return;
-      const editor = editorRegistry.current[tabId];
-      if (editor) setMarkdown(editor, migratedContent);
-      const view = currentView.current;
-      if (view.sourceMode && view.activeId === tabId) setSourceText(migratedContent);
+      syncEditor(tabId, migratedContent, false);
+      const saved = positions.current[tabId];
+      const references = sourceRewrites.current[tabId] ?? [];
+      if (saved?.source) {
+        saved.source = rebaseSourcePlace(saved.source, originalContent, migratedContent, references);
+      }
+      if (saved?.exchange?.markdown === originalContent) {
+        const exchange = saved.exchange;
+        exchange.source = rebaseSourcePlace(exchange.source, originalContent, migratedContent, references);
+        exchange.markdown = migratedContent;
+        const editor = editorRegistry.current[tabId];
+        if (editor) exchange.rendered.doc = renderedPlace(editor).doc;
+      }
       tabMirror.current[tabId] = {
         ...(tabMirror.current[tabId] ?? {
           markdown: migratedContent,
@@ -328,7 +523,7 @@ export default function App() {
         stats: computeStats(migratedContent),
       };
     },
-    [],
+    [syncEditor],
   );
 
   const handleSaveAsFor = useCallback(
@@ -373,6 +568,7 @@ export default function App() {
           (contentGenerations.current[tab.id] ?? 0) !== contentGeneration;
         if (!contentChangedDuringWrite) {
           commitImageMigration(migration);
+          sourceRewrites.current[tab.id] = migration.references ?? [];
           applyMigratedContent(tab.id, migratedContent, content);
         }
         const latestContent = resolveContent(latestBeforeWrite);
@@ -387,6 +583,11 @@ export default function App() {
           dirty: contentChangedDuringWrite ? latestContent !== migratedContent : false,
         });
         delete blockedExternalMtime.current[tab.id];
+        if (!contentChangedDuringWrite) {
+          await cleanRecovery(tab.id);
+          const latest = tabsRef.current.find((item) => item.id === tab.id);
+          if (latest?.dirty) protectDraft(latest);
+        }
         await pushRecentFile(target, basename(target));
         setRecentFiles(await getRecentFiles());
         return true;
@@ -397,7 +598,7 @@ export default function App() {
         return false;
       }
     },
-    [resolveContent, updateTab, applyMigratedContent],
+    [resolveContent, updateTab, applyMigratedContent, cleanRecovery, protectDraft],
   );
 
   const performSave = useCallback(
@@ -497,6 +698,7 @@ export default function App() {
           (contentGenerations.current[id] ?? 0) !== contentGeneration;
         if (!contentChangedDuringWrite) {
           commitImageMigration(migration);
+          sourceRewrites.current[id] = migration.references ?? [];
           applyMigratedContent(id, content, rawContent);
         }
         const latest = contentChangedDuringWrite
@@ -510,6 +712,11 @@ export default function App() {
           savedContent: content,
         });
         delete blockedExternalMtime.current[id];
+        if (!contentChangedDuringWrite) {
+          await cleanRecovery(id);
+          const current = tabsRef.current.find((item) => item.id === id);
+          if (current?.dirty) protectDraft(current);
+        }
         return true;
       } catch (err) {
         if (!isCurrentSave()) return false;
@@ -518,7 +725,7 @@ export default function App() {
         return false;
       }
     },
-    [handleSaveAsFor, resolveContent, updateTab, applyMigratedContent],
+    [handleSaveAsFor, resolveContent, updateTab, applyMigratedContent, cleanRecovery, protectDraft],
   );
 
   const doSave = useCallback(
@@ -557,6 +764,16 @@ export default function App() {
         if (!saved || tabsRef.current.find((candidate) => candidate.id === tab.id)?.dirty) return;
       }
       const closedId = pendingCloseTab.id;
+      const closingGeneration = contentGenerations.current[closedId];
+      if (!await cleanRecovery(closedId)) {
+        await showMessage('无法清理恢复副本，本次关闭已取消。请重试。', 'error');
+        return;
+      }
+      if (contentGenerations.current[closedId] !== closingGeneration) {
+        const current = tabsRef.current.find((tab) => tab.id === closedId);
+        if (current) { protectDraft(current); setPendingCloseTab(current); }
+        return;
+      }
       setPendingCloseTab(null);
       removeTab(closedId);
       // 关闭窗口流程:继续处理下一个未保存标签,全部完成后真正关闭窗口
@@ -579,7 +796,7 @@ export default function App() {
         }
       }
     },
-    [pendingCloseTab, removeTab, doSave, persistWindowState],
+    [pendingCloseTab, removeTab, doSave, persistWindowState, cleanRecovery, protectDraft],
   );
 
   /* ---------- 打开 / 新建 ---------- */
@@ -588,7 +805,7 @@ export default function App() {
       const key = pathKey(path);
       const alreadyOpen = tabsRef.current.find((t) => t.path && pathKey(t.path) === key);
       if (alreadyOpen) {
-        setActiveId(alreadyOpen.id);
+        selectTab(alreadyOpen.id);
         return;
       }
       if (openingPaths.current.has(key)) return;
@@ -598,7 +815,7 @@ export default function App() {
         const mtime = await fileMtime(path);
         const existing = tabsRef.current.find((t) => t.path && pathKey(t.path) === key);
         if (existing) {
-          setActiveId(existing.id);
+          selectTab(existing.id);
         } else {
           // 先确定标签 id,把文档里的相对图片引用转成短 token,通过预览缓存显示,
           // 并登记为 pending,保存时再转回相对路径落盘。
@@ -619,7 +836,7 @@ export default function App() {
         openingPaths.current.delete(key);
       }
     },
-    [addTab],
+    [addTab, selectTab],
   );
 
   const handleOpen = useCallback(async () => {
@@ -744,44 +961,29 @@ export default function App() {
     await doSave(activeTab.id, true, true);
   }, [activeTab, doSave]);
 
-  const syncActiveEditorForExport = useCallback(
-    async (tab: Tab) => {
-      if (!sourceMode) return;
-      const editor = editorRegistry.current[tab.id];
-      if (!editor) return;
-      const markdown = resolveContent(tab);
-      setMarkdown(editor, markdown);
-      await new Promise<void>((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-      });
-    },
-    [resolveContent, sourceMode],
-  );
-
   /* ---------- 导出功能 ---------- */
-  const handleExportHTML = useCallback(async () => {
-    if (!activeTab) return;
+  const handleExport = useCallback(async (format: 'html' | 'pdf') => {
+    if (!activeTab || exportBusy.current) return;
+    exportBusy.current = true;
+    setExporting(true);
     try {
-      await syncActiveEditorForExport(activeTab);
-      const title = activeTab.title || '未命名';
-      await exportHTML(title);
-      await showMessage('HTML 导出成功', 'info');
+      const editor = editorRegistry.current[activeTab.id];
+      if (!editor) throw new Error('编辑器尚未就绪，请稍后重试');
+      const snapshot = captureExport(editor, resolveContent(activeTab), activeTab.title || '未命名', bodyFont, codeFont,
+        (src) => resolveImageSource(activeTab.id, src));
+      if (format === 'html') {
+        if (await exportHTML(snapshot)) await showMessage('HTML 导出成功', 'info');
+      } else await exportPDF(snapshot);
     } catch (err) {
-      console.error('导出 HTML 失败', err);
-      await showMessage(`导出 HTML 失败: ${errorMessage(err)}`, 'error');
+      console.error('导出失败', err);
+      await showMessage(`导出失败: ${errorMessage(err)}`, 'error');
+    } finally {
+      exportBusy.current = false;
+      setExporting(false);
     }
-  }, [activeTab, syncActiveEditorForExport]);
-
-  const handleExportPDF = useCallback(async () => {
-    if (!activeTab) return;
-    try {
-      await syncActiveEditorForExport(activeTab);
-      await exportPDF();
-    } catch (err) {
-      console.error('导出 PDF 失败', err);
-      await showMessage(`导出 PDF 失败: ${errorMessage(err)}`, 'error');
-    }
-  }, [activeTab, syncActiveEditorForExport]);
+  }, [activeTab, bodyFont, codeFont, resolveContent]);
+  const handleExportHTML = useCallback(() => handleExport('html'), [handleExport]);
+  const handleExportPDF = useCallback(() => handleExport('pdf'), [handleExport]);
 
   /* ---------- 编辑器更新回传 ---------- */
   const scheduleAutoSave = useCallback(
@@ -806,6 +1008,12 @@ export default function App() {
 
   const handleTabUpdate = useCallback(
     (id: string, update: EditorUpdate, isInitial = false) => {
+      if (isInitial && (contentGenerations.current[id] ?? 0) > 0) {
+        const latest = tabMirror.current[id]?.markdown;
+        if (latest !== undefined) syncEditor(id, latest);
+        scheduleTabRender(id);
+        return;
+      }
       tabMirror.current[id] = update;
       if (isInitial) {
         contentGenerations.current[id] ??= 0;
@@ -814,18 +1022,23 @@ export default function App() {
       }
       const prev = tabsRef.current.find((t) => t.id === id);
       // 以「最近一次保存成功的内容」为基线判定 dirty,避免编辑又回到打开时内容后误判为已保存
-      const dirty = isInitial ? false : prev ? update.markdown !== prev.savedContent : true;
+      const dirty = isInitial ? (prev?.dirty ?? false) : prev ? update.markdown !== prev.savedContent : true;
       tabsRef.current = tabsRef.current.map((t) =>
         t.id === id ? { ...t, markdown: update.markdown, stats: update.stats, dirty } : t,
       );
       if (isInitial) {
+        const tab = tabsRef.current.find((tab) => tab.id === id);
+        if (tab && (tab.dirty || (tab.isNew && !!tab.markdown.trim()))) protectDraft(tab);
         setTabs([...tabsRef.current]);
         return;
       }
       if (dirty) scheduleAutoSave(id);
+      const changed = tabsRef.current.find((tab) => tab.id === id);
+      if (changed && (dirty || changed.isNew)) protectDraft(changed);
+      else if (changed) void cleanRecovery(id);
       scheduleTabRender(id);
     },
-    [scheduleAutoSave, scheduleTabRender],
+    [scheduleAutoSave, scheduleTabRender, protectDraft, cleanRecovery, syncEditor],
   );
 
   const registerEditor = useCallback((id: string, editor: Editor | null) => {
@@ -836,6 +1049,8 @@ export default function App() {
   const handleImagePaste = useCallback(async (tabId: string, file: File): Promise<string> => {
     try {
       const imagePath = await saveImage(file, tabId);
+      await protectPastedImage(tabId, imagePath);
+      if (!tabsRef.current.some((tab) => tab.id === tabId)) return '';
       return imagePath;
     } catch (err) {
       console.error('保存图片失败', err);
@@ -856,41 +1071,32 @@ export default function App() {
   }, [activeId]);
 
   /* ---------- 源码模式 ---------- */
-  const sourceModeRef = useRef(false);
-
   const toggleSourceMode = useCallback(() => {
-    setSourceMode((prev) => {
-      const next = !prev;
-      if (next) setSearchOpen(false);
-      void setSourceModePref(next);
-      return next;
-    });
-  }, []);
-
-  // 退出源码模式:把所有标签的编辑器与各自最新镜像(tabMirror)对齐,
-  // 避免非 active 标签的编辑器停留在进入源码模式前的旧内容
-  useEffect(() => {
-    if (sourceMode === sourceModeRef.current) return;
-    sourceModeRef.current = sourceMode;
-    if (!sourceMode) {
-      for (const tab of tabsRef.current) {
-        const editor = editorRegistry.current[tab.id];
-        const latest = tabMirror.current[tab.id]?.markdown;
-        if (editor && latest !== undefined) setMarkdown(editor, latest);
+    const { activeId: id, sourceMode: wasSource } = currentView.current;
+    rememberActive();
+    if (id && wasSource) {
+      const tab = tabsRef.current.find((tab) => tab.id === id);
+      const input = sourceRegistry.current[id];
+      const editor = editorRegistry.current[id];
+      const markdown = tabMirror.current[id]?.markdown ?? tab?.markdown ?? '';
+      syncEditor(id, markdown);
+      if (input && editor) {
+        const saved = positions.current[id] ??= {};
+        toRendered(editor, markdown, input, saved.exchange);
+        saved.rendered = renderedPlace(editor);
+        saved.exchange = { markdown, source: sourcePlace(input), rendered: saved.rendered };
       }
+    } else {
+      enteringSource.current = true;
+      setSearchOpen(false);
     }
-  }, [sourceMode]);
-
-  // 源码模式下切换标签页时,载入对应文档内容
-  useEffect(() => {
-    if (!sourceMode) return;
-    const tab = tabsRef.current.find((t) => t.id === activeId);
-    if (tab) setSourceText(tabMirror.current[tab.id]?.markdown ?? tab.markdown);
-  }, [activeId, sourceMode]);
+    setSourceMode(!wasSource);
+    void setSourceModePref(!wasSource);
+  }, [rememberActive, syncEditor]);
 
   const handleSourceChange = useCallback(
-    (text: string) => {
-      setSourceText(text);
+    (id: string, text: string) => {
+      const activeId = id;
       if (activeId) {
         contentGenerations.current[activeId] = (contentGenerations.current[activeId] ?? 0) + 1;
         const prev = tabsRef.current.find((t) => t.id === activeId);
@@ -911,10 +1117,13 @@ export default function App() {
           t.id === activeId ? { ...t, markdown: text, stats, dirty } : t,
         );
         if (dirty) scheduleAutoSave(activeId);
-        scheduleTabRender(activeId);
+        const changed = tabsRef.current.find((tab) => tab.id === activeId);
+        if (changed && (dirty || changed.isNew)) protectDraft(changed);
+        else if (changed) void cleanRecovery(activeId);
+        setTabs([...tabsRef.current]);
       }
     },
-    [activeId, scheduleAutoSave, scheduleTabRender],
+    [scheduleAutoSave, protectDraft, cleanRecovery],
   );
 
   /* ---------- 大纲面板状态持久化 ---------- */
@@ -1068,10 +1277,8 @@ export default function App() {
             externalChanged: false,
             savedContent: content,
           });
-          const editor = editorRegistry.current[tabId];
-          if (editor) setMarkdown(editor, content);
-          const view = currentView.current;
-          if (view.sourceMode && view.activeId === tabId) setSourceText(content);
+          syncEditor(tabId, content);
+          setTabs([...tabsRef.current]);
         } else {
           // 保留本地内容时记录冲突 mtime,避免后续自动保存静默覆盖外部版本。
           blockedExternalMtime.current[tabId] = detectedMtime;
@@ -1098,7 +1305,7 @@ export default function App() {
         externalPrompts.current.delete(tabId);
       }
     },
-    [activeId, sourceMode, updateTab],
+    [activeId, sourceMode, updateTab, syncEditor],
   );
 
   // 切回后台已变化的标签时再询问,避免后台标签弹窗打断当前编辑。
@@ -1162,9 +1369,9 @@ export default function App() {
       const currentIndex = tabs.findIndex((t) => t.id === activeId);
       const nextIndex = cycleTabIndex(currentIndex, tabs.length, delta);
       if (nextIndex === null) return;
-      setActiveId(tabs[nextIndex]?.id ?? null);
+      selectTab(tabs[nextIndex]?.id ?? null);
     },
-    [activeId, tabs],
+    [activeId, tabs, selectTab],
   );
 
   const runShortcut = useCallback(
@@ -1231,7 +1438,7 @@ export default function App() {
       // 输入法组字中(e.key === 'Process' 覆盖部分中文输入法)不响应
       if (isComposingEvent(e) || e.getModifierState('AltGraph')) return;
       // 有模态框/确认对话框打开时不响应
-      if (newModalOpen || shortcutsOpen || pendingCloseTab) return;
+      if (newModalOpen || shortcutsOpen || pendingCloseTab || recoveryOpen || mediaPreview) return;
 
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
@@ -1259,6 +1466,8 @@ export default function App() {
     newModalOpen,
     shortcutsOpen,
     pendingCloseTab,
+    recoveryOpen,
+    mediaPreview,
     handleUndo,
     handleRedo,
     runShortcut,
@@ -1290,11 +1499,29 @@ export default function App() {
 
   /* ---------- 关闭窗口时确认未保存改动 ---------- */
   const beginWindowClose = useCallback(async () => {
+    setMediaPreview(null);
     if (pendingWindowClose.current) return;
-    const dirty = tabsRef.current.filter((tab) => tab.dirty);
+    const dirty = tabsRef.current.filter((tab) => tab.dirty || (tab.isNew && !!tab.markdown.trim()));
     if (dirty.length === 0) {
       try {
+        const cleaned = await Promise.all(tabsRef.current.map((tab) => cleanRecovery(tab.id)));
+        if (cleaned.some((success) => !success)) {
+          await showMessage('无法清理恢复副本，本次退出已取消。请重试。', 'error');
+          return;
+        }
+        const changed = tabsRef.current.find((tab) => tab.dirty || (tab.isNew && !!tab.markdown.trim()));
+        if (changed) {
+          protectDraft(changed);
+          setPendingCloseTab(changed);
+          return;
+        }
         await persistWindowState();
+        const editedDuringClose = tabsRef.current.find((tab) => tab.dirty || (tab.isNew && !!tab.markdown.trim()));
+        if (editedDuringClose) {
+          protectDraft(editedDuringClose);
+          setPendingCloseTab(editedDuringClose);
+          return;
+        }
         await getCurrentWindow().destroy();
       } catch (err) {
         console.error('关闭窗口失败', err);
@@ -1306,7 +1533,7 @@ export default function App() {
     pendingWindowClose.current = true;
     pendingCloseQueue.current = dirty.map((tab) => tab.id);
     setPendingCloseTab(dirty[0]);
-  }, [persistWindowState]);
+  }, [persistWindowState, cleanRecovery, protectDraft]);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -1352,8 +1579,9 @@ export default function App() {
   const view = startupView(startupResolved, tabs.length);
 
   return (
-    <div className="app">
+    <div className="app" data-body-font={bodyFont}>
       <Toolbar
+        exporting={exporting}
         onOpen={() => void handleOpen()}
         onNew={() => setNewModalOpen(true)}
         onSave={() => void handleSave()}
@@ -1378,7 +1606,7 @@ export default function App() {
       <TabBar
         tabs={tabs}
         activeId={activeId}
-        onSelect={setActiveId}
+        onSelect={selectTab}
         onClose={closeTabRequest}
         onNew={() => setNewModalOpen(true)}
         onWheelSwitch={cycleTab}
@@ -1446,6 +1674,7 @@ export default function App() {
                 onUpdate={handleTabUpdate}
                 onRegister={registerEditor}
                 onImagePaste={handleImagePaste}
+                onMediaPreview={setMediaPreview}
               />
             ))
           )}
@@ -1458,16 +1687,19 @@ export default function App() {
             />
           )}
 
-          {activeTab && sourceMode && (
+          {tabs.map((tab) => (
             <SourceEditor
-              key={activeTab.id}
-              tabId={activeTab.id}
-              value={sourceText}
-              onChange={handleSourceChange}
+              key={tab.id}
+              tabId={tab.id}
+              active={tab.id === activeId && sourceMode}
+              value={resolveContent(tab)}
+              onRegister={registerSource}
+              imageRewrites={sourceRewrites.current[tab.id]}
+              onChange={(text) => handleSourceChange(tab.id, text)}
               onClose={toggleSourceMode}
               onImagePaste={handleImagePaste}
             />
-          )}
+          ))}
         </main>
       </div>
 
@@ -1479,9 +1711,19 @@ export default function App() {
         saveState={activeSaveState}
         zoom={editorZoom}
         onResetZoom={() => setEditorZoom(100)}
+        bodyFont={bodyFont}
+        codeFont={codeFont}
+        onBodyFont={changeBodyFont}
+        onCodeFont={changeCodeFont}
+        recoveryStatus={activeId ? recoveryStates[activeId] : undefined}
+        onRecovery={() => { setRecoveryOpen(true); void refreshRecovery(); }}
       />
 
+      {mediaPreview && <MediaViewer media={mediaPreview} onClose={() => setMediaPreview(null)} />}
       {newModalOpen && <NewFileModal onCancel={() => setNewModalOpen(false)} onConfirm={handleNew} />}
+      {recoveryOpen && <RecoveryModal entries={recoveryEntries} onRestore={handleRestore}
+        onRemove={(id) => setRecoveryEntries((entries) => entries.filter((entry) => entry.id !== id))}
+        onClose={() => setRecoveryOpen(false)} />}
 
       {shortcutsOpen && (
         <ShortcutModal

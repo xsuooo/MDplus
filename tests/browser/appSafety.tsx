@@ -11,6 +11,9 @@ export const safetyCases = [
   'close-during-read', 'switch-during-read', 'source-during-read', 'render-during-read', 'disk-during-read',
   'image-save-stay', 'image-save-switch', 'image-saveas-switch', 'image-save-enter-source',
   'source-images-new', 'source-images-existing', 'source-images-toggle', 'source-images-save-failure',
+  'edit-during-window-close',
+  'source-save-selection', 'source-autosave-selection', 'rendered-save-selection', 'background-save-focus',
+  'source-save-wrapped-reference',
 ] as const;
 export type SafetyCase = typeof safetyCases[number];
 
@@ -64,11 +67,20 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     ['C:/notes/b.md', { content: 'other document\n', mtime: 100 }],
   ]);
   const imageCase = testCase.startsWith('image-save');
+  const continuityCase = ['source-save-selection', 'source-autosave-selection', 'rendered-save-selection', 'background-save-focus', 'source-save-wrapped-reference'].includes(testCase);
   const sourceImageCase = testCase.startsWith('source-images-');
   if (sourceImageCase) files.set('C:/notes/a.md', { content: '', mtime: 100 });
   if (imageCase) files.set('C:/notes/a.md', {
     content: 'document A\n\n![photo](./img/pic.png "caption")\n', mtime: 100,
   });
+  if (continuityCase) files.set('C:/notes/a.md', {
+    content: `![photo](./img/pic.png)\n\n${Array.from({ length: 50 }, (_, i) => `## Heading ${i}\n\n段落 ${i} mixed content ${'text '.repeat(30)}\n`).join('\n')}\n![photo](./img/last.png)\n`,
+    mtime: 100,
+  });
+  if (testCase === 'source-save-wrapped-reference') {
+    const file = files.get('C:/notes/a.md')!;
+    file.content = file.content.replace('./img/pic.png', `<./img/${'中文 深层目录/'.repeat(18)}photo.png>`);
+  }
   files.set('C:/export/a.md', { content: '', mtime: 100 });
   const store = new Map<string, unknown>();
   const writes: string[] = [];
@@ -91,6 +103,9 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
   let confirms = 0;
   let completedRead = false;
   let destroyed = 0;
+  const windowStateGate = deferred<void>();
+  let holdWindowState = false;
+  let awaitingWindowState = false;
   let openPath = 'C:/notes/b.md';
   let failWrite = testCase === 'source-images-save-failure';
 
@@ -99,6 +114,10 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
   mockIPC(async (command, payload) => {
     const args = (payload ?? {}) as Record<string, unknown>;
     switch (command) {
+      case 'list_recovery_snapshots': return [];
+      case 'cache_recovery_image':
+      case 'write_recovery_snapshot':
+      case 'delete_recovery_snapshot': return;
       case 'take_startup_files': return ['C:/notes/a.md'];
       case 'take_pending_open_files': return [];
       case 'plugin:store|load': return 1;
@@ -107,7 +126,9 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
       case 'plugin:store|save': return;
       case 'plugin:window|is_minimized': return false;
       case 'plugin:window|is_maximized': return false;
-      case 'plugin:window|inner_size': return { width: 1000, height: 700 };
+      case 'plugin:window|inner_size':
+        if (holdWindowState) { awaitingWindowState = true; await windowStateGate.promise; }
+        return { width: 1000, height: 700 };
       case 'plugin:window|outer_position': return { x: 0, y: 0 };
       case 'plugin:window|available_monitors': return [];
       case 'plugin:window|show':
@@ -118,7 +139,10 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
       case 'plugin:path|dirname': return String(args.path).replace(/\/[^/]+$/, '');
       case 'plugin:path|join': return (args.paths as string[]).join('/').replace('/./', '/');
       case 'read_image_file': {
-        if (!sourceImageCase) return { path: 'C:/notes/img/pic.png', mime: 'image/png', data: [65, 66, 67] };
+        if (!sourceImageCase) return {
+          path: continuityCase ? `C:/notes/${args.relativePath}` : 'C:/notes/img/pic.png',
+          mime: 'image/png', data: [65, 66, 67],
+        };
         const path = `C:/notes/${args.relativePath}`;
         check(binaries.has(path), `Image was not saved: ${path}`);
         return { path, mime: 'image/png', data: binaries.get(path) };
@@ -184,7 +208,79 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
   const source = () => click('button[title*="源码"]');
   const dirty = () => document.querySelector('.tab.active .tab-dot')?.getAttribute('data-dirty') === '1';
 
-  if (sourceImageCase) {
+  if (continuityCase) {
+    await document.fonts.ready;
+    const sourceCase = testCase.startsWith('source-');
+    if (sourceCase) {
+      source();
+      await until(() => document.querySelector('.source-editor:not([hidden]) textarea'), 'source editor');
+      const field = document.querySelector<HTMLTextAreaElement>('.source-editor:not([hidden]) textarea')!;
+      const extra = ' draft edit';
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, field.value + extra);
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const at = field.value.indexOf('段落 25');
+      field.focus(); field.setSelectionRange(at, at + 5, 'backward'); field.scrollTop = 1400;
+      const selected = field.value.slice(at, at + 5);
+      const top = field.scrollTop;
+      const height = field.scrollHeight;
+      field.dispatchEvent(new Event('select', { bubbles: true }));
+      field.dispatchEvent(new Event('scroll', { bubbles: true }));
+      if (testCase !== 'source-autosave-selection') save();
+      await until(() => writes.length > 0 && !dirty(), 'image references saved');
+      check(field.value.slice(field.selectionStart, field.selectionEnd) === selected,
+        `Image migration displaced the selected source text: ${JSON.stringify({ selected, actual: field.value.slice(field.selectionStart, field.selectionEnd), at: field.selectionStart, expected: field.value.indexOf(selected), sourceAt: at })}`);
+      const expectedTop = testCase === 'source-save-wrapped-reference' ? top + field.scrollHeight - height : top;
+      check(field.selectionDirection === 'backward' && Math.abs(field.scrollTop - expectedTop) <= 1, 'Image migration moved source viewport or direction');
+      check(document.activeElement === field, 'Save took focus from source');
+      field.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }));
+      await until(() => !field.value.endsWith(extra), 'source undo survived migration');
+      check(!field.value.includes('mdplus-image:'), 'Undo resurrected stale image placeholders');
+    } else {
+      const editor = document.querySelector<HTMLElement>('.editor-tab.active .ProseMirror')!;
+      const scroller = document.querySelector<HTMLElement>('.editor-tab.active .milkdown-container')!;
+      const paragraph = Array.from(editor.querySelectorAll('p')).find((p) => p.textContent?.startsWith('段落 25'))!;
+      editor.focus();
+      const range = document.createRange(); range.setStart(paragraph.firstChild!, 0); range.setEnd(paragraph.firstChild!, 5);
+      window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range);
+      document.dispatchEvent(new Event('selectionchange'));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      check(window.getSelection()?.toString() === '段落 25', 'Fixture did not establish rendered text selection');
+      scroller.scrollTop = 1700;
+      const top = scroller.scrollTop;
+      holdWrite = testCase === 'background-save-focus';
+      save();
+      if (holdWrite) {
+        await until(() => awaitingWrite, 'blocked background write');
+        click('button[title="打开 (Ctrl+O)"]');
+        await until(() => text().includes('other document'), 'other tab opened');
+        source();
+        await until(() => document.querySelector('.source-editor:not([hidden]) textarea'), 'other source');
+        const other = document.querySelector<HTMLTextAreaElement>('.source-editor:not([hidden]) textarea')!;
+        other.focus();
+        writeGate.resolve();
+        await until(() => !document.querySelector<HTMLButtonElement>('button[title^="保存 (Ctrl+S)"]')!.disabled, 'background save complete');
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        check(document.activeElement === other, 'Background image save stole the other tab focus');
+        click('[role="tab"]');
+        await until(() => document.querySelector('.editor-tab.active .ProseMirror')?.contains(paragraph), 'original tab restored');
+        check(scroller.scrollTop === top, 'Background image save lost the saved viewport');
+      } else {
+        await until(() => writes.length > 0 && !dirty(), 'rendered image save complete');
+        check(window.getSelection()?.toString() === '段落 25', 'Image migration lost rendered text selection');
+        check(scroller.scrollTop === top && document.activeElement === editor,
+          `Image migration jumped or stole focus: top ${scroller.scrollTop} expected ${top}, focus ${document.activeElement?.className}`);
+      }
+    }
+  } else if (testCase === 'edit-during-window-close') {
+    holdWindowState = true;
+    click('button[aria-label="关闭窗口"]');
+    await until(() => awaitingWindowState, 'pending close metadata');
+    await insert(' input while closing');
+    windowStateGate.resolve();
+    await until(() => document.querySelector('#close-document-title') || destroyed > 0, 'close outcome');
+    check(destroyed === 0 && text().includes('input while closing'), 'Window close lost input made during metadata persistence');
+  } else if (sourceImageCase) {
     if (testCase === 'source-images-new') {
       close();
       await until(() => !document.querySelector('[role="tab"]'), 'close initial document');
@@ -198,9 +294,9 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     check(labels.filter((label) => label === '保存').length === 1
       && labels.filter((label) => label === '另存为').length === 1, 'Duplicate Save As labels');
     source();
-    await until(() => document.querySelector('.source-textarea'), 'source editor');
+    await until(() => document.querySelector('.source-editor:not([hidden]) .source-textarea'), 'source editor');
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    const field = () => document.querySelector<HTMLTextAreaElement>('.source-textarea')!;
+    const field = () => document.querySelector<HTMLTextAreaElement>('.source-editor:not([hidden]) .source-textarea')!;
     const pixel = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j2ioAAAAASUVORK5CYII='), (c) => c.charCodeAt(0));
     for (let i = 0; i < 4; i++) {
       const input = field();
@@ -217,7 +313,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
       '.editor-tab.active .ProseMirror img:not(.ProseMirror-separator)'));
     if (testCase === 'source-images-toggle') {
       source();
-      await until(() => !document.querySelector('.source-textarea'), 'leave source before save');
+      await until(() => !document.querySelector('.source-editor:not([hidden]) .source-textarea'), 'leave source before save');
       await until(() => renderedImages().length === 4, 'four rendered images before save');
     }
     save();
@@ -235,7 +331,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     for (const url of getImageUrls(saved)) {
       check(binaries.get(`C:/notes/${url.replace(/^\.\//, '')}`)?.length === pixel.length, 'Saved image bytes are missing');
     }
-    if (document.querySelector('.source-textarea')) source();
+    if (document.querySelector('.source-editor:not([hidden]) .source-textarea')) source();
     await until(() => renderedImages().length === 4 && renderedImages().every((image) => image.naturalWidth > 0), 'four loaded previews');
     source();
     await until(() => getImageUrls(field()?.value ?? '').length === 4, 'images after mode round trip');
@@ -256,8 +352,8 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     check(document.querySelector('[role="tab"]'), 'F01: unsaved tab was removed');
   } else if (testCase === 'source-immediately') {
     await insert(' last character'); source();
-    await until(() => document.querySelector('.source-textarea'), 'source editor');
-    check(document.querySelector<HTMLTextAreaElement>('.source-textarea')?.value.includes('last character'), 'F01: source switch lost the last input');
+    await until(() => document.querySelector('.source-editor:not([hidden]) .source-textarea'), 'source editor');
+    check(document.querySelector<HTMLTextAreaElement>('.source-editor:not([hidden]) .source-textarea')?.value.includes('last character'), 'F01: source switch lost the last input');
   } else if (testCase === 'edit-during-save') {
     holdWrite = true;
     await insert(' saved edit'); save();
@@ -269,7 +365,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     close();
     await until(() => document.querySelector('[role="dialog"]'), 'newer input close warning');
   } else if (imageCase) {
-    const sourceText = () => document.querySelector<HTMLTextAreaElement>('.source-textarea')?.value;
+    const sourceText = () => document.querySelector<HTMLTextAreaElement>('.source-editor:not([hidden]) .source-textarea')?.value;
     const enteringSource = testCase === 'image-save-enter-source';
     const switchingTab = testCase === 'image-save-switch' || testCase === 'image-saveas-switch';
     if (!enteringSource) {
@@ -312,7 +408,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     holdMtime = testCase === 'edit-during-mtime';
     if (testCase === 'switch-during-read' || testCase === 'render-during-read') {
       source();
-      await until(() => document.querySelector('.source-textarea'), 'initial source mode');
+      await until(() => document.querySelector('.source-editor:not([hidden]) .source-textarea'), 'initial source mode');
     }
     files.set('C:/notes/a.md', { content: 'disk replacement\n', mtime: 200 });
     await until(() => confirms > 0, 'external reload confirmation');
@@ -329,10 +425,10 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
       click('button[title="打开 (Ctrl+O)"]');
       await until(() => text().includes('other document'), 'second document');
       source();
-      await until(() => document.querySelector<HTMLTextAreaElement>('.source-textarea')?.value.includes('other document'), 'second source');
+      await until(() => document.querySelector<HTMLTextAreaElement>('.source-editor:not([hidden]) .source-textarea')?.value.includes('other document'), 'second source');
       readGate.resolve();
       await until(() => host.textContent?.includes('disk replacement'), 'background reload complete');
-      check(document.querySelector<HTMLTextAreaElement>('.source-textarea')?.value.includes('other document'), 'F03: reload replaced the other tab source view');
+      check(document.querySelector<HTMLTextAreaElement>('.source-editor:not([hidden]) .source-textarea')?.value.includes('other document'), 'F03: reload replaced the other tab source view');
     } else if (testCase === 'disk-during-read') {
       files.set('C:/notes/a.md', { content: 'newer disk replacement\n', mtime: 300 });
       readGate.resolve();
@@ -341,13 +437,13 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
       check(writes.length === 0, 'F03: inconsistent read was saved');
     } else if (testCase === 'source-during-read') {
       source();
-      await until(() => document.querySelector('.source-textarea'), 'switch to source during read');
+      await until(() => document.querySelector('.source-editor:not([hidden]) .source-textarea'), 'switch to source during read');
       readGate.resolve();
       await until(() => host.textContent?.includes('disk replacement'), 'reload committed');
-      check(document.querySelector<HTMLTextAreaElement>('.source-textarea')?.value.includes('disk replacement'), 'F03: newly active source view kept stale content');
+      check(document.querySelector<HTMLTextAreaElement>('.source-editor:not([hidden]) .source-textarea')?.value.includes('disk replacement'), 'F03: newly active source view kept stale content');
     } else if (testCase === 'render-during-read') {
       source();
-      await until(() => !document.querySelector('.source-textarea'), 'switch to rendered mode during read');
+      await until(() => !document.querySelector('.source-editor:not([hidden]) .source-textarea'), 'switch to rendered mode during read');
       readGate.resolve();
       await until(() => text().includes('disk replacement'), 'reload after switching to rendered mode');
       check(!dirty(), 'F03: switching presentation invalidated an unchanged document');

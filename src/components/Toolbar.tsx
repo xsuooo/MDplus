@@ -1,6 +1,7 @@
 import { memo, useState, useEffect, useRef } from 'react';
 import { isComposingEvent } from '../lib/shortcuts';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { BUILD_LABEL } from '../lib/buildInfo';
 import {
   IconBrand,
   IconOpen,
@@ -36,6 +37,7 @@ interface ToolbarProps {
   hasActiveTab: boolean;
   activeIsNew: boolean;
   saving: boolean;
+  exporting?: boolean;
   onSearch: () => void;
   searchOpen: boolean;
   onToggleOutline: () => void;
@@ -59,6 +61,7 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
     hasActiveTab,
     activeIsNew,
     saving,
+    exporting,
     onSearch,
     searchOpen,
     onToggleOutline,
@@ -115,7 +118,7 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
 
   return (
     <header className="toolbar" data-tauri-drag-region>
-      <div className="toolbar-brand" title="MDPlus">
+      <div className="toolbar-brand" title={BUILD_LABEL}>
         <span className="toolbar-brand-logo" aria-hidden="true">
           <IconBrand size={18} />
         </span>
@@ -155,13 +158,13 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
             className="toolbar-btn toolbar-btn-secondary"
             onClick={() => setExportMenuOpen(!exportMenuOpen)}
             title="导出"
-            disabled={!hasActiveTab}
+            disabled={!hasActiveTab || exporting}
             aria-haspopup="menu"
             aria-expanded={exportMenuOpen && hasActiveTab}
             style={{ pointerEvents: 'auto' }}
           >
             <IconExport size={15} />
-            <span className="toolbar-btn-label">导出</span>
+            <span className="toolbar-btn-label">{exporting ? '导出中…' : '导出'}</span>
           </button>
           {exportMenuOpen && hasActiveTab && (
             <div className="toolbar-dropdown-menu" role="menu" style={{ pointerEvents: 'auto' }}>

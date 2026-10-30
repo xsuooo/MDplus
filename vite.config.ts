@@ -27,8 +27,8 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // Native build and sandbox evidence files can be exclusively locked on Windows.
+      ignored: ["**/src-tauri/**", "**/.audit/**"],
     },
   },
   // 4. code-split third-party deps into stable vendor chunks
