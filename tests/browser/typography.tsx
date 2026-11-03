@@ -1,12 +1,14 @@
 import { createRoot } from 'react-dom/client';
 import App from '../../src/App';
 import { ErrorBoundary } from '../../src/components/ErrorBoundary';
+import { CODE_FONTS } from '../../src/lib/editorFont';
 import '../../src/styles/global.css';
 
 export const typographyCases = [
   'typography-defaults', 'typography-independent-fonts', 'typography-layout',
   'typography-panel-keyboard', 'typography-persistence', 'typography-long-document',
   'typography-global-ui', 'typography-shortcut-fonts', 'typography-error-font',
+  'typography-comparison',
 ] as const;
 export type TypographyCase = typeof typographyCases[number];
 
@@ -89,9 +91,14 @@ function click(selector: string) {
   check(element, `Missing typography control: ${selector}`); element.click();
 }
 async function change(label: string, value: string) {
-  const select = document.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`);
-  check(select, `Missing ${label}`); select.value = value;
-  select.dispatchEvent(new Event('change', { bubbles: true }));
+  if (label === '源码与代码字体') {
+    const radio = document.querySelector<HTMLInputElement>(`input[name="code-font"][value="${value}"]`);
+    check(radio, `Missing code preset: ${value}`); radio.click();
+  } else {
+    const select = document.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`);
+    check(select, `Missing ${label}`); select.value = value;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  }
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   await document.fonts.ready;
 }
@@ -206,7 +213,8 @@ export async function runTypographyRegression(testCase: TypographyCase): Promise
       click('button[aria-label="排版设置"]');
       await until(() => document.querySelector('.typography-panel'));
       const panel = document.querySelector<HTMLElement>('.typography-panel')!;
-      check(panel.querySelectorAll('select').length === 2, 'Panel must expose both font roles');
+      check(panel.querySelectorAll('select').length === 1 && panel.querySelectorAll('input[type="radio"]').length === 3,
+        'Panel must expose a body selector and three code specimens');
       check(document.activeElement === panel.querySelector('select'), 'Panel did not focus its first control');
       panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
       await until(() => !document.querySelector('.typography-panel'));
@@ -230,9 +238,27 @@ export async function runTypographyRegression(testCase: TypographyCase): Promise
         await change('源码与代码字体', preset);
         check(getComputedStyle(editor).fontFamily === body, 'Code choice changed body font');
         check(source.value === original, 'Typography choice modified Markdown');
-        check(getComputedStyle(document.querySelector('.typography-preview-code')!).fontFamily === getComputedStyle(code).fontFamily,
+        check(getComputedStyle(document.querySelector('.font-option.selected .font-option-sample')!).fontFamily === getComputedStyle(code).fontFamily,
           'Code preview does not match document code');
       }
+    } else if (testCase === 'typography-comparison') {
+      const original = source.value;
+      click('button[aria-label="排版设置"]'); await until(() => document.querySelector('.typography-panel'));
+      await document.fonts.ready;
+      const specimens = Array.from(document.querySelectorAll<HTMLElement>('.font-option-sample'));
+      check(specimens.length === 3, 'The three font specimens are not visible together');
+      check(new Set(specimens.map((element) => element.textContent)).size === 1, 'Comparison uses different sample text');
+      for (const [index, font] of CODE_FONTS.entries()) {
+        check(getComputedStyle(specimens[index]).fontFamily.startsWith(font.family), `Specimen uses the UI font: ${font.id}`);
+        for (const family of font.family.split(', ')) {
+          const faces = await document.fonts.load(`14px ${family}`, '0O 1Il 中文注释');
+          check(faces.length && faces.every((face) => face.status === 'loaded'), `Specimen font not loaded: ${family}`);
+        }
+        await change('源码与代码字体', font.id);
+        check(document.querySelector<HTMLInputElement>(`input[value="${font.id}"]`)?.checked, 'Radio selection not applied');
+        check(document.querySelector('.typography-footer [role="status"]')?.textContent?.includes(font.purpose), 'Current scheme feedback is stale');
+      }
+      check(source.value === original, 'Font comparison edited the Markdown');
     } else if (testCase === 'typography-persistence') {
       check(getComputedStyle(editor).fontFamily.startsWith('"MDPlus MiSans"'), 'Legacy code setting leaked into body default');
       check(getComputedStyle(code).fontFamily.startsWith('"MDPlus Fira Code"'), 'Existing code preference was lost');

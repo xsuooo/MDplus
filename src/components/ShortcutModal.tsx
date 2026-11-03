@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { useDialogFocus } from '../lib/useDialogFocus';
+import { useIsPresent } from '../lib/presence';
 import {
   SHORTCUT_DEFINITIONS,
   applyShortcut,
@@ -32,6 +33,7 @@ interface ShortcutModalProps {
 
 export const ShortcutModal = memo(function ShortcutModal({ bindings, onChange, onClose }: ShortcutModalProps) {
   const dialogRef = useDialogFocus<HTMLDivElement>(onClose);
+  const present = useIsPresent();
   const [capturing, setCapturing] = useState<{ action: ShortcutAction; binding: string | null } | null>(null);
   const [conflict, setConflict] = useState<{ action: ShortcutAction; actions: ShortcutAction[] } | null>(null);
   const [hint, setHint] = useState<string | null>(null);
@@ -40,6 +42,7 @@ export const ShortcutModal = memo(function ShortcutModal({ bindings, onChange, o
   bindingsRef.current = bindings;
 
   useEffect(() => {
+    if (!present) { setCapturing(null); setConflict(null); setHint(null); return; }
     if (!capturing) return;
     const onKeyDown = (event: KeyboardEvent) => {
       // 输入法组字中:交给输入法,既不录制也不吞键
@@ -78,7 +81,7 @@ export const ShortcutModal = memo(function ShortcutModal({ bindings, onChange, o
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [capturing, onChange]);
+  }, [capturing, onChange, present]);
 
   const startCapture = (action: ShortcutAction, binding: string | null = null) => {
     setConflict(null);

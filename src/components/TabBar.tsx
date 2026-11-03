@@ -15,10 +15,22 @@ interface TabBarProps {
 export const TabBar = memo(function TabBar({ tabs, activeId, onSelect, onClose, onNew, onWheelSwitch }: TabBarProps) {
   const tabRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const barRef = useRef<HTMLDivElement | null>(null);
+  const stripRef = useRef<HTMLDivElement | null>(null);
   const wheelState = useRef({ ...TAB_WHEEL_INITIAL });
   const wheelHandler = useRef(onWheelSwitch);
   wheelHandler.current = onWheelSwitch;
   const tabCount = tabs.length;
+
+  useEffect(() => {
+    const tab = activeId ? tabRefs.current[activeId] : null;
+    const strip = stripRef.current;
+    if (!tab || !strip) return;
+    const box = tab.getBoundingClientRect();
+    const visible = strip.getBoundingClientRect();
+    const delta = box.left < visible.left ? box.left - visible.left : Math.max(0, box.right - visible.right);
+    if (delta) strip.scrollTo({ left: strip.scrollLeft + delta,
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
+  }, [activeId, tabCount]);
 
   // 滚轮监听需要 passive: false 才能阻止页面滚动,而 React 的 onWheel 是 passive 的,
   // 所以这里自己挂原生监听。
@@ -39,7 +51,7 @@ export const TabBar = memo(function TabBar({ tabs, activeId, onSelect, onClose, 
   }, [tabCount]);
 
   const focusTab = (id: string) => {
-    requestAnimationFrame(() => tabRefs.current[id]?.focus());
+    requestAnimationFrame(() => tabRefs.current[id]?.focus({ preventScroll: true }));
   };
 
   const selectRelative = (index: number, offset: number) => {
@@ -53,7 +65,7 @@ export const TabBar = memo(function TabBar({ tabs, activeId, onSelect, onClose, 
 
   return (
     <div className="tabbar" role="tablist" aria-label="打开的文档" ref={barRef}>
-      <div className="tabbar-tabs">
+      <div className="tabbar-tabs" ref={stripRef}>
         {tabs.map((tab, index) => (
           <div
             key={tab.id}
@@ -66,7 +78,7 @@ export const TabBar = memo(function TabBar({ tabs, activeId, onSelect, onClose, 
             title={tab.path ?? tab.title}
             tabIndex={tab.id === activeId ? 0 : -1}
             aria-selected={tab.id === activeId}
-            aria-label={`${tab.title}${tab.dirty || tab.isNew ? ',尚未保存' : ''}${tab.externalChanged ? ',文件已在外部修改' : ''}`}
+            aria-label={`${tab.title}${tab.path ? `,${tab.path}` : ',尚未保存到磁盘'}${tab.dirty || tab.isNew ? ',尚未保存' : ''}${tab.externalChanged ? ',文件已在外部修改' : ''}`}
             onKeyDown={(event) => {
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();

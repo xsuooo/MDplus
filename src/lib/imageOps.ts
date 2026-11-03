@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { join, dirname } from '@tauri-apps/api/path';
-import { getImageUrls, rewriteImageReferences, type PendingImageReference } from './imagePaths';
-import { basename, fileMtime, readImageFile } from './fileOps';
+import { getImageUrls, isRelativeImageUrl, rewriteImageReferences, type PendingImageReference } from './imagePaths';
+import { basename, readImageFile, type ImageReceipt } from './fileOps';
 
 interface PendingImage extends PendingImageReference {
   filename: string;
@@ -15,7 +15,45 @@ interface PendingImage extends PendingImageReference {
   source?: { url: string; absolutePath: string };
 }
 
-const pendingImages = new Map<string, PendingImage[]>();
+interface ImageCache {
+  images: Map<string, PendingImage>;
+  aliases: Map<string, string>;
+  generation: number;
+  docPath: string | null;
+}
+const imageCaches = new Map<string, ImageCache>();
+const imageListeners = new Map<string, Set<() => void>>();
+
+function cacheFor(tabId: string): ImageCache {
+  let cache = imageCaches.get(tabId);
+  if (!cache) {
+    cache = { images: new Map(), aliases: new Map(), generation: 0, docPath: null };
+    imageCaches.set(tabId, cache);
+  }
+  return cache;
+}
+
+function notifyImages(tabId: string): void {
+  for (const listener of [...(imageListeners.get(tabId) ?? [])]) {
+    try { listener(); } catch (error) { console.error('图片预览刷新失败', error); }
+  }
+}
+
+function changed(tabId: string, cache: ImageCache, notify = true): void {
+  cache.generation += 1;
+  if (notify) notifyImages(tabId);
+}
+
+/** Preview-only subscription: never dispatches an editor transaction. */
+export function subscribeImageSources(tabId: string, listener: () => void): () => void {
+  let listeners = imageListeners.get(tabId);
+  if (!listeners) { listeners = new Set(); imageListeners.set(tabId, listeners); }
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+    if (!listeners.size && imageListeners.get(tabId) === listeners) imageListeners.delete(tabId);
+  };
+}
 
 const IMAGE_EXTENSIONS: Record<string, string> = {
   'image/gif': 'gif',
@@ -59,40 +97,53 @@ function bytesToDataUrl(bytes: Uint8Array, mime: string): string {
   return `data:${mime};base64,${btoa(binary)}`;
 }
 
-function isExternalUrl(url: string): boolean {
-  return /^(?:mdplus-image:|https?:|data:|file:|[a-zA-Z]:[\\/]|\/|\/\/)/.test(url);
-}
-
 function rememberPendingImage(tabId: string, image: PendingImage): void {
-  const images = pendingImages.get(tabId) ?? [];
-  images.push(image);
-  pendingImages.set(tabId, images);
+  const cache = cacheFor(tabId);
+  cache.images.set(image.placeholder, image);
+  if (image.source) cache.aliases.set(image.source.url, image.placeholder);
+  changed(tabId, cache);
 }
 
 export function getPendingImages(tabId: string): PendingImage[] {
-  return [...(pendingImages.get(tabId) ?? [])];
+  const cache = imageCaches.get(tabId);
+  if (!cache) return [];
+  return [...cache.images.values()].map((image) => {
+    // A retired token still owns its immutable bytes, but its old disk URL may
+    // now refer to another image. Undo must copy those bytes rather than reuse it.
+    if (image.source && cache.aliases.get(image.source.url) !== image.placeholder) {
+      return { ...image, source: undefined };
+    }
+    return image;
+  });
 }
 
 export function restorePendingImages(tabId: string, images: {
   placeholder: string; filename: string; data: number[]; mime: string;
 }[]): void {
-  pendingImages.set(tabId, images.map((image) => ({
-    ...image,
-    relativePath: `./assets/${image.filename}`,
+  const cache: ImageCache = { images: new Map(), aliases: new Map(), generation: 0, docPath: null };
+  for (const image of images) cache.images.set(image.placeholder, {
+    ...image, relativePath: `./assets/${image.filename}`,
     preview: bytesToDataUrl(new Uint8Array(image.data), image.mime),
-  })));
+  });
+  imageCaches.set(tabId, cache);
+  notifyImages(tabId);
 }
 
 export function clearPendingImages(tabId: string): void {
-  pendingImages.delete(tabId);
+  imageCaches.delete(tabId);
+  notifyImages(tabId);
 }
 
 export function resolveImageSource(tabId: string, url: string): string {
-  const image = pendingImages.get(tabId)?.find((item) => item.placeholder === url || item.source?.url === url);
+  const cache = imageCaches.get(tabId);
+  const image = cache?.images.get(url) ?? cache?.images.get(cache.aliases.get(url) ?? '');
   return image?.preview ?? url;
 }
 
 interface ImageMigration {
+  tabId: string;
+  cache: ImageCache;
+  targetFilePath: string;
   markdown: string;
   references: PendingImageReference[];
   updates: { image: PendingImage; filename: string; source: { url: string; absolutePath: string } }[];
@@ -100,11 +151,20 @@ interface ImageMigration {
 
 /** 仅在文档写入成功后提交来源,失败的另存为不能改变后续迁移的基准目录。 */
 export function commitImageMigration(migration: ImageMigration): void {
+  const cache = imageCaches.get(migration.tabId);
+  if (!cache || cache !== migration.cache) return;
+  if (cache.docPath && !isSamePath(cache.docPath, migration.targetFilePath)) cache.aliases.clear();
   for (const { image, filename, source } of migration.updates) {
-    image.filename = filename;
-    image.relativePath = source.url;
-    image.source = source;
+    const current = cache.images.get(image.placeholder);
+    if (!current) continue;
+    if (current.source && cache.aliases.get(current.source.url) === current.placeholder) {
+      cache.aliases.delete(current.source.url);
+    }
+    cache.images.set(image.placeholder, { ...current, filename, relativePath: source.url, source });
+    cache.aliases.set(source.url, image.placeholder);
   }
+  cache.docPath = migration.targetFilePath;
+  changed(migration.tabId, cache);
 }
 
 /**
@@ -116,7 +176,9 @@ export async function migratePendingImages(
   targetFilePath: string,
   markdown: string,
 ): Promise<ImageMigration> {
+  const cache = cacheFor(tabId);
   const pending = getPendingImages(tabId);
+  const context = { tabId, cache, targetFilePath };
   const updates: ImageMigration['updates'] = [];
   const urls = new Set(getImageUrls(markdown));
   const knownTokens = new Set(pending.map((image) => image.placeholder));
@@ -125,20 +187,11 @@ export async function migratePendingImages(
       throw new Error(`图片数据已丢失,无法保存: ${url}`);
     }
   }
-  if (pending.length === 0) return { markdown, updates, references: [] };
+  if (pending.length === 0) return { ...context, markdown, updates, references: [] };
 
   const dir = await dirname(targetFilePath);
 
   const references: PendingImageReference[] = [];
-  let assetsDirReady = false;
-  const ensureAssetsDir = async (): Promise<string> => {
-    const assetsDir = await join(dir, 'assets');
-    if (!assetsDirReady) {
-      await invoke('create_directory', { path: assetsDir });
-      assetsDirReady = true;
-    }
-    return assetsDir;
-  };
 
   for (const image of pending) {
     const imageReferences = [image.placeholder, image.source?.url]
@@ -154,27 +207,22 @@ export async function migratePendingImages(
         for (const reference of imageReferences) {
           references.push({ placeholder: reference, relativePath: image.source.url });
         }
+        updates.push({ image, filename: image.filename, source: image.source });
         continue;
       }
     }
 
-    // 新粘贴的图,或另存为到别处、原相对引用已经失效的图:复制进 assets。
-    // 文件名去重,保证同名不同源的图各自留一份。
-    const assetsDir = await ensureAssetsDir();
-    const filename = await uniqueAssetName(assetsDir, image.filename);
-    const targetPath = await join(assetsDir, filename);
-    await invoke('save_binary_file', { path: targetPath, data: image.data });
-    for (const reference of imageReferences) {
-      references.push({ placeholder: reference, relativePath: `./assets/${filename}` });
-    }
-    updates.push({
-      image,
-      filename,
-      source: { url: `./assets/${filename}`, absolutePath: targetPath },
+    // Allocate and write in one native operation; per-tab queues cannot protect a shared assets directory.
+    const asset = await invoke<ImageReceipt>('save_image_asset', {
+      docPath: targetFilePath, filename: image.filename, data: image.data,
     });
+    for (const reference of imageReferences) {
+      references.push({ placeholder: reference, relativePath: asset.relativePath });
+    }
+    updates.push({ image, filename: asset.filename, source: { url: asset.relativePath, absolutePath: asset.path } });
   }
 
-  return { markdown: rewriteImageReferences(markdown, references), updates, references };
+  return { ...context, markdown: rewriteImageReferences(markdown, references), updates, references };
 }
 
 /**
@@ -190,72 +238,85 @@ function isSamePath(a: string, b: string): boolean {
   return normalize(a) === normalize(b);
 }
 
-/**
- * 在 assets 里挑一个还没被占用的文件名。同名不同源的图片因此不会互相覆盖:
- * pic.png 已存在时,第二张写成 pic-1.png。
- */
-async function uniqueAssetName(assetsDir: string, filename: string): Promise<string> {
-  const dot = filename.lastIndexOf('.');
-  const stem = dot > 0 ? filename.slice(0, dot) : filename;
-  const ext = dot > 0 ? filename.slice(dot) : '';
-  for (let attempt = 0; attempt < 1000; attempt += 1) {
-    const candidate = attempt === 0 ? filename : `${stem}-${attempt}${ext}`;
-    try {
-      await fileMtime(await join(assetsDir, candidate));
-    } catch {
-      return candidate;
-    }
-  }
-  return `${stem}-${Date.now()}${ext}`;
+export interface PreparedImageReferences {
+  markdown: string;
+  /** False means the tab/cache changed or this preparation was already consumed. */
+  commit: () => boolean;
 }
 
 /**
- * 将磁盘上已存在文档的相对图片引用转成短 token,显示数据仅存缓存。
- * 登记为 pending 后,保存时再转回相对路径并落盘。
- * 读不到的文件保留原引用(显示为加载失败),不阻断文档打开。
+ * Stage relative image reads without changing visible aliases, tokens or bytes.
+ * The caller checks document generation/path/native revision before committing.
+ * Only the per-tab lifetime record is reserved here, so closing an empty tab can
+ * invalidate an outstanding read. Source Markdown is always returned verbatim.
  */
-export async function loadImageReferences(
-  tabId: string,
-  markdown: string,
-  docPath: string,
-): Promise<string> {
-  const pending = getPendingImages(tabId);
-  const seen = new Set(pending.map((image) => image.relativePath));
-  const references: PendingImageReference[] = [];
-
-  for (const url of getImageUrls(markdown)) {
-    if (isExternalUrl(url)) continue;
+export async function prepareImageReferences(
+  tabId: string, markdown: string, docPath: string, options: { refresh?: boolean } = {},
+): Promise<PreparedImageReferences> {
+  const cache = cacheFor(tabId);
+  const generation = cache.generation;
+  const aliases = new Map(cache.aliases);
+  const images = new Map(cache.images);
+  const sameDocument = cache.docPath !== null && isSamePath(cache.docPath, docPath);
+  const staged = new Map<string, PendingImage | null>();
+  for (const url of new Set(getImageUrls(markdown))) {
+    if (!isRelativeImageUrl(url)) continue;
+    const existing = images.get(aliases.get(url) ?? '');
+    if (sameDocument && existing && !options.refresh) continue;
     const relativePath = url.replace(/^\.\//, '');
-    // 同一引用只处理一次,避免重复读文件与重复登记。
-    if (seen.has(url)) continue;
-    seen.add(url);
-
-    let bytes: number[];
-    let dataUrl: string;
-    let assetPath: string;
     try {
       const image = await readImageFile(docPath, relativePath);
-      assetPath = image.path;
-      bytes = image.data;
-      dataUrl = bytesToDataUrl(new Uint8Array(bytes), image.mime);
+      const preview = bytesToDataUrl(new Uint8Array(image.data), image.mime);
+      if (existing?.source && isSamePath(existing.source.absolutePath, image.path) && existing.preview === preview) {
+        staged.set(url, existing);
+      } else {
+        const placeholder = `mdplus-image:${imageId()}`;
+        staged.set(url, { placeholder, preview, relativePath: url, filename: basename(relativePath),
+          data: image.data, source: { url, absolutePath: image.path } });
+      }
     } catch {
-      continue;
+      // Failure is also a staged observation. Do not keep serving an obsolete
+      // live URL after commit, but keep its immutable token available for undo.
+      staged.set(url, null);
     }
-
-    const placeholder = `mdplus-image:${imageId()}`;
-    rememberPendingImage(tabId, {
-      placeholder,
-      preview: dataUrl,
-      // 原样保留作者写的引用。只有另存为到别的目录、这个引用不再指向同一
-      // 个文件时,migratePendingImages 才会把它复制进 assets 并改写路径。
-      relativePath: url,
-      filename: basename(relativePath),
-      data: bytes,
-      source: { url, absolutePath: assetPath },
-    });
-    references.push({ placeholder: url, relativePath: placeholder });
   }
+  let consumed = false;
+  return {
+    markdown,
+    commit: () => {
+      if (consumed || imageCaches.get(tabId) !== cache || cache.generation !== generation) return false;
+      consumed = true;
+      let visibleChange = false;
+      if (!sameDocument && cache.docPath !== null) {
+        visibleChange = cache.aliases.size > 0;
+        cache.aliases.clear();
+      }
+      for (const [url, image] of staged) {
+        if (image) {
+          visibleChange ||= cache.aliases.get(url) !== image.placeholder;
+          cache.images.set(image.placeholder, image);
+          cache.aliases.set(url, image.placeholder);
+        } else {
+          visibleChange = cache.aliases.delete(url) || visibleChange;
+        }
+      }
+      cache.docPath = docPath;
+      // Even an identical winning read must invalidate older pending results.
+      changed(tabId, cache, visibleChange);
+      return true;
+    },
+  };
+}
 
+/** First-open convenience: publish a checked cache, then tokenize only image URLs. */
+export async function loadImageReferences(tabId: string, markdown: string, docPath: string): Promise<string> {
+  const prepared = await prepareImageReferences(tabId, markdown, docPath, { refresh: true });
+  if (!prepared.commit()) throw new Error('图片缓存已在加载期间改变，请重新打开文档');
+  const cache = imageCaches.get(tabId)!;
+  const references = [...new Set(getImageUrls(markdown))].flatMap((url) => {
+    const token = cache.aliases.get(url);
+    return token ? [{ placeholder: url, relativePath: token }] : [];
+  });
   return rewriteImageReferences(markdown, references);
 }
 

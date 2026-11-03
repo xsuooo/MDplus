@@ -6,6 +6,24 @@ const MD_FILTERS = [
   { name: '所有文件', extensions: ['*'] },
 ];
 
+/** Shapes follow src-tauri/src/file_contract.json; document writes never fall back to write_file. */
+export interface DocumentSnapshot { content: string; revision: string; mtime: number }
+export interface RevisionState { revision: string | null; mtime: number | null }
+export interface WriteReceipt { revision: string; mtime: number; backupPath: string | null }
+export interface ImageReceipt { filename: string; relativePath: string; path: string }
+
+export async function readDocument(path: string): Promise<DocumentSnapshot> {
+  return invoke<DocumentSnapshot>('read_document', { path });
+}
+
+export async function documentRevision(path: string): Promise<RevisionState> {
+  return invoke<RevisionState>('document_revision', { path });
+}
+
+export async function writeDocument(path: string, content: string, expectedRevision: string | null): Promise<WriteReceipt> {
+  return invoke<WriteReceipt>('write_document', { path, content, expectedRevision });
+}
+
 /** 读取文件文本内容 */
 export async function readFile(path: string): Promise<string> {
   return invoke<string>('read_file', { path });

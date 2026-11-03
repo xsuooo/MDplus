@@ -6,8 +6,9 @@ import '../../src/styles/global.css';
 
 export const appearanceCases = [
   'images-centered', 'theme-system-light', 'theme-system-change', 'font-presets',
-  'theme-crossfade', 'theme-source-crossfade', 'theme-reduced-motion',
-  'theme-no-transition-api', 'theme-rapid-toggle', 'theme-quiet-dialog',
+  'theme-colors', 'theme-source-colors', 'theme-reduced-motion',
+  'theme-initial-render', 'theme-rapid-toggle', 'theme-quiet-dialog',
+  'theme-pointer-through',
 ] as const;
 export type AppearanceCase = typeof appearanceCases[number];
 
@@ -27,6 +28,19 @@ function click(selector: string) {
   const element = document.querySelector<HTMLButtonElement>(selector);
   check(element, `Missing control: ${selector}`);
   element.click();
+}
+
+function clickHit(selector: string) {
+  const control = document.querySelector<HTMLElement>(selector)!;
+  const box = control.getBoundingClientRect();
+  const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+  check(hit && control.contains(hit), `Theme animation intercepts pointer input: ${selector}`);
+  control.click();
+}
+
+async function settleAnimations() {
+  await new Promise(requestAnimationFrame);
+  await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => {})));
 }
 
 export async function runAppearanceRegression(testCase: AppearanceCase): Promise<string> {
@@ -62,24 +76,12 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
   }
 
   const nativeMatchMedia = window.matchMedia.bind(window);
-  const nativeTransition = document.startViewTransition?.bind(document);
-  const transitions: ViewTransition[] = [];
-  document.startViewTransition = testCase === 'theme-no-transition-api'
-    ? undefined as unknown as typeof document.startViewTransition
-    : (callback) => {
-      const transition = nativeTransition!(callback);
-      transitions.push(transition);
-      return transition;
-    };
   const media = new EventTarget();
   let dark = false;
   Object.assign(media, { media: '(prefers-color-scheme: dark)' });
   Object.defineProperty(media, 'matches', { get: () => dark });
   window.matchMedia = (query) => {
     if (query === '(prefers-color-scheme: dark)') return media as MediaQueryList;
-    if (query === '(prefers-reduced-motion: reduce)' && testCase === 'theme-reduced-motion') {
-      return { matches: true } as MediaQueryList;
-    }
     return nativeMatchMedia(query);
   };
   const host = document.createElement('div');
@@ -88,6 +90,13 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
   root.render(<App />);
   try {
     await until(() => document.querySelector('button[title="新建文档 (Ctrl+N)"]'));
+    if (testCase === 'theme-initial-render') {
+      check(document.documentElement.dataset.theme === 'light', 'Initial theme is not ready for first paint');
+      const surface = document.querySelector('.app')!;
+      check(getComputedStyle(surface).backgroundColor === 'rgb(238, 242, 245)', 'Initial surface is fading from an unthemed background');
+      check(!surface.getAnimations().some((animation) => animation instanceof CSSTransition), 'Initial theme has an unnecessary color entrance');
+      return `${testCase}: first layout has final colors without a theme entrance`;
+    }
     click('button[title="新建文档 (Ctrl+N)"]');
     await until(() => document.querySelector('.newfile-card'));
     if (testCase === 'theme-quiet-dialog') {
@@ -102,13 +111,12 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
     }
     click('.newfile-card:nth-child(2)');
     const ready = () => document.querySelector('.md-mermaid-holder img')
-      && !document.querySelector('.md-mermaid-node.loading')
-      && !document.documentElement.classList.contains('theme-transitioning');
+      && !document.querySelector('.md-mermaid-node.loading');
     await until(ready);
-    if (['theme-crossfade', 'theme-source-crossfade', 'theme-reduced-motion', 'theme-no-transition-api', 'theme-rapid-toggle'].includes(testCase)) {
+    if (['theme-colors', 'theme-source-colors', 'theme-reduced-motion', 'theme-rapid-toggle', 'theme-pointer-through'].includes(testCase)) {
       await document.fonts.ready;
-      transitions.length = 0;
-      if (testCase === 'theme-source-crossfade') {
+      await settleAnimations();
+      if (testCase === 'theme-source-colors' || testCase === 'theme-pointer-through') {
         click('button[aria-label="切换源码模式"]');
         await until(() => document.querySelector('.source-editor:not([hidden]) .source-textarea'));
       }
@@ -128,21 +136,53 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
         await until(() => document.querySelector('button[aria-label="切换主题,当前为跟随系统"]'));
         click('button[aria-label="切换主题,当前为跟随系统"]');
         await until(() => document.documentElement.dataset.theme === 'light' && ready());
-      } else if (testCase === 'theme-reduced-motion' || testCase === 'theme-no-transition-api') {
+      } else if (testCase === 'theme-reduced-motion') {
+        check(nativeMatchMedia('(prefers-reduced-motion: reduce)').matches, 'Runner must emulate the actual reduced-motion media feature');
         await until(() => document.documentElement.dataset.theme === 'dark' && ready());
-        check(transitions.length === 0, 'Reduced motion / unsupported engine started a snapshot animation');
+        check(parseFloat(getComputedStyle(document.querySelector('.editor-area')!).transitionDuration) <= 0.00001,
+          'Reduced-motion CSS still animates theme colors');
       } else {
-        check(transitions.length === 1, 'Theme did not start a single coordinated transition');
-        await transitions[0].ready;
+        const surface = document.querySelector('.editor-area')!;
+        const fade = surface.getAnimations().find((animation) => animation instanceof CSSTransition
+          && animation.transitionProperty === 'background-color');
+        check(fade?.effect?.getTiming().duration === 280 && fade.playState === 'running', 'Expected a live 280ms surface color transition');
+        check(getComputedStyle(surface).transitionTimingFunction.includes('cubic-bezier(0.22, 1, 0.36, 1)'), 'Theme easing differs from the shared motion curve');
+        if (testCase === 'theme-pointer-through') {
+          const box = source!.getBoundingClientRect();
+          check(document.elementFromPoint(box.left + 20, box.top + 20) === source, 'Live source editor is not hit-testable during theme feedback');
+          source!.focus();
+          Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(source, before + '\nTheme input remains live.');
+          source!.dispatchEvent(new Event('input', { bubbles: true }));
+          clickHit('button[aria-label="排版设置"]');
+          await new Promise(requestAnimationFrame);
+          check(document.querySelector('.typography-panel'), 'Theme transition swallowed the next control activation');
+          check(source!.value.endsWith('Theme input remains live.'), 'Theme feedback swallowed source editing');
+          clickHit('button[aria-label="关闭排版设置"]');
+          await settleAnimations();
+          clickHit('button[aria-label="切换主题,当前为深色"]');
+          await until(() => document.documentElement.dataset.theme === 'light');
+          check(surface.getAnimations().some((animation) => animation instanceof CSSTransition && animation.playState === 'running'),
+            'Search regression missed the in-progress return transition');
+          clickHit('button[aria-label="搜索当前文档"]');
+          await new Promise(requestAnimationFrame);
+          check(document.querySelector('.search-input'), 'Search could not open during the theme transition');
+          clickHit('button[aria-label="关闭搜索"]');
+          await settleAnimations();
+          return `${testCase}: live hit tests, typography, search and source input passed during the transition`;
+        }
         check(holder.querySelector('.md-mermaid-preview img')?.getBoundingClientRect().height,
-          'Snapshot lost the previous diagram while its font-aware replacement was loading');
-        const fade = document.getAnimations().find((animation) => (animation as CSSAnimation).animationName === 'theme-fade-out');
-        check(fade && fade.effect?.getTiming().duration === 280, 'Expected one 280ms theme crossfade');
-        check(getComputedStyle(document.querySelector('.editor-area')!).backgroundColor === 'rgb(21, 30, 39)',
-          'Panel transitions left the new snapshot in an intermediate color');
-        await transitions[0].finished;
+          'Theme refresh lost the old diagram while its replacement was loading');
+        for (const selector of source ? ['.source-editor-head'] : ['.ProseMirror', '.ProseMirror h1', '.ProseMirror strong', '.ProseMirror code', '.md-mermaid-holder']) {
+          const animations = document.querySelector(selector)!.getAnimations();
+          check(animations.some((animation) => animation instanceof CSSTransition && animation.effect?.getTiming().duration === 280),
+            `Explicit document color jumps instead of following the surface: ${selector}`);
+        }
+        await fade.finished;
         await until(ready);
       }
+      await settleAnimations();
+      const expectedBackground = testCase === 'theme-rapid-toggle' ? 'rgb(251, 252, 253)' : 'rgb(21, 30, 39)';
+      check(getComputedStyle(document.querySelector('.editor-area')!).backgroundColor === expectedBackground, 'Theme did not settle on the latest surface color');
       const afterBox = holder.getBoundingClientRect();
       check(initialBox.top === afterBox.top && initialBox.height === afterBox.height,
         `Theme animation moved the diagram: ${JSON.stringify(initialBox.toJSON())} => ${JSON.stringify(afterBox.toJSON())}`);
@@ -153,7 +193,6 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
         check(source.value === before && source.selectionStart === 24 && source.selectionEnd === 32,
           'Theme animation modified the source draft or selection');
       }
-      await until(() => !document.documentElement.classList.contains('theme-transitioning'));
       return `${testCase}: theme feedback, geometry, scroll and source draft passed`;
     }
     if (testCase === 'font-presets') {
@@ -165,9 +204,7 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
       click('button[aria-label="排版设置"]');
       await until(() => document.querySelector('.typography-panel'));
       for (const font of CODE_FONTS) {
-        const select = document.querySelector<HTMLSelectElement>('select[aria-label="源码与代码字体"]')!;
-        select.value = font.id;
-        select.dispatchEvent(new Event('change', { bubbles: true }));
+        document.querySelector<HTMLInputElement>(`input[name="code-font"][value="${font.id}"]`)!.click();
         await until(() => localStorage.getItem(CODE_FONT_STORAGE_KEY) === font.id);
         for (const family of font.family.split(', ')) {
           const faces = await document.fonts.load(`16px ${family}`, 'Hello 中文，标点');
@@ -212,6 +249,5 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
     root.unmount();
     host.remove();
     window.matchMedia = nativeMatchMedia;
-    document.startViewTransition = nativeTransition!;
   }
 }

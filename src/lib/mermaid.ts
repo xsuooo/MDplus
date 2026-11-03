@@ -29,18 +29,93 @@ const mermaidView = (onPreview?: (media: MediaPreview) => void): NodeViewConstru
 
   /* ---------- 非 mermaid:普通代码块 ---------- */
   if (lang !== 'mermaid') {
+    const dom = document.createElement('div');
+    dom.className = 'md-code-block';
+    const controls = document.createElement('div');
+    controls.className = 'md-code-controls';
+    controls.contentEditable = 'false';
+    const label = document.createElement('span');
+    label.className = 'md-code-language';
+    label.textContent = lang || '文本';
+    const status = document.createElement('span');
+    status.className = 'md-code-status';
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    status.setAttribute('aria-atomic', 'true');
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'md-code-copy';
+    copy.textContent = '复制';
+    copy.title = '复制代码块内容';
+    copy.setAttribute('aria-label', '复制代码块内容');
+    controls.append(label, status, copy);
     const pre = document.createElement('pre');
     const code = document.createElement('code');
     if (lang) code.className = `language-${lang}`;
     pre.appendChild(code);
+    dom.append(controls, pre);
+
+    let currentNode = node;
+    let isDestroyed = false;
+    let copying = false;
+    let resetTimer: ReturnType<typeof setTimeout> | undefined;
+    // Keep pointer copying out of the document selection and undo history.
+    controls.onmousedown = (event) => event.preventDefault();
+    copy.onclick = async () => {
+      if (copying || isDestroyed) return;
+      copying = true;
+      clearTimeout(resetTimer);
+      copy.setAttribute('aria-disabled', 'true');
+      copy.setAttribute('aria-busy', 'true');
+      copy.textContent = '复制中…';
+      delete copy.dataset.state;
+      status.textContent = '';
+      try {
+        await navigator.clipboard.writeText(currentNode.textContent);
+        if (isDestroyed) return;
+        copy.textContent = '已复制';
+        copy.dataset.state = 'copied';
+        copy.title = '已复制到剪贴板';
+        status.textContent = '代码块内容已复制到剪贴板';
+        resetTimer = setTimeout(() => {
+          copy.textContent = '复制';
+          copy.title = '复制代码块内容';
+          delete copy.dataset.state;
+          status.textContent = '';
+        }, 2000);
+      } catch {
+        if (isDestroyed) return;
+        copy.textContent = '复制失败';
+        copy.dataset.state = 'error';
+        copy.title = '请点击重试，或选中文本后按 Ctrl+C 复制';
+        status.textContent = '复制失败。请点击重试，或选中文本后按 Ctrl+C 复制。';
+      } finally {
+        copying = false;
+        if (!isDestroyed) {
+          copy.removeAttribute('aria-disabled');
+          copy.removeAttribute('aria-busy');
+        }
+      }
+    };
     return {
-      dom: pre,
+      dom,
       contentDOM: code,
       update(next: PMNode): boolean {
         const nextLang = String(next.attrs.language ?? '').toLowerCase();
-        if (nextLang === 'mermaid') return false; // 变成 mermaid,重建视图
+        if (next.type !== node.type || nextLang === 'mermaid') return false;
+        currentNode = next;
         code.className = nextLang ? `language-${nextLang}` : '';
+        label.textContent = nextLang || '文本';
         return true;
+      },
+      // View-owned attributes/chrome are not code edits; keep observing text and selection.
+      ignoreMutation: (mutation) => mutation.type !== 'selection'
+        && (mutation.type === 'attributes' || !code.contains(mutation.target)),
+      stopEvent: (event) => event.target instanceof Node && controls.contains(event.target),
+      destroy: () => {
+        isDestroyed = true;
+        clearTimeout(resetTimer);
+        copy.onclick = null;
       },
     };
   }
@@ -145,8 +220,10 @@ const mermaidView = (onPreview?: (media: MediaPreview) => void): NodeViewConstru
       if (fade && holder.querySelector('.md-mermaid-preview:not(.md-mermaid-preview-pending)')
         && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
         preview.classList.add('md-mermaid-preview-revealing');
+        const motion = getComputedStyle(dom);
         await preview.animate([{ opacity: 0 }, { opacity: 1 }],
-          { duration: 160, easing: 'ease-out', fill: 'forwards' }).finished.catch(() => {});
+          { duration: parseFloat(motion.getPropertyValue('--motion-enter')) || 220,
+            easing: motion.getPropertyValue('--ease-out').trim() || 'ease-out', fill: 'forwards' }).finished.catch(() => {});
         if (isDestroyed || token !== renderToken) { preview.remove(); return; }
         preview.classList.remove('md-mermaid-preview-revealing');
       }

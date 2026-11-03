@@ -1,7 +1,10 @@
 export const CODE_FONTS = [
-  { id: 'jetbrains-sarasa', label: 'JetBrains Mono + 更纱黑体', family: '"MDPlus JetBrains Mono", "MDPlus Sarasa Gothic SC"' },
-  { id: 'fira-wenkai', label: 'Fira Code + 霞鹜文楷', family: '"MDPlus Fira Code", "MDPlus LXGW WenKai"' },
-  { id: 'cascadia-misans', label: 'Cascadia Code + MiSans', family: '"MDPlus Cascadia Code", "MDPlus MiSans"' },
+  { id: 'jetbrains-sarasa', label: 'JetBrains Mono + 更纱黑体', family: '"MDPlus JetBrains Mono", "MDPlus Sarasa Gothic SC"',
+    purpose: '工程阅读', description: '字形利落，中文黑体克制，适合专注阅读代码。' },
+  { id: 'fira-wenkai', label: 'Fira Code + 霞鹜文楷', family: '"MDPlus Fira Code", "MDPlus LXGW WenKai"',
+    purpose: '中文注释', description: '代码搭配手写感中文，适合注释、笔记与教程。' },
+  { id: 'cascadia-misans', label: 'Cascadia Code + MiSans', family: '"MDPlus Cascadia Code", "MDPlus MiSans"',
+    purpose: '紧凑混排', description: '英文略紧凑，中文延续默认界面，适合日常混排。' },
 ] as const;
 
 export const BODY_FONTS = [

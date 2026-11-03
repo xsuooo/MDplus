@@ -73,6 +73,13 @@ Test-Case 'unsafe paths refused' {
     }
     Assert-Throws { Assert-SeparatePaths $root (Join-Path $root 'child') } 'Nested paths accepted'
 }
+Test-Case 'quoted NSIS install location is normalized without weakening path checks' {
+    Assert-True ((Get-NSISInstallPath ('"' + $root + '"')) -ceq $root) 'Quoted NSIS path was rejected'
+    Assert-True ((Get-NSISInstallPath $root) -ceq $root) 'Unquoted NSIS path changed'
+    foreach ($path in @('"C:\"', '"C:relative"', '"\\server\share"', ('"' + $root), ($root + '"'), ('""' + $root + '""'), ('"' + $root + '" /S'))) {
+        Assert-Throws { Get-NSISInstallPath $path } "Unsafe registry path accepted: $path"
+    }
+}
 Test-Case 'junction traversal refused' {
     $target = New-EmptyDirectory (Join-Path $root 'junction-target')
     $link = Join-Path $root 'junction-link'

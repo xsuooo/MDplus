@@ -25,6 +25,59 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+  browser:
+    name: Browser regression (native IPC mocked)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      # Keep the native CLI fixed; its npm package requires Node >=24.
+      AGENT_BROWSER_VERSION: '0.41.0'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Use Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '26.13.0'
+          cache: npm
+      - name: Install project dependencies
+        run: npm ci
+      - name: Check browser test types
+        run: npm run typecheck:browser
+      - name: List every requested browser case without starting services
+        run: ./scripts/windows/test-browser.ps1 -ListCases -Cases all
+      - name: Install pinned browser tooling in the disposable CI runner
+        run: |
+          $tools = Join-Path $env:RUNNER_TEMP 'mdplus-browser-tools'
+          npm install --prefix $tools --no-save --package-lock=false --no-audit --no-fund "agent-browser@$env:AGENT_BROWSER_VERSION"
+          if ($LASTEXITCODE -ne 0) { throw 'Browser tooling installation failed.' }
+          $package = Get-Content -LiteralPath (Join-Path $tools 'node_modules/agent-browser/package.json') -Raw | ConvertFrom-Json
+          if ($package.version -cne $env:AGENT_BROWSER_VERSION) { throw 'Unexpected browser tooling version.' }
+          $browser = Join-Path $tools 'node_modules/agent-browser/bin/agent-browser-win32-x64.exe'
+          if (!(Test-Path -LiteralPath $browser -PathType Leaf)) { throw 'Native browser runner is missing.' }
+          & $browser --version
+          if ($LASTEXITCODE -ne 0) { throw 'Browser runner version check failed.' }
+          & $browser install
+          if ($LASTEXITCODE -ne 0) { throw 'Browser binary installation failed.' }
+          "MDPLUS_BROWSER=$browser" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Run complete browser regression (not native app acceptance)
+        run: |
+          ./scripts/windows/test-browser.ps1 -Browser $env:MDPLUS_BROWSER -Cases all -EvidenceDirectory (Join-Path $env:GITHUB_WORKSPACE '.audit/browser-ci')
+      - name: Preserve browser outcomes and diagnostics even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-regression-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .audit/browser-ci/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
   rust:
     runs-on: windows-latest
     steps:

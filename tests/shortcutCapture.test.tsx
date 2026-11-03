@@ -30,6 +30,7 @@ vi.mock('react', async (original) => ({
   },
 }));
 vi.mock('../src/lib/useDialogFocus', () => ({ useDialogFocus: () => ({ current: null }) }));
+vi.mock('../src/lib/presence', () => ({ useIsPresent: () => true }));
 
 import { ShortcutModal } from '../src/components/ShortcutModal';
 

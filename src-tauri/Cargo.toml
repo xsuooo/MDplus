@@ -28,6 +28,9 @@ serde_json = "1"
 encoding_rs = "0.8"
 infer = "0.19"
 quick-xml = "0.41"
+# Already present in Cargo.lock via Tauri; also used directly for safe file receipts/staging.
+sha2 = "0.10.9"
+tempfile = "3.27.0"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }

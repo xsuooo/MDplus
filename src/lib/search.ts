@@ -34,24 +34,36 @@ function notifyCount(view: EditorView): void {
   countListeners.get(view)?.forEach((listener) => listener(count));
 }
 
-/** 在文档中收集所有匹配位置 */
+/** Literal search keeps UTF-16 offsets in the original text, including case-insensitive matches. */
+export function findTextMatches(text: string, keyword: string, caseSensitive: boolean): Match[] {
+  if (!keyword) return [];
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(escaped, caseSensitive ? 'gu' : 'giu');
+  return [...text.matchAll(pattern)].map((match) => ({ from: match.index, to: match.index + match[0].length }));
+}
+
+/** Adjacent text with different marks is one visible run; blocks and inline atoms remain boundaries. */
 function collectMatches(doc: PMNode, keyword: string, caseSensitive: boolean): Match[] {
   const matches: Match[] = [];
   if (!keyword) return matches;
-  const needle = caseSensitive ? keyword : keyword.toLowerCase();
-  doc.descendants((node, pos) => {
-    if (node.isText) {
-      const text = node.text ?? '';
-      const haystack = caseSensitive ? text : text.toLowerCase();
-      let idx = 0;
-      for (;;) {
-        const found = haystack.indexOf(needle, idx);
-        if (found === -1) break;
-        matches.push({ from: pos + found, to: pos + found + needle.length });
-        idx = found + needle.length;
+  doc.descendants((block, pos) => {
+    if (!block.isTextblock) return true;
+    let text = '';
+    let start = pos + 1;
+    const flush = () => {
+      for (const match of findTextMatches(text, keyword, caseSensitive)) {
+        matches.push({ from: start + match.from, to: start + match.to });
       }
-    }
-    return true;
+      text = '';
+    };
+    block.forEach((node, offset) => {
+      if (node.isText) {
+        if (!text) start = pos + 1 + offset;
+        text += node.text ?? '';
+      } else flush();
+    });
+    flush();
+    return false;
   });
   return matches;
 }
@@ -104,7 +116,7 @@ export const searchPlugin = new Plugin<SearchPluginState>({
       // 文档变化(输入等)时,若有关键词则实时重算
       if (prev.keyword && newState.doc !== _oldState.doc) {
         const matches = collectMatches(newState.doc, prev.keyword, prev.caseSensitive);
-        const current = matches.length ? Math.min(prev.current, matches.length - 1) : -1;
+        const current = matches.length ? Math.max(0, Math.min(prev.current, matches.length - 1)) : -1;
         return { ...prev, decor: buildDecor(newState.doc, matches, current), matches, current, count: matches.length };
       }
       return prev;

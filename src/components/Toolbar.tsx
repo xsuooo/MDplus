@@ -2,6 +2,7 @@ import { memo, useState, useEffect, useRef } from 'react';
 import { isComposingEvent } from '../lib/shortcuts';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { BUILD_LABEL } from '../lib/buildInfo';
+import { Presence } from '../lib/presence';
 import {
   IconBrand,
   IconOpen,
@@ -166,12 +167,12 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
             <IconExport size={15} />
             <span className="toolbar-btn-label">{exporting ? '导出中…' : '导出'}</span>
           </button>
-          {exportMenuOpen && hasActiveTab && (
+          <Presence present={exportMenuOpen && hasActiveTab}>
             <div className="toolbar-dropdown-menu" role="menu" style={{ pointerEvents: 'auto' }}>
               <button role="menuitem" onClick={() => { onExportHTML(); setExportMenuOpen(false); }}>导出为 HTML</button>
-              <button role="menuitem" onClick={() => { onExportPDF(); setExportMenuOpen(false); }}>导出为 PDF</button>
+              <button role="menuitem" title="在系统打印窗口选择 PDF 并确认保存；应用无法确认输出文件是否已保存" onClick={() => { onExportPDF(); setExportMenuOpen(false); }}>打印 / 另存为 PDF</button>
             </div>
-          )}
+          </Presence>
         </div>
       </div>
 

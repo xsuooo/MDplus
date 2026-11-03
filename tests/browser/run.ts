@@ -8,15 +8,20 @@ import { continuityCases, runContinuityRegression, type ContinuityCase } from '.
 import { typographyCases, runTypographyRegression, type TypographyCase } from './typography';
 import { mediaCases, runMediaRegression, type MediaCase } from './media';
 import { exportCases, runExportRegression, type ExportCase } from './export';
+import { interfaceCases, runInterfaceRegression, type InterfaceCase } from './interface';
+import { codeBlockCases, runCodeBlockRegression, type CodeBlockCase } from './codeBlock';
 
 const testCase = new URLSearchParams(location.search).get('case') ?? 'editor-sync';
 const result = document.createElement('pre');
 result.id = 'regression-result';
 result.dataset.status = 'running';
+result.hidden = true;
 document.body.append(result);
 try {
   if (testCase === 'editor-sync') {
     result.textContent = JSON.stringify(await runEditorSyncRegression());
+  } else if (codeBlockCases.includes(testCase as CodeBlockCase)) {
+    result.textContent = await runCodeBlockRegression(testCase as CodeBlockCase);
   } else if (exportCases.includes(testCase as ExportCase)) {
     result.textContent = await runExportRegression(testCase as ExportCase);
   } else if (mediaCases.includes(testCase as MediaCase)) {
@@ -35,6 +40,8 @@ try {
     result.textContent = await runMermaidCommitRegression(testCase as MermaidCase);
   } else if (safetyCases.includes(testCase as SafetyCase)) {
     result.textContent = await runAppSafetyRegression(testCase as SafetyCase);
+  } else if (interfaceCases.includes(testCase as InterfaceCase)) {
+    result.textContent = await runInterfaceRegression(testCase as InterfaceCase);
   } else {
     throw new Error(`Unknown regression case: ${testCase}`);
   }
@@ -42,4 +49,6 @@ try {
 } catch (error) {
   result.dataset.status = 'failed';
   result.textContent = error instanceof Error ? error.stack ?? error.message : String(error);
+} finally {
+  result.hidden = false;
 }

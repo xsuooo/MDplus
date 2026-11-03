@@ -34,7 +34,7 @@ Assert-Hash $reportPath $acceptance.reportSha256
 $installedExe = Join-Path $InstallDirectory 'mdplus.exe'
 if (!(Test-Path -LiteralPath $installedExe -PathType Leaf)) { throw 'Upgrade only: select the existing MDPlus installation.' }
 $registration = Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\MDPlus'
-if ((Get-LocalPath $registration.InstallLocation) -ine $InstallDirectory) { throw 'Install directory differs from the registered per-user installation.' }
+if ((Get-NSISInstallPath $registration.InstallLocation) -ine $InstallDirectory) { throw 'Install directory differs from the registered per-user installation.' }
 $roots = @{ installation = $InstallDirectory; roaming = Join-Path $env:APPDATA 'com.mdplus.desktop'; local = Join-Path $env:LOCALAPPDATA 'com.mdplus.desktop' }
 $roots.roaming = Get-LocalPath $roots.roaming; $roots.local = Get-LocalPath $roots.local
 Assert-SeparatePaths $InstallDirectory $roots.roaming

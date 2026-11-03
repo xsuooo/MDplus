@@ -10,7 +10,7 @@ interface StatusBarProps {
   themeMode: ThemeMode;
   onThemeMode: (mode: ThemeMode) => void;
   sourceMode: boolean;
-  saveState: 'idle' | 'saving' | 'unsaved' | 'dirty' | 'saved';
+  saveState: 'idle' | 'saving' | 'unsaved' | 'dirty' | 'saved' | 'paused';
   zoom: number;
   onResetZoom: () => void;
   bodyFont: BodyFont;
@@ -40,27 +40,33 @@ export const StatusBar = memo(function StatusBar({
   const saveLabel =
     saveState === 'saving'
       ? '保存中…'
-      : saveState === 'unsaved'
-        ? '待另存为'
-        : saveState === 'dirty'
-          ? '未保存'
-          : '已保存';
+      : saveState === 'paused'
+        ? '自动保存已暂停'
+        : saveState === 'unsaved'
+          ? '待另存为'
+          : saveState === 'dirty'
+            ? '未保存'
+            : '已保存';
 
   return (
     <footer className="statusbar">
       {tab ? (
         <div className="statusbar-left">
-          <span className="status-item">{tab.stats.words} 词</span>
-          <span className="status-sep">·</span>
-          <span className="status-item">{tab.stats.chars} 字符</span>
-          <span className="status-sep">·</span>
-          <span className="status-item">{tab.stats.lines} 行</span>
-          <span className="status-sep">·</span>
-          <span className={`status-item status-save status-save-${saveState}${saveState === 'dirty' ? ' dirty' : ''}`}>
+          <span className={`status-item status-save status-save-${saveState}${saveState === 'dirty' ? ' dirty' : ''}`}
+            role="status" title={saveState === 'paused' ? '按 Ctrl+S 确认磁盘版本，或另存为保留两份；恢复副本不等于正式保存。' : undefined}>
             {saveLabel}
           </span>
+          <span className="status-metrics">
+            <span className="status-sep">·</span>
+            <span className="status-item">{tab.stats.words} 词</span>
+            <span className="status-sep">·</span>
+            <span className="status-item">{tab.stats.chars} 字符</span>
+            <span className="status-sep">·</span>
+            <span className="status-item">{tab.stats.lines} 行</span>
+          </span>
           <span className="status-sep">·</span>
-          <span className="status-item">{sourceMode ? '源码模式' : '编辑模式'}</span>
+          <span className="status-item status-mode">{sourceMode ? '源码模式' : '编辑模式'}</span>
+          <span className="status-item status-file-identity" title={tab.path ?? '尚未保存到磁盘'}>{tab.path ?? '尚未保存到磁盘'}</span>
           {recoveryStatus && recoveryStatus !== 'idle' && (
             <span className={`status-item recovery-status-${recoveryStatus}`} role="status"
               title="本机恢复副本不是正式保存。包含原文和图片，未加密。">

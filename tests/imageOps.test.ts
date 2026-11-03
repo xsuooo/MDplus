@@ -26,7 +26,10 @@ const original = '![](./img/pic.png)';
 beforeEach(() => {
   clearPendingImages('tab');
   vi.clearAllMocks();
-  mocks.invoke.mockResolvedValue(undefined);
+  mocks.invoke.mockImplementation(async (command: string, args: { docPath: string; filename: string }) => {
+    if (command === 'save_image_asset') return { filename: args.filename, relativePath: `./assets/${args.filename}`,
+      path: path.win32.join(path.win32.dirname(args.docPath), 'assets', args.filename) };
+  });
   mocks.fileMtime.mockRejectedValue(new Error('not found'));
   mocks.readImageFile.mockResolvedValue({
     path: '\\\\?\\C:\\notes\\img\\pic.png',
@@ -71,8 +74,8 @@ describe('document image loading and migration', () => {
 
     const savedAs = await migratePendingImages('tab', 'D:\\new\\note.md', saved.markdown);
     expect(savedAs.markdown).toBe('![photo](./assets/pic.png "edited caption")');
-    expect(mocks.invoke).toHaveBeenCalledWith('save_binary_file', {
-      path: 'D:\\new\\assets\\pic.png', data: [65, 66, 67],
+    expect(mocks.invoke).toHaveBeenCalledWith('save_image_asset', {
+      docPath: 'D:\\new\\note.md', filename: 'pic.png', data: [65, 66, 67],
     });
   });
 
@@ -101,8 +104,8 @@ describe('document image loading and migration', () => {
     expect(display).toContain('[shared]: ./img/pic.png "caption"');
     const savedAs = await migratePendingImages('tab', 'D:\\new\\note.md', display);
     expect(savedAs.markdown).toBe('![photo](./assets/pic.png "caption") [download][shared]\n\n[shared]: ./img/pic.png "caption"');
-    expect(mocks.invoke).toHaveBeenCalledWith('save_binary_file', {
-      path: 'D:\\new\\assets\\pic.png', data: [65, 66, 67],
+    expect(mocks.invoke).toHaveBeenCalledWith('save_image_asset', {
+      docPath: 'D:\\new\\note.md', filename: 'pic.png', data: [65, 66, 67],
     });
   });
 
@@ -114,8 +117,8 @@ describe('document image loading and migration', () => {
     expect(savedAs.markdown).not.toContain('mdplus-image:');
     expect(savedAs.markdown).toContain('![photo](./assets/pic.png "one&#10;&#10;two")');
     expect(savedAs.markdown).toContain('[download][shared]');
-    expect(mocks.invoke).toHaveBeenCalledWith('save_binary_file', {
-      path: 'D:\\new\\assets\\pic.png', data: [65, 66, 67],
+    expect(mocks.invoke).toHaveBeenCalledWith('save_image_asset', {
+      docPath: 'D:\\new\\note.md', filename: 'pic.png', data: [65, 66, 67],
     });
   });
 
@@ -125,8 +128,8 @@ describe('document image loading and migration', () => {
     const savedAs = await migratePendingImages('tab', 'D:\\new\\note.md', markdown);
     expect(savedAs.markdown).toBe(markdown.replace(display, '![](./assets/pic.png)'));
     expect(savedAs.markdown).not.toContain('mdplus-image:');
-    expect(mocks.invoke).toHaveBeenCalledWith('save_binary_file', {
-      path: 'D:\\new\\assets\\pic.png', data: [65, 66, 67],
+    expect(mocks.invoke).toHaveBeenCalledWith('save_image_asset', {
+      docPath: 'D:\\new\\note.md', filename: 'pic.png', data: [65, 66, 67],
     });
   });
 
@@ -215,8 +218,8 @@ describe('document image loading and migration', () => {
     const savedAs = await migratePendingImages('tab', 'D:\\new\\note.md', saved.markdown);
     commitImageMigration(savedAs);
     expect(savedAs.markdown).toBe('![](./assets/pic.png)');
-    expect(mocks.invoke).toHaveBeenCalledWith('save_binary_file', {
-      path: 'D:\\new\\assets\\pic.png', data: [65, 66, 67],
+    expect(mocks.invoke).toHaveBeenCalledWith('save_image_asset', {
+      docPath: 'D:\\new\\note.md', filename: 'pic.png', data: [65, 66, 67],
     });
     mocks.invoke.mockClear();
     const repeated = await migratePendingImages('tab', 'D:\\new\\note.md', savedAs.markdown);
@@ -225,8 +228,8 @@ describe('document image loading and migration', () => {
 
     const third = await migratePendingImages('tab', 'E:\\third\\note.md', repeated.markdown);
     expect(third.markdown).toBe('![](./assets/pic.png)');
-    expect(mocks.invoke).toHaveBeenCalledWith('save_binary_file', {
-      path: 'E:\\third\\assets\\pic.png', data: [65, 66, 67],
+    expect(mocks.invoke).toHaveBeenCalledWith('save_image_asset', {
+      docPath: 'E:\\third\\note.md', filename: 'pic.png', data: [65, 66, 67],
     });
   });
 
@@ -242,7 +245,7 @@ describe('document image loading and migration', () => {
   it('leaves cached sources unchanged when an image migration fails', async () => {
     const display = await loadImageReferences('tab', original, document);
     mocks.invoke.mockImplementation(async (command: string) => {
-      if (command === 'save_binary_file') throw new Error('disk full');
+      if (command === 'save_image_asset') throw new Error('disk full');
     });
     await expect(migratePendingImages('tab', 'D:\\failed\\note.md', display)).rejects.toThrow('disk full');
     expect(resolveImageSource('tab', './assets/pic.png')).toBe('./assets/pic.png');
@@ -258,7 +261,7 @@ describe('document image loading and migration', () => {
     commitImageMigration(saved);
     const next = await migratePendingImages('tab', 'D:\\new\\note.md', `${saved.markdown}\n${display}`);
     expect(next.markdown).toBe('![](./assets/pic.png)\n![](./assets/pic.png)');
-    expect(mocks.invoke.mock.calls.filter(([command]) => command === 'save_binary_file')).toHaveLength(1);
+    expect(mocks.invoke.mock.calls.filter(([command]) => command === 'save_image_asset')).toHaveLength(1);
   });
 
   it('keeps different filenames when images have identical bytes', async () => {
@@ -275,7 +278,7 @@ describe('document image loading and migration', () => {
     expect(saved.markdown).toBe(markdown);
     const savedAs = await migratePendingImages('tab', 'D:\\new\\note.md', display);
     expect(savedAs.markdown).toBe('![](./assets/one.png)\n![](./assets/two.png)');
-    expect(mocks.invoke.mock.calls.filter(([command]) => command === 'save_binary_file')).toHaveLength(2);
+    expect(mocks.invoke.mock.calls.filter(([command]) => command === 'save_image_asset')).toHaveLength(2);
   });
 
   it('retains pasted image data after its first save', async () => {
@@ -297,8 +300,8 @@ describe('document image loading and migration', () => {
       mocks.invoke.mockClear();
       const next = await migratePendingImages('tab', 'D:\\new\\note.md', first.markdown);
       expect(next.markdown).toMatch(/^!\[\]\(\.\/assets\/image-.+\.png\)$/);
-      expect(mocks.invoke).toHaveBeenCalledWith('save_binary_file', expect.objectContaining({
-        path: expect.stringContaining('D:\\new\\assets\\image-'), data: [65, 66, 67],
+      expect(mocks.invoke).toHaveBeenCalledWith('save_image_asset', expect.objectContaining({
+        docPath: 'D:\\new\\note.md', filename: expect.stringMatching(/^image-.+\.png$/), data: [65, 66, 67],
       }));
     } finally {
       vi.unstubAllGlobals();

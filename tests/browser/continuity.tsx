@@ -9,8 +9,10 @@ import '../../src/styles/global.css';
 export const continuityCases = [
   'sync-identical', 'sync-image-attributes', 'sync-local-edit',
   'source-tab-history', 'mode-reading-anchor', 'mode-selection-roundtrip',
-  'font-source-position', 'rendered-tab-position',
-  'mode-formatted-blocks',
+  'font-source-position', 'font-pending-restore', 'font-pending-input', 'font-pending-wheel', 'font-pending-key',
+  'font-pending-pointer', 'font-pending-other-input', 'font-pending-other-radio', 'font-pending-radio-key',
+  'rendered-tab-position',
+  'mode-formatted-blocks', 'mode-input-isolation',
 ] as const;
 export type ContinuityCase = typeof continuityCases[number];
 export const longDocument = Array.from({ length: 35 }, (_, i) =>
@@ -85,6 +87,29 @@ export async function runContinuityRegression(testCase: ContinuityCase): Promise
     click('.newfile-card'); await until(() => document.querySelector('.ProseMirror'));
     click('button[aria-label="切换源码模式"]'); await until(() => document.querySelector('.source-editor:not([hidden]) .source-textarea'));
     let field = document.querySelector<HTMLTextAreaElement>('.source-editor:not([hidden]) .source-textarea')!;
+    if (testCase === 'mode-input-isolation') {
+      input(field, '```text\n题目内容\n```');
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      click('button[aria-label="切换源码模式"]');
+      await until(() => document.querySelector('.md-code-copy'));
+      const rendered = document.querySelector<HTMLElement>('.editor-tab.active')!;
+      const mirror = rendered.querySelector('.ProseMirror');
+      const copy = rendered.querySelector<HTMLButtonElement>('.md-code-copy')!;
+      const height = rendered.getBoundingClientRect().height;
+      click('button[aria-label="切换源码模式"]');
+      await until(() => document.querySelector('.source-editor:not([hidden])'));
+      check(rendered.inert && rendered.getAttribute('aria-hidden') === 'true', 'Source mode leaves covered editor controls in the input/accessibility tree');
+      field = document.querySelector<HTMLTextAreaElement>('.source-editor:not([hidden]) textarea')!;
+      field.focus(); copy.focus();
+      check(document.activeElement === field, 'Keyboard focus entered a hidden copy button');
+      check(rendered.getBoundingClientRect().height === height, 'Input isolation changed rendered-editor geometry');
+      click('button[aria-label="切换源码模式"]');
+      await until(() => !document.querySelector('.source-editor:not([hidden])'));
+      check(!rendered.inert && !rendered.hasAttribute('aria-hidden') && rendered.querySelector('.ProseMirror') === mirror, 'Mode change rebuilt or left the editor inaccessible');
+      copy.focus();
+      check(document.activeElement === copy, 'Copy button did not become accessible after returning to rendered mode');
+      return `${testCase}: source-mode focus isolation and editor identity/geometry passed`;
+    }
     if (testCase === 'mode-formatted-blocks') {
       const fixtures = [
         ['## Same heading\n\nFirst paragraph\n\n## Same heading\n\nSecond **目标文字** with 中文🙂.', '目标文字'],
@@ -112,23 +137,175 @@ export async function runContinuityRegression(testCase: ContinuityCase): Promise
     input(field, longDocument);
     await until(() => field.value === longDocument);
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    if (testCase.startsWith('font-pending-') || testCase === 'font-source-position') await document.fonts.ready;
     const selection = longDocument.indexOf('段落 17') + 5;
     field.setSelectionRange(selection, selection + 8, 'backward');
     field.dispatchEvent(new Event('select', { bubbles: true }));
     field.scrollTop = 1400;
     const sourceTop = field.scrollTop;
-    if (testCase === 'font-source-position') {
+    if (testCase.startsWith('font-pending-')) {
+      const snapshot = () => ({ scrollTop: field.scrollTop, start: field.selectionStart,
+        end: field.selectionEnd, direction: field.selectionDirection, text: field.value });
+      const expected = Object.freeze(snapshot());
+      check(expected.scrollTop === 1400 && expected.start === selection && expected.end === selection + 8
+        && expected.direction === 'backward' && expected.text === longDocument, 'Invalid pending-font source fixture');
       click('button[aria-label="排版设置"]');
       await until(() => document.querySelector('.typography-panel'));
-      for (const font of ['fira-wenkai', 'cascadia-misans', 'jetbrains-sarasa']) {
-        const select = document.querySelector<HTMLSelectElement>('select[aria-label="源码与代码字体"]')!;
-        select.value = font; select.dispatchEvent(new Event('change', { bubbles: true }));
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const radio = document.querySelector<HTMLInputElement>('input[name="code-font"]:not(:checked)')!;
+      const radioInputs: { type: string; trusted: boolean }[] = [];
+      const sourceInputs: { type: string; trusted: boolean; inputType: string }[] = [];
+      const observeInput = (event: Event) => {
+        if (event.target === radio) radioInputs.push({ type: event.type, trusted: event.isTrusted });
+        if (event.target === field) sourceInputs.push({ type: event.type, trusted: event.isTrusted,
+          inputType: event instanceof InputEvent ? event.inputType : '' });
+      };
+      const nativeLoad = document.fonts.load;
+      const loads: Promise<FontFace[]>[] = [];
+      const requests: { font: string; text?: string }[] = [];
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      document.fonts.load = (font, text) => {
+        const loaded = nativeLoad.call(document.fonts, font, text);
+        loads.push(loaded); requests.push({ font, text });
+        return loaded.then(async (faces) => { await gate; return faces; },
+          async (error) => { await gate; throw error; });
+      };
+      const sourceNavigation: { type: string; trusted: boolean }[] = [];
+      const observeNavigation = (event: Event) => {
+        if (event.target === field) sourceNavigation.push({ type: event.type, trusted: event.isTrusted });
+      };
+      for (const event of ['wheel', 'keydown', 'pointerdown']) window.addEventListener(event, observeNavigation, true);
+      window.addEventListener('input', observeInput, true);
+      try {
+        radio.click();
+        await until(() => loads.length > 0);
+        const beforeAdjustment = snapshot();
+        // Reproduce the observed 1px non-user font-layout offset; no input event or large jump is fabricated.
+        if (testCase === 'font-pending-restore') field.scrollTop = expected.scrollTop - 1;
+        const pending = snapshot();
+        const faces = await Promise.all(loads);
         await document.fonts.ready;
-        check(field.selectionStart === selection && field.selectionEnd === selection + 8, 'Font change lost source selection');
-        check(field.scrollTop === sourceTop, 'Font change moved source scroll position');
-        check(field.value === longDocument, 'Font change edited Markdown');
+        check(faces.every((group) => group.length > 0 && group.every((face) => face.status === 'loaded')),
+          'Pending-font test did not load the real bundled fonts');
+        let userPlace: ReturnType<typeof snapshot> | undefined;
+        let boundaryAction: { type: string; name: string; event: string; trusted: boolean } | undefined;
+        if (testCase === 'font-pending-input') {
+          field.focus({ preventScroll: true });
+          check(document.execCommand('insertText', false, '用户输入'), 'Native source text insertion failed');
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          userPlace = Object.freeze(snapshot());
+          const edited = longDocument.slice(0, selection) + '用户输入' + longDocument.slice(selection + 8);
+          check(userPlace.text === edited && userPlace.start === selection + 4 && userPlace.end === selection + 4
+            && sourceInputs.some((event) => event.trusted && event.inputType === 'insertText'), 'Source input was not a real user edit');
+        }
+        if (testCase === 'font-pending-wheel') {
+          const beforeWheel = field.scrollTop;
+          field.dispatchEvent(new WheelEvent('wheel', { deltaY: 240, bubbles: true, cancelable: true }));
+          // Synthetic wheel events have no browser default; apply the requested user scroll through the public DOM.
+          field.scrollBy({ top: 240, behavior: 'instant' });
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          userPlace = Object.freeze(snapshot());
+          check(userPlace.scrollTop === beforeWheel + 240 && userPlace.text === longDocument
+            && userPlace.start === selection && userPlace.end === selection + 8 && userPlace.direction === 'backward',
+            'Source wheel fixture did not navigate by exactly 240px');
+        }
+        if (testCase === 'font-pending-key') {
+          field.focus({ preventScroll: true });
+          field.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+          // Apply ArrowRight's collapsed caret explicitly: a synthetic key event has no native default.
+          field.setSelectionRange(selection + 8, selection + 8, 'forward');
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          userPlace = Object.freeze(snapshot());
+          check(userPlace.text === longDocument && userPlace.start === selection + 8 && userPlace.end === selection + 8
+            && userPlace.direction === 'forward', 'Source key fixture did not move the caret');
+        }
+        if (testCase === 'font-pending-pointer') {
+          field.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1, pointerType: 'mouse', isPrimary: true,
+            button: 0, buttons: 1, bubbles: true, cancelable: true }));
+          field.focus({ preventScroll: true });
+          // Apply the newly chosen caret explicitly: a synthetic pointer event has no native default.
+          field.setSelectionRange(selection + 2, selection + 2, 'forward');
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          userPlace = Object.freeze(snapshot());
+          check(userPlace.text === longDocument && userPlace.start === selection + 2 && userPlace.end === selection + 2
+            && userPlace.direction === 'forward', 'Source pointer fixture did not move the caret');
+        }
+        if (['font-pending-other-input', 'font-pending-other-radio', 'font-pending-radio-key'].includes(testCase)) {
+          const target = testCase === 'font-pending-radio-key' ? radio : document.createElement('input');
+          if (target !== radio) {
+            target.type = testCase === 'font-pending-other-radio' ? 'radio' : 'text';
+            target.name = testCase === 'font-pending-other-radio' ? 'other-font' : 'code-font';
+            target.hidden = true; host.append(target);
+          }
+          const event = target === radio
+            ? new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })
+            : new Event('input', { bubbles: true });
+          boundaryAction = { type: target.type, name: target.name, event: event.type, trusted: event.isTrusted };
+          try { target.dispatchEvent(event); } finally { if (target !== radio) target.remove(); }
+          // These public boundary events have no native default. Move only scroll, without another cancellation event.
+          const beforeMove = field.scrollTop;
+          field.scrollBy({ top: 240, behavior: 'instant' });
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          userPlace = Object.freeze(snapshot());
+          check(userPlace.scrollTop === beforeMove + 240 && userPlace.text === longDocument
+            && userPlace.start === selection && userPlace.end === selection + 8 && userPlace.direction === 'backward',
+            'Nonmatching font-control event did not establish the newer source position');
+        }
+        const expectedAtSettlement = userPlace ?? expected;
+        release();
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const frame1 = snapshot();
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const frame2 = snapshot();
+        const evidence = JSON.stringify({ testCase, expected, expectedAtSettlement, beforeAdjustment, pending, frame1, frame2,
+          method: { font: radio.value, radioInputs, sourceInputs, sourceNavigation, boundaryAction,
+            action: boundaryAction ? 'nonmatching input/radio navigation event + explicit 240px source move'
+              : testCase === 'font-pending-input' ? 'native textarea insertText without keyboard events'
+              : testCase === 'font-pending-wheel' ? 'public source wheel event + explicit 240px scrollBy default'
+              : testCase === 'font-pending-key' ? 'public source ArrowRight keydown + explicit collapsed caret'
+              : testCase === 'font-pending-pointer' ? 'public source pointerdown + explicit new caret' : 'font radio click',
+            layoutOffset: testCase === 'font-pending-restore' ? 'observed 1px non-user offset simulated via scrollTop only' : 'none',
+            settlement: 'native FontFaceSet.load and fonts.ready before gate release; exactly two frames, no position polling' },
+          requests, faces: faces.map((group) => group.map((face) => ({ family: face.family, status: face.status }))) });
+        check(JSON.stringify(frame2) === JSON.stringify(expectedAtSettlement), 'Pending font settlement lost immutable source position: ' + evidence);
+        return testCase + ': ' + evidence;
+      } finally {
+        release(); document.fonts.load = nativeLoad;
+        window.removeEventListener('input', observeInput, true);
+        for (const event of ['wheel', 'keydown', 'pointerdown']) window.removeEventListener(event, observeNavigation, true);
       }
+    } else if (testCase === 'font-source-position') {
+      check(sourceTop === 1400, 'Invalid font source scroll fixture');
+      click('button[aria-label="排版设置"]');
+      await until(() => document.querySelector('.typography-panel'));
+      const nativeLoad = document.fonts.load;
+      let loads: Promise<FontFace[]>[] = [];
+      document.fonts.load = (font, text) => {
+        const loaded = nativeLoad.call(document.fonts, font, text); loads.push(loaded); return loaded;
+      };
+      try {
+        for (const font of ['fira-wenkai', 'cascadia-misans', 'jetbrains-sarasa']) {
+          const radio = document.querySelector<HTMLInputElement>(`input[name="code-font"][value="${font}"]`)!;
+          const changed = !radio.checked;
+          loads = []; radio.click();
+          if (changed) await until(() => loads.length > 0);
+          const faces = await Promise.all(loads);
+          await document.fonts.ready;
+          check(faces.every((group) => group.length > 0 && group.every((face) => face.status === 'loaded')),
+            'Font position test did not load the real bundled fonts');
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          check(field.selectionStart === selection && field.selectionEnd === selection + 8, 'Font change lost source selection');
+          check(field.selectionDirection === 'backward', 'Font change lost source selection direction');
+          check(field.scrollTop === sourceTop, 'Font change moved source scroll position');
+          check(field.value === longDocument, 'Font change edited Markdown');
+        }
+      } finally { document.fonts.load = nativeLoad; }
     } else if (testCase === 'rendered-tab-position') {
       click('button[aria-label="切换源码模式"]');
       await until(() => !document.querySelector('.source-editor:not([hidden])'));

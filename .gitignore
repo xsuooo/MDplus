@@ -13,6 +13,7 @@ dist-ssr
 *.local
 coverage
 .vite
+*.tsbuildinfo
 
 # Python
 __pycache__/
@@ -41,6 +42,9 @@ icon-preview
 !.vscode/extensions.json
 .idea
 .DS_Store
+Thumbs.db
+Desktop.ini
+/nul
 *.suo
 *.ntvs*
 *.njsproj
@@ -49,3 +53,6 @@ icon-preview
 
 # 本地审计与验收日志（不随仓库分发）
 .audit/
+
+# 本地备份和历史报告（不随仓库分发）
+/_backup/

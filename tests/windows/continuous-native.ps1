@@ -135,6 +135,12 @@ function Choose($name,$index,$expected){
   for($i=0;$i-lt $index;$i++){[Windows.Forms.SendKeys]::SendWait('{DOWN}')}
   Until {$e.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value-eq $expected} "Font choice did not settle: $name"
 }
+function ChooseCode($label){
+  Until {$null-ne(ByName $label ([Windows.Automation.ControlType]::RadioButton))} "Missing code font $label"
+  $e=ByName $label ([Windows.Automation.ControlType]::RadioButton);$e.SetFocus()
+  $e.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
+  Until {$e.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected} "Code font choice did not settle: $label"
+}
 function PrintDialog{
   [Windows.Forms.SendKeys]::SendWait('{ESC}');Focus (ByName '导出');[Windows.Forms.SendKeys]::SendWait('^+p')
   Until {$null-ne(ByName '打印')} 'Print preview missing'
@@ -258,7 +264,7 @@ const title = "连续验收";
   Until {[IO.File]::ReadAllText($original).Contains('Continuous final graph')} 'Ctrl+S missed unblurred graph draft'
   Check ($null-ne(ByName 'Mermaid 图表源码')) 'Live graph save keeps editing active'
   InvokeName '预览';Until {(Get-PreviewInk (ByName 'Mermaid 图表预览'))-gt 100} 'Graph preview is blank'
-  InvokeName '排版设置';Choose '界面与正文字体' 2 '霞鹜文楷';Choose '源码与代码字体' 1 'Fira Code + 霞鹜文楷';InvokeName '关闭排版设置'
+  InvokeName '排版设置';Choose '界面与正文字体' 2 '霞鹜文楷';ChooseCode 'Fira Code + 霞鹜文楷';InvokeName '关闭排版设置'
   foreach($cycle in 1..3){
     $button=@('切换主题,当前为深色','切换主题,当前为浅色','切换主题,当前为跟随系统')|ForEach-Object {ByName $_}|Where-Object {$null-ne $_}|Select-Object -First 1
     $button.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke();Start-Sleep -Seconds 2
@@ -300,7 +306,7 @@ const title = "连续验收";
   InvokeName '排版设置'
   Until {$null-ne(ByName '界面与正文字体' ([Windows.Automation.ControlType]::ComboBox))} 'Reopened typography panel is not ready'
   Check ((ByName '界面与正文字体' ([Windows.Automation.ControlType]::ComboBox)).GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value-eq '霞鹜文楷') 'Body font survives normal restart'
-  Check ((ByName '源码与代码字体' ([Windows.Automation.ControlType]::ComboBox)).GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value-eq 'Fira Code + 霞鹜文楷') 'Code font survives normal restart'
+  Check ((ByName 'Fira Code + 霞鹜文楷' ([Windows.Automation.ControlType]::RadioButton)).GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected) 'Code font survives normal restart'
   InvokeName '关闭排版设置';ClickInput (ByName 'Markdown 源码');[Windows.Forms.SendKeys]::SendWait('^{HOME}');Source $false
   Until {(Get-PreviewInk (ByName 'Mermaid 图表预览'))-gt 100} 'Reopened graph is blank';Capture 'reopened'
   [void]$script:app.CloseMainWindow();Check ($script:app.WaitForExit(15000)) 'Final reopened session closes normally'

@@ -29,6 +29,8 @@ export interface Tab {
   dirty: boolean;
   /** 外部文件的修改时间(毫秒),用于检测外部变更 */
   externalMtime: number;
+  /** 与最近读取或保存的原始磁盘字节绑定；null 仅用于尚未落盘的文档。 */
+  diskRevision: string | null;
   /** 文件在后台标签页中被外部修改,等待切回时提示 */
   externalChanged: boolean;
   /** 编辑器初始内容(仅挂载时使用) */

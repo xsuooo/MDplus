@@ -1,7 +1,9 @@
 import { createRoot } from 'react-dom/client';
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks';
+import { emit } from '@tauri-apps/api/event';
 import App from '../../src/App';
 import { getImageUrls } from '../../src/lib/imagePaths';
+import { getThemeMode } from '../../src/lib/store';
 
 // Real App, React and Milkdown. Only the native IPC boundary is simulated.
 // Run one case per page load to isolate module-level stores and browser timers.
@@ -14,6 +16,10 @@ export const safetyCases = [
   'edit-during-window-close',
   'source-save-selection', 'source-autosave-selection', 'rendered-save-selection', 'background-save-focus',
   'source-save-wrapped-reference',
+  'theme-preference-startup',
+  'no-edit-reference-links', 'no-edit-bare-autolinks',
+  'image-reference-source', 'image-reference-reload', 'image-reference-refresh', 'image-reference-saveas-edit', 'image-reference-saveas-undo', 'image-reference-recovery',
+  'save-paused-feedback', 'drop-unsupported-feedback', 'drop-mixed-feedback', 'file-identity-feedback', 'print-action-label',
 ] as const;
 export type SafetyCase = typeof safetyCases[number];
 
@@ -66,7 +72,13 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     ['C:/notes/a.md', { content: 'original\n', mtime: 100 }],
     ['C:/notes/b.md', { content: 'other document\n', mtime: 100 }],
   ]);
+  const noEditRaw = testCase === 'no-edit-reference-links'
+    ? "[Full][id] [collapsed][] [shortcut]\n\n[id]: https://example.com/full \"title\"\n[collapsed]: https://example.com/collapsed\n[shortcut]: https://example.com/shortcut\n"
+    : testCase === 'no-edit-bare-autolinks'
+      ? "Visit https://example.com/path?q=1&x=2. Email audit@example.com.\n" : null;
+  if (noEditRaw !== null) files.set('C:/notes/a.md', { content: noEditRaw, mtime: 100 });
   const imageCase = testCase.startsWith('image-save');
+  const imageReferenceCase = testCase.startsWith('image-reference-');
   const continuityCase = ['source-save-selection', 'source-autosave-selection', 'rendered-save-selection', 'background-save-focus', 'source-save-wrapped-reference'].includes(testCase);
   const sourceImageCase = testCase.startsWith('source-images-');
   if (sourceImageCase) files.set('C:/notes/a.md', { content: '', mtime: 100 });
@@ -82,9 +94,32 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     file.content = file.content.replace('./img/pic.png', `<./img/${'中文 深层目录/'.repeat(18)}photo.png>`);
   }
   files.set('C:/export/a.md', { content: '', mtime: 100 });
-  const store = new Map<string, unknown>();
+  const themeStartupCase = testCase === 'theme-preference-startup';
+  const store = new Map<string, unknown>(themeStartupCase ? [['theme-mode', 'dark']] : []);
+  const themeOperations: string[] = [];
   const writes: string[] = [];
   const binaries = new Map<string, number[]>();
+  const recoveryImageBytes = new Map<string, number[]>();
+  const recoverySnapshots: { markdown: string; images: { key: string; placeholder: string }[] }[] = [];
+  const imageReadGate = deferred<void>();
+  let awaitingImageRead = false;
+  let holdImageRead = testCase === 'image-reference-recovery';
+  let expectedReferenceImage: number[] = [];
+  let expectedReferenceSource = '';
+  if (imageReferenceCase) {
+    const image = (color: string) => {
+      const canvas = document.createElement('canvas'); canvas.width = 2; canvas.height = 2;
+      const context = canvas.getContext('2d')!; context.fillStyle = color; context.fillRect(0, 0, 2, 2);
+      const source = canvas.toDataURL('image/png');
+      return { source, bytes: Array.from(atob(source.split(',')[1]), (char) => char.charCodeAt(0)) };
+    };
+    const oldImage = image('#c0392b'); const newImage = image('#2471a3');
+    const expectedImage = testCase === 'image-reference-saveas-edit' || testCase === 'image-reference-saveas-undo' ? oldImage : newImage;
+    expectedReferenceImage = expectedImage.bytes; expectedReferenceSource = expectedImage.source;
+    binaries.set('C:/notes/img/pic.png', oldImage.bytes);
+    binaries.set('C:/notes/img/next.png', newImage.bytes);
+    files.set('C:/notes/a.md', { content: testCase === 'image-reference-source' || testCase === 'image-reference-recovery' ? '# Reference\n' : '# Reference\n\n![](./img/pic.png)\n', mtime: 100 });
+  }
   const writePaths: string[] = [];
   const messages: string[] = [];
   const unexpected: string[] = [];
@@ -115,14 +150,18 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     const args = (payload ?? {}) as Record<string, unknown>;
     switch (command) {
       case 'list_recovery_snapshots': return [];
-      case 'cache_recovery_image':
-      case 'write_recovery_snapshot':
+      case 'cache_recovery_image': recoveryImageBytes.set(String(args.key), args.data as number[]); return;
+      case 'write_recovery_snapshot': recoverySnapshots.push(args.snapshot as typeof recoverySnapshots[number]); return;
       case 'delete_recovery_snapshot': return;
       case 'take_startup_files': return ['C:/notes/a.md'];
       case 'take_pending_open_files': return [];
       case 'plugin:store|load': return 1;
-      case 'plugin:store|get': return [store.get(String(args.key)), store.has(String(args.key))];
-      case 'plugin:store|set': store.set(String(args.key), args.value); return;
+      case 'plugin:store|get':
+        if (args.key === 'theme-mode') themeOperations.push('get');
+        return [store.get(String(args.key)), store.has(String(args.key))];
+      case 'plugin:store|set':
+        if (args.key === 'theme-mode') themeOperations.push('set');
+        store.set(String(args.key), args.value); return;
       case 'plugin:store|save': return;
       case 'plugin:window|is_minimized': return false;
       case 'plugin:window|is_maximized': return false;
@@ -135,10 +174,19 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
       case 'plugin:window|set_focus': return;
       case 'plugin:window|destroy': destroyed += 1; return;
       case 'plugin:dialog|open': return openPath;
-      case 'plugin:dialog|save': return testCase === 'image-saveas-switch' ? 'C:/export/a.md' : 'C:/notes/a.md';
+      case 'plugin:dialog|save':
+        if (imageReferenceCase && (args.options as { title?: string } | undefined)?.title === '导出 HTML') return 'C:/export/result.html';
+        return testCase === 'image-saveas-switch' || imageReferenceCase || testCase === 'save-paused-feedback' ? 'C:/export/a.md' : 'C:/notes/a.md';
       case 'plugin:path|dirname': return String(args.path).replace(/\/[^/]+$/, '');
       case 'plugin:path|join': return (args.paths as string[]).join('/').replace('/./', '/');
       case 'read_image_file': {
+        if (imageReferenceCase) {
+          const path = String(args.docPath).replace(/\/[^/]+$/, '') + '/' + String(args.relativePath);
+          const data = binaries.get(path);
+          check(data, `Missing referenced image ${path}`);
+          if (holdImageRead) { awaitingImageRead = true; await imageReadGate.promise; }
+          return { path, mime: 'image/png', data };
+        }
         if (!sourceImageCase) return {
           path: continuityCase ? `C:/notes/${args.relativePath}` : 'C:/notes/img/pic.png',
           mime: 'image/png', data: [65, 66, 67],
@@ -149,6 +197,18 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
       }
       case 'create_directory': return;
       case 'save_binary_file': binaries.set(String(args.path), args.data as number[]); return;
+      case 'save_image_asset': {
+        const directory = String(args.docPath).replace(/\/[^/]+$/, '') + '/assets';
+        const originalName = String(args.filename);
+        const dot = originalName.lastIndexOf('.');
+        let filename = originalName;
+        for (let index = 1; binaries.has(`${directory}/${filename}`); index++) {
+          filename = `${originalName.slice(0, dot)}-${index}${originalName.slice(dot)}`;
+        }
+        const path = `${directory}/${filename}`;
+        binaries.set(path, args.data as number[]);
+        return { filename, relativePath: `./assets/${filename}`, path };
+      }
       case 'plugin:dialog|message': {
         const message = String(args.message);
         messages.push(message);
@@ -156,40 +216,51 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
           confirms += 1;
           return holdConfirmation ? confirmation.promise : 'Yes';
         }
+        if (message.includes('已存在。是否用当前文档替换') || (imageReferenceCase && message.includes('将导出可离线'))) return 'Yes';
         return args.buttons === 'YesNo' ? 'No' : 'Ok';
       }
-      case 'read_file': {
+      case 'read_file':
+      case 'read_document': {
         const file = files.get(String(args.path));
         check(file, `Unknown file: ${args.path}`);
-        const content = file.content;
+        // The native snapshot binds content and revision before an asynchronous caller resumes.
+        const snapshot = { content: file.content, revision: `mock:${file.content}`, mtime: file.mtime };
         if (holdRead && args.path === 'C:/notes/a.md') {
           awaitingRead = true;
           await readGate.promise;
           completedRead = true;
         }
         if (confirms > 0) didReloadRead = true;
-        return content;
+        return command === 'read_document' ? snapshot : snapshot.content;
       }
-      case 'file_mtime': {
-        if (binaries.has(String(args.path))) return 100;
-        const file = files.get(String(args.path));
-        check(file, `Unknown file: ${args.path}`);
+      case 'file_mtime':
+      case 'document_revision': {
+        if (command === 'file_mtime' && binaries.has(String(args.path))) return 100;
         if (holdMtime && didReloadRead && args.path === 'C:/notes/a.md') {
           awaitingMtime = true;
           await mtimeGate.promise;
         }
+        const file = files.get(String(args.path));
+        if (command === 'document_revision') return file
+          ? { revision: `mock:${file.content}`, mtime: file.mtime } : { revision: null, mtime: null };
+        check(file, `Unknown file: ${args.path}`);
         return file.mtime;
       }
-      case 'write_file': {
+      case 'write_file':
+      case 'write_document': {
+        if (imageReferenceCase && command === 'write_file') check(args.path === 'C:/export/result.html', 'HTML export must not overwrite the Markdown fixture');
         writes.push(String(args.content));
         writePaths.push(String(args.path));
         if (failWrite) { failWrite = false; throw new Error('simulated disk write failure'); }
         if (holdWrite) { awaitingWrite = true; await writeGate.promise; }
         const file = files.get(String(args.path));
-        check(file, `Unknown write: ${args.path}`);
-        file.content = String(args.content);
-        file.mtime += 1;
-        return;
+        if (command === 'write_document' && args.expectedRevision !== (file ? `mock:${file.content}` : null)) {
+          throw { code: 'CONFLICT', message: 'simulated revision conflict', path: String(args.path),
+            recoveryPath: null, backupPath: null, actualRevision: file ? `mock:${file.content}` : null, writeState: 'unchanged' };
+        }
+        const saved = { content: String(args.content), mtime: (file?.mtime ?? 99) + 1 };
+        files.set(String(args.path), saved);
+        return command === 'write_document' ? { revision: `mock:${saved.content}`, mtime: saved.mtime, backupPath: null } : undefined;
       }
       default:
         unexpected.push(command);
@@ -197,17 +268,181 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     }
   }, { shouldMockEvents: true });
 
+  if (themeStartupCase) {
+    await getThemeMode(); // A ready native store exposes layout/passive effect ordering.
+    themeOperations.length = 0;
+  }
   const host = document.createElement('div');
   document.body.append(host);
   createRoot(host).render(<App />);
   await until(() => document.querySelector('.editor-tab.active .ProseMirror'), 'ready editor');
   // Wait for EditorTab's initial-state effect, not Milkdown's former content debounce.
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  if (themeStartupCase) {
+    check(themeOperations[0] === 'get', 'Initial layout overwrote the saved theme before reading it');
+    await until(() => document.documentElement.dataset.theme === 'dark' && store.get('theme-mode') === 'dark', 'saved dark theme');
+    click('button[aria-label="切换主题,当前为深色"]');
+    await until(() => store.get('theme-mode') === 'system', 'explicit system theme persisted');
+    check(document.documentElement.dataset.theme === (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
+      'Stored system choice did not resolve to the system appearance');
+    return `${testCase}: saved dark preference survives startup; explicit choice still persists`;
+  }
   const save = () => click('button[title^="保存 (Ctrl+S)"]');
   const close = () => click('.tab.active .tab-close');
   const source = () => click('button[title*="源码"]');
   const dirty = () => document.querySelector('.tab.active .tab-dot')?.getAttribute('data-dirty') === '1';
 
+  if (testCase === 'save-paused-feedback') {
+    await insert(' local draft');
+    files.set('C:/notes/a.md', { content: 'external edit\n', mtime: 200 });
+    await until(() => messages.some((message) => message.includes('自动保存已暂停')), 'automatic conflict notice');
+    await until(() => !document.querySelector<HTMLButtonElement>('button[title^="保存 (Ctrl+S)"]')!.disabled, 'paused save settled');
+    check(document.querySelector('.status-save')?.textContent?.includes('自动保存已暂停'), 'Persistent pause status is missing');
+    const noticesBeforeSave = messages.length;
+    save();
+    await until(() => messages.length > noticesBeforeSave, 'manual overwrite confirmation');
+    await until(() => document.querySelector('.status-save')?.textContent === '自动保存已暂停'
+      && !document.querySelector<HTMLButtonElement>('button[title^="保存 (Ctrl+S)"]')!.disabled, 'manual conflict cancellation');
+    check(files.get('C:/notes/a.md')!.content === 'external edit\n', 'Cancelled conflict overwrote external bytes');
+    check(document.querySelector('.status-save')?.textContent?.includes('自动保存已暂停'), 'Cancelling overwrite falsely resumed saving');
+    click('button[title="另存为"]');
+    await until(() => files.get('C:/export/a.md')!.content.includes('local draft') && document.querySelector('.status-save')?.textContent === '已保存', 'SaveAs resolves pause');
+    check(files.get('C:/notes/a.md')!.content === 'external edit\n', 'SaveAs changed the original external document');
+    return `${testCase}: persistent pause survives cancel; explicit SaveAs preserves both documents`;
+  }
+  if (testCase === 'drop-unsupported-feedback' || testCase === 'drop-mixed-feedback') {
+    const mixed = testCase === 'drop-mixed-feedback';
+    await emit('tauri://drag-drop', { paths: [...(mixed ? ['C:/notes/b.md'] : []), 'C:/notes/unsupported.txt'], position: { x: 1, y: 1 } });
+    await until(() => messages.some((message) => message.includes('已忽略 1')), 'unsupported dropped-file notice');
+    if (mixed) await until(() => text().includes('other document'), 'supported part of a mixed drop');
+    check(document.querySelectorAll('[role="tab"]').length === (mixed ? 2 : 1), 'Drop opened an unsupported path or lost a supported document');
+    check(unexpected.length === 0, 'Unsupported drop reached unexpected native IPC');
+    return `${testCase}: unsupported paths reported without discarding supported Markdown`;
+  }
+  if (testCase === 'file-identity-feedback') {
+    check(document.querySelector('.status-file-identity')?.textContent === 'C:/notes/a.md', 'Status omits full document identity');
+    check(document.querySelector('[role="tab"]')?.getAttribute('aria-label')?.includes('C:/notes/a.md'), 'Tab accessible name cannot distinguish same-named files');
+    return `${testCase}: current path is visible and accessible`;
+  }
+  if (testCase === 'print-action-label') {
+    click('button[title="导出"]'); await until(() => document.querySelector('[role="menuitem"]'), 'export menu');
+    const item = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find((button) => button.textContent === '打印 / 另存为 PDF');
+    check(item?.title.includes('确认保存'), 'Print action falsely implies an already saved PDF');
+    return `${testCase}: print-to-PDF action requires explicit confirmation in the system dialog`;
+  }
+
+  if (testCase === 'image-reference-recovery') {
+    holdWrite = true;
+    source(); await until(() => document.querySelector('.source-editor:not([hidden]) textarea'), 'source editor');
+    const field = document.querySelector<HTMLTextAreaElement>('.source-editor:not([hidden]) textarea')!;
+    const markdown = '# One edit\n\n![new](./img/next.png)\n';
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, markdown);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    await until(() => awaitingImageRead, 'pending image read');
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    check(recoverySnapshots.length === 0, 'Recovery persisted a relative-image draft before its bytes were prepared');
+    check(document.querySelector('.recovery-status-pending'), 'Pending image bytes were advertised as protected or failed prematurely');
+    holdImageRead = false; imageReadGate.resolve();
+    await until(() => recoverySnapshots.some((snapshot) => snapshot.images.length === 1), 'portable recovery snapshot after one input');
+    const snapshot = recoverySnapshots[recoverySnapshots.length - 1];
+    check(snapshot.markdown.includes('mdplus-image:') && !snapshot.markdown.includes('./img/next.png'), 'Recovery retained an unusable relative image reference');
+    check(JSON.stringify(recoveryImageBytes.get(snapshot.images[0].key)) === JSON.stringify(expectedReferenceImage), 'Recovery image bytes disagree with the prepared preview');
+    check(field.value === markdown, 'Recovery changed the source draft');
+    holdWrite = false; writeGate.resolve();
+    return `${testCase}: a single raw-image edit waits for bytes before durable recovery protection`;
+  }
+
+  if (testCase === 'image-reference-saveas-edit' || testCase === 'image-reference-saveas-undo') {
+    const undoEdit = testCase === 'image-reference-saveas-undo';
+    await until(() => document.querySelector<HTMLImageElement>('.editor-tab.active .md-image-node img')?.naturalWidth, 'initial relative image');
+    source(); await until(() => document.querySelector('.source-editor:not([hidden]) textarea'), 'source editor');
+    const field = document.querySelector<HTMLTextAreaElement>('.source-editor:not([hidden]) textarea')!;
+    const original = field.value;
+    holdWrite = true; click('button[title="另存为"]');
+    await until(() => awaitingWrite, 'SaveAs pending write');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, original + '\nconcurrent edit');
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    if (undoEdit) {
+      field.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }));
+      await until(() => field.value === original, 'source undo restores original Markdown');
+    }
+    const currentDraft = undoEdit ? original : original + '\nconcurrent edit';
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }));
+    holdWrite = false; writeGate.resolve();
+    await until(() => !document.querySelector<HTMLButtonElement>('button[title^="保存 (Ctrl+S)"]')!.disabled, 'SaveAs and queued save settled');
+    check(document.querySelector('.status-file-identity')?.textContent === 'C:/notes/a.md', 'Concurrent image SaveAs changed the relative-image base');
+    check(field.value === currentDraft, 'Concurrent SaveAs changed the latest source');
+    check(messages.some((message) => message.includes('副本已写入')), 'Written snapshot and retained current draft are not distinguished');
+    check(writePaths.length === 1 && writePaths[0] === 'C:/export/a.md', 'Queued save wrote after a base-preserving cancellation');
+    check(files.get('C:/notes/a.md')!.content === original, 'Original Markdown changed during SaveAs');
+    click('button[title="另存为"]');
+    await until(() => document.querySelector('.status-file-identity')?.textContent === 'C:/export/a.md' && !dirty(), 'explicit SaveAs retry');
+    check(files.get('C:/export/a.md')!.content.includes('concurrent edit') === !undoEdit, 'SaveAs retry persisted text that had been undone');
+    const url = getImageUrls(files.get('C:/export/a.md')!.content)[0];
+    check(url?.startsWith('./assets/'), 'Retried SaveAs lost portable image path');
+    check(JSON.stringify(binaries.get(`C:/export/${url.slice(2)}`)) === JSON.stringify(expectedReferenceImage), 'Retried SaveAs lost original image bytes');
+    return `${testCase}: concurrent relative-image draft retains its base; retry preserves latest text and bytes`;
+  }
+
+  if (imageReferenceCase) {
+    if (testCase === 'image-reference-source') {
+      source(); await until(() => document.querySelector('.source-editor:not([hidden]) textarea'), 'source editor');
+      const field = document.querySelector<HTMLTextAreaElement>('.source-editor:not([hidden]) textarea')!;
+      const markdown = '# Reference\n\n![](./img/next.png)\n';
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, markdown);
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      source();
+      await until(() => !document.querySelector('.source-editor:not([hidden])'), 'rendered reference');
+      check(field.value === markdown, 'Resolving an image rewrote typed source');
+    } else {
+      await until(() => document.querySelector<HTMLImageElement>('.editor-tab.active .md-image-node img')?.naturalWidth, 'initial image');
+      if (testCase === 'image-reference-refresh') binaries.set('C:/notes/img/pic.png', expectedReferenceImage);
+      files.set('C:/notes/a.md', { content: testCase === 'image-reference-reload'
+        ? '# External\n\n![](./img/pic.png)\n\n![](./img/next.png)\n' : '# External\n\n![](./img/pic.png)\n', mtime: 200 });
+      await until(() => confirms > 0 && text().includes('External'), 'external document reload');
+    }
+    await until(() => Array.from(document.querySelectorAll<HTMLImageElement>('.editor-tab.active img'))
+      .some((image) => image.src === expectedReferenceSource && image.naturalWidth > 0), 'current image bytes in preview');
+    click('button[title="另存为"]');
+    await until(() => files.get('C:/export/a.md')!.content.includes('./assets/'), 'portable SaveAs references');
+    const portableMarkdown = files.get('C:/export/a.md')!.content;
+    const references = getImageUrls(files.get('C:/export/a.md')!.content);
+    const last = references[references.length - 1];
+    check(last?.startsWith('./assets/'), 'SaveAs retained an unportable image path');
+    check(JSON.stringify(binaries.get(`C:/export/${last.slice(2)}`)) === JSON.stringify(expectedReferenceImage), 'SaveAs copied stale or missing image bytes');
+    click('button[title="导出"]');
+    await until(() => document.querySelector('[role="menuitem"]'), 'export menu');
+    const htmlButton = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find((button) => button.textContent?.includes('HTML'));
+    check(htmlButton, 'HTML export action missing'); htmlButton.click();
+    await until(() => files.has('C:/export/result.html'), 'offline HTML output');
+    check(files.get('C:/export/a.md')!.content === portableMarkdown, 'HTML export overwrote the current Markdown document');
+    const exported = new DOMParser().parseFromString(files.get('C:/export/result.html')!.content, 'text/html');
+    check(Array.from(exported.images).some((image) => image.getAttribute('src') === expectedReferenceSource), 'Offline export embedded stale or missing image bytes');
+    check(unexpected.length === 0, 'Unexpected IPC in image reference flow');
+    return `${testCase}: preview, SaveAs and offline HTML agree on current bytes (native IPC mocked)`;
+  }
+
+  if (noEditRaw !== null) {
+    // Let the passive initial notification settle before testing a no-edit save.
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    check(!dirty(), 'Opening the original source was marked as an edit');
+    save();
+    await until(() => writes.length > 0, 'no-edit save write');
+    check(writes[0] === noEditRaw, `No-edit save rewrote original source: ${JSON.stringify({ expected: noEditRaw, actual: writes[0] })}`);
+    await until(() => !document.querySelector<HTMLButtonElement>('button[title^="保存 (Ctrl+S)"]')!.disabled, 'no-edit save complete');
+    check(!dirty() && files.get('C:/notes/a.md')!.content === noEditRaw, 'No-edit save changed source or dirty state');
+    source();
+    await until(() => document.querySelector('.source-editor:not([hidden]) textarea'), 'original source readback');
+    check(document.querySelector<HTMLTextAreaElement>('.source-editor:not([hidden]) textarea')!.value === noEditRaw, 'Source view lost original spelling');
+    source();
+    await until(() => !document.querySelector('.source-editor:not([hidden]) textarea'), 'return to rendered mode without editing');
+    save();
+    await until(() => writes.length === 2, 'save after unchanged mode round trip');
+    check(writes[1] === noEditRaw, 'Unchanged source/rendered round trip rewrote original source');
+    check(unexpected.length === 0, 'Unexpected native IPC in preservation regression');
+    return `${testCase}: exact no-edit write and source/rendered round trip preserved (native IPC mocked)`;
+  }
   if (continuityCase) {
     await document.fonts.ready;
     const sourceCase = testCase.startsWith('source-');
@@ -370,7 +605,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     const switchingTab = testCase === 'image-save-switch' || testCase === 'image-saveas-switch';
     if (!enteringSource) {
       source();
-      await until(() => sourceText()?.includes('mdplus-image:'), 'hydrated image source');
+      await until(() => sourceText() === files.get('C:/notes/a.md')!.content, 'original image source preserved');
     }
     holdWrite = true;
     if (testCase === 'image-saveas-switch') click('button[title="另存为"]');
@@ -387,7 +622,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
       await until(() => sourceText()?.includes('other document'), 'second source');
     } else if (enteringSource) {
       source();
-      await until(() => sourceText()?.includes('mdplus-image:'), 'source opened during save');
+      await until(() => sourceText() === files.get('C:/notes/a.md')!.content, 'original source opened during save');
     }
     writeGate.resolve();
     await until(() => files.get(expectedPath)?.content === writes[0], 'image write completed');

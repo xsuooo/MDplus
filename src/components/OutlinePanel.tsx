@@ -67,6 +67,7 @@ export const OutlinePanel = memo(function OutlinePanel({
       className={`outline${open ? '' : ' collapsed'}${resizing ? ' outline-resizing' : ''}`}
       aria-label="文档目录"
       aria-hidden={!open}
+      {...{ inert: open ? undefined : '' }}
       style={style}
     >
       {open && (

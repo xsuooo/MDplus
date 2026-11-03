@@ -2,13 +2,14 @@ import { memo, useEffect, useLayoutEffect, useRef } from 'react';
 import { useEditor, Milkdown, MilkdownProvider } from '@milkdown/react';
 import type { Editor } from '@milkdown/kit/core';
 import { createEditor, getCurrentState } from '../lib/editor';
-import { resolveImageSource } from '../lib/imageOps';
+import { resolveImageSource, subscribeImageSources } from '../lib/imageOps';
 import type { Tab, EditorUpdate } from '../lib/types';
 import type { MediaPreview } from '../lib/media';
 
 interface EditorTabProps {
   tab: Tab;
   active: boolean;
+  sourceMode: boolean;
   onUpdate: (id: string, update: EditorUpdate, isInitial?: boolean) => void;
   onRegister: (id: string, editor: Editor | null) => void;
   onImagePaste?: (tabId: string, file: File) => Promise<string>;
@@ -28,7 +29,7 @@ export const EditorTab = memo(function EditorTab(props: EditorTabProps) {
   );
 });
 
-function EditorTabInner({ tab, active, onUpdate, onRegister, onImagePaste, onMediaPreview }: EditorTabProps) {
+function EditorTabInner({ tab, active, sourceMode, onUpdate, onRegister, onImagePaste, onMediaPreview }: EditorTabProps) {
   const previewRef = useRef(onMediaPreview);
   previewRef.current = onMediaPreview;
   const onUpdateRef = useRef(onUpdate);
@@ -45,13 +46,14 @@ function EditorTabInner({ tab, active, onUpdate, onRegister, onImagePaste, onMed
   useLayoutEffect(() => {
     activity.current += 1;
     return () => { activity.current += 1; };
-  }, [active, tab.id]);
+  }, [active, sourceMode, tab.id]);
 
   const { get, loading } = useEditor(
     (root) =>
       createEditor(root, initialContentRef.current, {
         onUpdate: (u) => onUpdateRef.current(tabIdRef.current, u),
         resolveImageSource: (url) => resolveImageSource(tabIdRef.current, url),
+        subscribeImageSources: (listener) => subscribeImageSources(tabIdRef.current, listener),
         onMediaPreview: (media) => previewRef.current?.(media),
         captureImagePaste: () => {
           const current = activity.current;
@@ -77,7 +79,8 @@ function EditorTabInner({ tab, active, onUpdate, onRegister, onImagePaste, onMed
   }, [loading, get, tab.id]);
 
   return (
-    <div className={`editor-tab${active ? ' active' : ''}`} data-active={active ? '1' : '0'}>
+    <div className={`editor-tab${active ? ' active' : ''}`} data-active={active ? '1' : '0'}
+      {...{ inert: sourceMode ? '' : undefined }} aria-hidden={sourceMode ? true : undefined}>
       <div className="milkdown-container">
         <Milkdown />
       </div>

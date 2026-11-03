@@ -22,6 +22,12 @@ function Test-InDirectory([string]$Path, [string]$Directory) {
         $Path.StartsWith($Directory.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)
 }
 
+function Get-NSISInstallPath([string]$Path) {
+    # NSIS stores InstallLocation with one surrounding pair of quotes.
+    if ($Path -match '^"([^"]+)"$') { $Path = $Matches[1] }
+    return Get-LocalPath $Path
+}
+
 function Assert-SeparatePaths([string]$First, [string]$Second) {
     if ((Test-InDirectory $First $Second) -or (Test-InDirectory $Second $First)) { throw 'Paths must not overlap.' }
 }

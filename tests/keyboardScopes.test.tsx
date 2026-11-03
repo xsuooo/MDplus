@@ -12,6 +12,7 @@ vi.mock('../src/lib/search', () => ({
   runSearch: vi.fn(), stepSearch: vi.fn(), clearSearch: vi.fn(),
   getSearchCount: () => 0, subscribeSearchCount: vi.fn(),
 }));
+vi.mock('../src/lib/presence', () => ({ useIsPresent: () => true }));
 
 import { SearchBar } from '../src/components/SearchBar';
 

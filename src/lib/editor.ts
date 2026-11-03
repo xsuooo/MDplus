@@ -41,6 +41,7 @@ export interface EditorCallbacks {
   onUpdate: (update: EditorUpdate) => void;
   onImagePaste?: (file: File) => Promise<string>;
   resolveImageSource?: (url: string) => string;
+  subscribeImageSources?: (listener: () => void) => () => void;
   captureImagePaste?: () => () => boolean;
   onMediaPreview?: (media: MediaPreview) => void;
 }
@@ -107,7 +108,9 @@ export function createEditor(root: HTMLElement, content: string, callbacks: Edit
     .use($prose(() => imageLayoutPlugin))
     .use($prose(() => taskListPlugin));
 
-  editor.use($view(imageSchema.node, () => imageView(callbacks.resolveImageSource ?? ((src) => src), callbacks.onMediaPreview)));
+  editor.use($view(imageSchema.node, () => imageView(
+    callbacks.resolveImageSource ?? ((src) => src), callbacks.onMediaPreview, callbacks.subscribeImageSources,
+  )));
 
   // 添加图片粘贴支持
   if (callbacks.onImagePaste) {

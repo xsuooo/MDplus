@@ -63,16 +63,34 @@ export async function runRecoveryRegression(testCase: RecoveryCase): Promise<str
       case 'plugin:path|dirname': return args.path.replace(/\/[^/]+$/, '');
       case 'plugin:path|join': return args.paths.join('/').replace('/./', '/');
       case 'read_file': return files.get(args.path);
+      case 'read_document': {
+        const content = files.get(args.path);
+        check(content !== undefined, 'Missing mock document');
+        return { content, revision: `mock:${content}`, mtime: 100 };
+      }
+      case 'document_revision': return files.has(args.path)
+        ? { revision: `mock:${files.get(args.path)}`, mtime: 100 } : { revision: null, mtime: null };
       case 'file_mtime': {
         if (!files.has(args.path)) throw new Error('File not found');
         return 100;
       }
-      case 'write_file': {
+      case 'write_file':
+      case 'write_document': {
         if (testCase === 'recovery-save-failure') throw new Error('simulated write failure');
-        events.push('document-saved'); files.set(args.path, args.content); return;
+        if (command === 'write_document' && args.expectedRevision !== (files.has(args.path) ? `mock:${files.get(args.path)}` : null)) {
+          throw new Error('simulated revision conflict');
+        }
+        events.push('document-saved'); files.set(args.path, args.content);
+        return command === 'write_document' ? { revision: `mock:${args.content}`, mtime: 100, backupPath: null } : undefined;
       }
       case 'create_directory': return;
       case 'save_binary_file': binaryWrites.push(args.path); return;
+      case 'save_image_asset': {
+        const directory = args.docPath.replace(/\/[^/]+$/, '') + '/assets';
+        const target = `${directory}/${args.filename}`;
+        binaryWrites.push(target);
+        return { filename: args.filename, relativePath: `./assets/${args.filename}`, path: target };
+      }
       case 'list_recovery_snapshots': return [...snapshots.values()].filter((s) => !args.activeIds.includes(s.id))
         .map((s) => ({ ...s, updatedAt: Date.now(), damaged: false }));
       case 'read_recovery_snapshot': return {

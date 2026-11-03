@@ -3,9 +3,11 @@ import { fitMedia, type MediaPreview } from '../lib/media';
 import { useDialogFocus } from '../lib/useDialogFocus';
 import { IconClose } from './icons';
 import { isComposingEvent } from '../lib/shortcuts';
+import { useIsPresent } from '../lib/presence';
 
 export function MediaViewer({ media, onClose }: { media: MediaPreview; onClose: () => void }) {
   const dialog = useDialogFocus<HTMLDialogElement>(onClose);
+  const present = useIsPresent();
   const viewport = useRef<HTMLDivElement>(null);
   const [fit, setFit] = useState(1);
   const [zoom, setZoom] = useState<number | null>(null);
@@ -13,19 +15,24 @@ export function MediaViewer({ media, onClose }: { media: MediaPreview; onClose: 
   const scale = zoom ?? fit;
   const drag = useRef<{ id: number; x: number; y: number; left: number; top: number } | null>(null);
   useEffect(() => {
+    if (!present) {
+      dialog.current?.close();
+      setZoom(null); setFailed(false); drag.current = null;
+      return;
+    }
     dialog.current?.showModal();
     const element = viewport.current!;
     const measure = () => setFit(fitMedia(media.width, media.height, element.clientWidth - 32, element.clientHeight - 32));
     const observer = new ResizeObserver(measure);
     observer.observe(element); measure();
     return () => observer.disconnect();
-  }, [dialog, media]);
+  }, [dialog, media, present]);
   const changeZoom = (next: number | null) => {
     setZoom(next === null ? null : Math.max(0.1, Math.min(4, next)));
     if (viewport.current) { viewport.current.scrollTop = 0; viewport.current.scrollLeft = 0; }
   };
   return (
-    <dialog ref={dialog} className="media-viewer" aria-label={`${media.kind === 'image' ? '图片' : '图表'}查看器`}
+    <dialog ref={dialog} className="media-viewer" {...{ inert: present ? undefined : '' }} aria-label={`${media.kind === 'image' ? '图片' : '图表'}查看器`}
       onCancel={(event) => { event.preventDefault(); onClose(); }}
       onKeyDown={(event) => {
         // Viewer keyboard actions never fall through to document shortcuts.

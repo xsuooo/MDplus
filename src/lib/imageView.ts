@@ -2,8 +2,14 @@ import type { NodeViewConstructor } from '@milkdown/prose/view';
 import { NodeSelection } from '@milkdown/prose/state';
 import type { MediaPreview } from './media';
 
-export function imageView(resolve: (src: string) => string, onPreview?: (media: MediaPreview) => void): NodeViewConstructor {
+export function imageView(
+  resolve: (src: string) => string,
+  onPreview?: (media: MediaPreview) => void,
+  subscribe?: (listener: () => void) => () => void,
+): NodeViewConstructor {
   return (node, view, getPos) => {
+    let currentNode = node;
+    let destroyed = false;
     const dom = document.createElement('span');
     dom.className = 'md-image-node';
     const image = document.createElement('img');
@@ -43,9 +49,18 @@ export function imageView(resolve: (src: string) => string, onPreview?: (media: 
       image.title = next.attrs.title ?? '';
     };
     render(node);
+    const unsubscribe = subscribe?.(() => {
+      if (!destroyed && !view.isDestroyed) render(currentNode);
+    });
     return {
       dom,
-      update(next) { if (next.type !== node.type) return false; render(next); return true; },
+      update(next) {
+        if (next.type !== currentNode.type) return false;
+        currentNode = next;
+        render(next);
+        return true;
+      },
+      destroy() { destroyed = true; unsubscribe?.(); },
       stopEvent: (event) => event.target instanceof Element && !!event.target.closest('.md-media-controls'),
       ignoreMutation: () => true,
     };

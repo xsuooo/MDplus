@@ -6,32 +6,46 @@ import {
   clearSearch,
   getSearchCount,
   subscribeSearchCount,
+  findTextMatches,
 } from '../lib/search';
+import { measureSourceText } from '../lib/sourcePosition';
 import { IconChevronDown, IconChevronUp, IconClose, IconSearch } from './icons';
 import { isComposingEvent } from '../lib/shortcuts';
+import { useIsPresent } from '../lib/presence';
 
 interface SearchBarProps {
   editor: Editor | null;
+  source?: { input: HTMLTextAreaElement | null; text: string };
   onClose: () => void;
 }
 
-export const SearchBar = memo(function SearchBar({ editor, onClose }: SearchBarProps) {
+export const SearchBar = memo(function SearchBar({ editor, source, onClose }: SearchBarProps) {
   const [keyword, setKeyword] = useState('');
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [count, setCount] = useState(0);
   const previousFocus = useRef<HTMLElement | null>(null);
+  const present = useIsPresent();
+  const [sourceIndex, setSourceIndex] = useState(-1);
+  const sourceMatches = source ? findTextMatches(source.text, keyword, caseSensitive) : [];
+  const total = source ? sourceMatches.length : count;
+
+  useEffect(() => { setSourceIndex(-1); }, [source?.text, keyword, caseSensitive]);
 
   useEffect(() => {
+    if (!present) { setKeyword(''); setCaseSensitive(false); setCount(0); return; }
     previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const input = document.querySelector<HTMLInputElement>('.search-input');
-    input?.focus();
+    input?.focus({ preventScroll: true });
     const unsubscribe = editor ? subscribeSearchCount(editor, setCount) : undefined;
     return () => {
       unsubscribe?.();
       if (editor) clearSearch(editor);
-      if (previousFocus.current?.isConnected) previousFocus.current.focus();
+      if (previousFocus.current?.isConnected
+        && (document.activeElement?.closest('.searchbar') || document.activeElement === document.body)) {
+        previousFocus.current.focus({ preventScroll: true });
+      }
     };
-  }, [editor]);
+  }, [editor, present]);
 
   const apply = (value: string, cs: boolean) => {
     setKeyword(value);
@@ -41,7 +55,25 @@ export const SearchBar = memo(function SearchBar({ editor, onClose }: SearchBarP
   };
 
   const step = (dir: 1 | -1) => {
-    if (!editor || !keyword) return;
+    if (!keyword) return;
+    if (source) {
+      const input = source.input;
+      if (!input?.isConnected || !sourceMatches.length) return;
+      const next = sourceIndex < 0 ? (dir === 1 ? 0 : sourceMatches.length - 1)
+        : (sourceIndex + dir + sourceMatches.length) % sourceMatches.length;
+      setSourceIndex(next);
+      const match = sourceMatches[next];
+      input.setSelectionRange(match.from, match.to);
+      measureSourceText(input, source.text, (top, lineHeight) => {
+        const first = top(match.from);
+        const last = top(match.to - 1) + lineHeight;
+        if (first < input.scrollTop || last > input.scrollTop + input.clientHeight) {
+          input.scrollTop = Math.max(0, first - input.clientHeight / 3);
+        }
+      });
+      return;
+    }
+    if (!editor) return;
     stepSearch(editor, dir);
     setCount(getSearchCount(editor));
   };
@@ -80,7 +112,7 @@ export const SearchBar = memo(function SearchBar({ editor, onClose }: SearchBarP
         <span>Aa</span>
       </label>
       <span className="search-count" aria-live="polite">
-        {keyword && count > 0 ? `${count} 处` : keyword ? '无匹配' : ''}
+        {keyword && total > 0 ? `${total} 处` : keyword ? '无匹配' : ''}
       </span>
       <button className="search-btn" onClick={() => step(-1)} title="上一条 (Shift+Enter)" aria-label="上一条匹配">
         <IconChevronUp size={14} />

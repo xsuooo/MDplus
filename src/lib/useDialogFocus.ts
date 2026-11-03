@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { isComposingEvent } from './shortcuts';
+import { useIsPresent } from './presence';
 
 const FOCUSABLE_SELECTOR =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -10,8 +11,10 @@ export function useDialogFocus<T extends HTMLElement>(onClose: () => void) {
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   const previousFocus = useRef<HTMLElement | null>(null);
+  const present = useIsPresent();
 
   useEffect(() => {
+    if (!present) return;
     previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const dialog = dialogRef.current;
     if (!dialog) return;
@@ -50,9 +53,12 @@ export function useDialogFocus<T extends HTMLElement>(onClose: () => void) {
     dialog.addEventListener('keydown', onKeyDown);
     return () => {
       dialog.removeEventListener('keydown', onKeyDown);
-      if (previousFocus.current?.isConnected) previousFocus.current.focus({ preventScroll: true });
+      if (previousFocus.current?.isConnected
+        && (dialog.contains(document.activeElement) || document.activeElement === document.body)) {
+        previousFocus.current.focus({ preventScroll: true });
+      }
     };
-  }, []);
+  }, [present]);
 
   return dialogRef;
 }

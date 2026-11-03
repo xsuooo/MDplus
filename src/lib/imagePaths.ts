@@ -5,6 +5,11 @@ import { decodeString } from 'micromark-util-decode-string';
 import { normalizeIdentifier } from 'micromark-util-normalize-identifier';
 import type { Token } from 'micromark-util-types';
 
+// Keep the document-directory dependency policy identical for cache reads and SaveAs.
+export function isRelativeImageUrl(url: string): boolean {
+  return !/^(?:mdplus-image:|https?:|data:|file:|[a-zA-Z]:[\\/]|\/|\/\/)/.test(url);
+}
+
 export interface PendingImageReference {
   placeholder: string;
   relativePath: string;

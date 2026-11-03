@@ -1,6 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getPendingImages, restorePendingImages } from './imageOps';
-import { getImageUrls, rewriteImageReferences } from './imagePaths';
+import { getImageUrls, isRelativeImageUrl, rewriteImageReferences } from './imagePaths';
 import type { Tab } from './types';
 
 export interface RecoveryImage { placeholder: string; filename: string; key: string }
@@ -67,7 +67,8 @@ function capture(tab: Pick<Tab, 'id' | 'title' | 'path' | 'markdown'>) {
       sourceUrl: image.source?.url, data: image.data,
     }));
   for (const url of urls) {
-    if (url.startsWith('mdplus-image:') && !images.some((image) => image.placeholder === url)) {
+    if ((url.startsWith('mdplus-image:') || isRelativeImageUrl(url))
+      && !images.some((image) => (image.placeholder === url || image.sourceUrl === url) && image.data.length > 0)) {
       throw new Error('恢复快照缺少图片数据，请立即手动保存文档');
     }
   }
@@ -81,25 +82,32 @@ function capture(tab: Pick<Tab, 'id' | 'title' | 'path' | 'markdown'>) {
 }
 
 export function scheduleRecovery(tab: Pick<Tab, 'id' | 'title' | 'path' | 'markdown'>,
-  onStatus: (status: RecoveryStatus) => void): void {
+  onStatus: (status: RecoveryStatus) => void, ready?: Promise<boolean>): void {
   if (!isTauri()) return;
   const entry = journal(tab.id);
   const generation = ++entry.generation;
   clearTimeout(entry.timer);
+  entry.timer = undefined;
   onStatus('pending');
-  // Capture image aliases now, before a concurrent Save As commits new paths.
-  let data: ReturnType<typeof capture>;
-  try { data = capture(tab); } catch { onStatus('error'); return; }
-  entry.timer = setTimeout(() => {
-    entry.timer = undefined;
-    void enqueue(entry, async () => {
-      if (entry.generation !== generation) return;
-      for (const image of data.images) await cacheImage(tab.id, image, entry);
-      if (entry.generation !== generation) return;
-      await invoke('write_recovery_snapshot', { snapshot: data.snapshot });
-      if (entry.generation === generation) onStatus('protected');
-    }).catch(() => { if (entry.generation === generation) onStatus('error'); });
-  }, 1000);
+  const fail = () => { if (entry.generation === generation) onStatus('error'); };
+  const captureAndSchedule = () => {
+    if (entry.generation !== generation) return;
+    // Without a preparation barrier, freeze aliases synchronously before Save As changes them.
+    let data: ReturnType<typeof capture>;
+    try { data = capture(tab); } catch { fail(); return; }
+    entry.timer = setTimeout(() => {
+      entry.timer = undefined;
+      void enqueue(entry, async () => {
+        if (entry.generation !== generation) return;
+        for (const image of data.images) await cacheImage(tab.id, image, entry);
+        if (entry.generation !== generation) return;
+        await invoke('write_recovery_snapshot', { snapshot: data.snapshot });
+        if (entry.generation === generation) onStatus('protected');
+      }).catch(fail);
+    }, 1000);
+  };
+  if (ready) void ready.then((prepared) => { if (prepared) captureAndSchedule(); else fail(); }, fail);
+  else captureAndSchedule();
 }
 
 /** Serialize deletion after pending image/snapshot writes, so they cannot resurrect a draft. */

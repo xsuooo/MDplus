@@ -40,10 +40,14 @@ export async function runMediaRegression(testCase: MediaCase): Promise<string> {
       await until(() => document.querySelector<HTMLButtonElement>('.md-media-controls button')?.disabled === false);
       click('.md-media-controls button'); await until(() => document.querySelector('.media-viewer[open]'));
       document.querySelector('.media-viewer')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', ctrlKey: true, bubbles: true, cancelable: true }));
-      check(!document.querySelector('.newfile-card'), 'Viewer shortcut edited background document');
+      await new Promise(requestAnimationFrame);
+      const newFile = document.querySelector('.newfile-card');
+      check(!newFile || newFile.closest('[inert]'), 'Viewer shortcut opened an interactive background dialog');
       // This calls the same close handler as a native window-close request.
       click('button[aria-label="关闭窗口"]');
       await until(() => !document.querySelector('.media-viewer') && document.querySelector('#close-document-title'));
+      check(document.querySelector('#close-document-title')!.closest('.modal')!.contains(document.activeElement),
+        'Viewer exit stole the unsaved confirmation focus');
       check(input.value === draft, 'Window close from viewer lost draft');
       return `${testCase}: native close path dismisses viewer before unsaved confirmation`;
     } finally { root.unmount(); host.remove(); }

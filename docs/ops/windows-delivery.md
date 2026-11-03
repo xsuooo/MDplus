@@ -39,11 +39,25 @@ in the build process environment and restored in `finally`. Existing artifacts
 are not used to hide a build failure. Rust and native acceptance remain separate
 gates; successful delivery is not a claim that all acceptance passed.
 
+The [source-manifest tool](<../../scripts/source-manifest.mjs>) captures byte-based
+input manifests before checks, after checks, and after compilation. Build publication
+requires all three digests to agree. The manifest includes selected untracked source,
+public assets, native configuration, tests and scripts; generated output, private
+profiles and local credentials are excluded. The policy and per-file hashes are
+embedded in the existing delivery manifest, without adding a fifth delivery file.
+This is an observed-input binding, not an atomic filesystem snapshot, signature,
+reproducible-build promise, or native acceptance. Toolchain caches and environment
+values are not silently included in the source digest.
+
 To export an existing locally trusted package instead, pass `-PackagePath` and
 `-ExpectedPackageSha256` from its verified acceptance manifest. Never obtain the
 expected hash from an untrusted package and treat that as independent approval.
-This mode does not rebuild, and its source HEAD/build label does not prove the
-historical binary was built from today's tree. It records `mode = Existing`.
+This mode does not rebuild. It derives version from the package name and checks
+the extracted payload ProductVersion, but leaves source/build identity unknown:
+`mode = Existing`, `source.status = unknown`, and null source manifest, source HEAD,
+working-tree state and build label. Current source or old check logs must not be
+attached as proof for those historical bytes. Browser and native acceptance are
+recorded separately as not run by delivery.
 
 Both modes:
 
@@ -95,6 +109,18 @@ Replace `-Browser` with your installed native EXE path. It is not a dependency
 silently installed by these scripts. Results contain the requested cases and
 actual outcomes; zero/incomplete cases fail. CLI calls have a 45-second timeout;
 cleanup closes only that session and stops only the runner's server process.
+
+The [candidate smoke script](<../../tests/windows/candidate-smoke.ps1>) is a
+**separate, opt-in VM-only** check. Its Node/AST self-tests do not execute the
+candidate and do not prove native UIA or WinRT compatibility. Do not run it on the
+host or weaken execution policy. Provision the disposable Windows Sandbox and
+read-only input mapping separately, use the approved binary hash plus matching
+host name/sentinel/fresh RunId, and review its refused/blocked/manual results.
+It never installs, starts Sandbox, uses coordinate/keyboard fallback, or force-kills
+processes. UIA text replacement is not IME coverage; DPI and actual PDF fidelity
+remain manual. A successful automatic smoke still sets `candidateAccepted=false`;
+cleanup only covers its root and recorded descendants, not an unobserved process
+tree. The current completion record is [here](<../completion-2026-11-02.md>).
 
 After reviewing the report, create a **local** JSON approval receipt containing:
 

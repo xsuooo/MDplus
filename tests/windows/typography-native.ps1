@@ -49,6 +49,17 @@ function Choose($name,$index,$label) {
   for($i=0;$i-lt $index;$i++){[Windows.Forms.SendKeys]::SendWait('{DOWN}')}
   Until {(SelectionName $name)-eq $label} "Font selection did not apply: $label"
 }
+function CodeSelected($label) {
+  $element=ByName $label ([Windows.Automation.ControlType]::RadioButton)
+  return $element -and $element.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected
+}
+function ChooseCode($label) {
+  Until {$null-ne(ByName $label ([Windows.Automation.ControlType]::RadioButton))} "Missing code font $label"
+  $element=ByName $label ([Windows.Automation.ControlType]::RadioButton)
+  $element.SetFocus()
+  $element.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
+  Until {CodeSelected $label} "Code font selection did not apply: $label"
+}
 function SourceText { (ByName 'Markdown 源码').GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value }
 function SourceSelection { ((ByName 'Markdown 源码').GetCurrentPattern([Windows.Automation.TextPattern]::Pattern).GetSelection()|Select-Object -First 1).GetText(-1) }
 function Launch {
@@ -73,7 +84,7 @@ try {
   InvokeName '排版设置'
   Until {$null-ne(ByName '界面与正文字体')} 'Typography controls not available'
   Check ((SelectionName '界面与正文字体')-eq 'MiSans') 'Native body default is MiSans'
-  Check ((SelectionName '源码与代码字体')-eq 'JetBrains Mono + 更纱黑体') 'Native code default is JetBrains / Sarasa'
+  Check (CodeSelected 'JetBrains Mono + 更纱黑体') 'Native code default is JetBrains / Sarasa'
   Capture 'typography-default'
   InvokeName '关闭排版设置'
   (ByName '切换源码模式').GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern).Toggle()
@@ -86,8 +97,8 @@ try {
   Check (![string]::IsNullOrEmpty($selected)) 'Native source selection established'
   InvokeName '排版设置'
   Choose '界面与正文字体' 2 '霞鹜文楷'
-  Check ((SelectionName '源码与代码字体')-eq 'JetBrains Mono + 更纱黑体') 'Body change leaves code preference unchanged'
-  Choose '源码与代码字体' 2 'Cascadia Code + MiSans'
+  Check (CodeSelected 'JetBrains Mono + 更纱黑体') 'Body change leaves code preference unchanged'
+  ChooseCode 'Cascadia Code + MiSans'
   Check ((SelectionName '界面与正文字体')-eq '霞鹜文楷') 'Code change leaves body preference unchanged'
   Start-Sleep -Milliseconds 400
   Check ((SourceText)-eq $before -and (SourceSelection)-eq $selected) 'Native font changes preserve draft and source selection'
@@ -102,7 +113,7 @@ try {
   InvokeName '排版设置'
   Until {$null-ne(ByName '界面与正文字体')} 'Reopened panel missing'
   Check ((SelectionName '界面与正文字体')-eq '霞鹜文楷') 'Body preference survives process restart'
-  Check ((SelectionName '源码与代码字体')-eq 'Cascadia Code + MiSans') 'Code preference survives process restart'
+  Check (CodeSelected 'Cascadia Code + MiSans') 'Code preference survives process restart'
   InvokeName '关闭排版设置'
   Capture 'typography-reopened'
   [void]$script:app.CloseMainWindow()
