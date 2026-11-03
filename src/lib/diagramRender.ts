@@ -1,5 +1,5 @@
 import { bodyFamily, embeddedFonts, blobDataURL } from './fontResources';
-import type { BodyFont } from './editorFont';
+import { BODY_FONTS, type BodyFont } from './editorFont';
 import { diagramPreview, type MediaPreview } from './media';
 
 let queue: Promise<unknown> = Promise.resolve();
@@ -12,7 +12,10 @@ export async function renderDiagramMedia(code: string, theme: 'light' | 'dark', 
     if (fontCache?.promise === pending) fontCache = undefined;
     throw error;
   });
-  await document.fonts.load(`400 16px ${bodyFamily(font)}`, '中文 Mixed');
+  const body = BODY_FONTS.find((entry) => entry.id === font)!;
+  await Promise.all([document.fonts.load(`400 16px ${body.family}`, '中文 Mixed'),
+    document.fonts.load(`${body.strongWeight} 16px ${body.family}`, '中文 Bold')]);
+  await document.fonts.ready;
   const { default: mermaid } = await import('mermaid');
   const task = queue.then(async () => {
     // Strict rendering measures loaded app fonts; previews use inert SVG images.
@@ -46,6 +49,30 @@ export async function renderDiagramMedia(code: string, theme: 'light' | 'dark', 
         // WebView2 can retain Mermaid's temporary label bounds in its live SVG.
         // Measure the completed, strict-sanitized tree with final node positions.
         host.replaceChildren(parsed); applyStyles();
+        parsed.getBoundingClientRect();
+        await document.fonts.ready;
+        for (const label of parsed.querySelectorAll('foreignObject')) {
+          const content = label.firstElementChild;
+          const matrix = label.getScreenCTM();
+          if (!(content instanceof HTMLElement) || !matrix) continue;
+          // Shrink HTML content before replacing a leaked measurement box.
+          content.style.display = 'inline-block';
+          const box = content.getBoundingClientRect();
+          const scaleX = Math.hypot(matrix.a, matrix.b), scaleY = Math.hypot(matrix.c, matrix.d);
+          if (scaleX > 0 && scaleY > 0) {
+            label.setAttribute('width', String(box.width / scaleX));
+            label.setAttribute('height', String(box.height / scaleY));
+          }
+        }
+        const title = parsed.querySelector('text.flowchartTitleText');
+        if (title) {
+          // Mermaid can center the title on its temporary 16384px label bounds.
+          const parent = title.parentNode!, next = title.nextSibling;
+          title.remove();
+          const graph = parsed.getBBox();
+          title.setAttribute('x', String(graph.x + graph.width / 2));
+          parent.insertBefore(title, next);
+        }
         const bounds = parsed.getBBox();
         const padding = mermaid.mermaidAPI.getConfig().flowchart?.diagramPadding ?? 8;
         parsed.setAttribute('viewBox', `${bounds.x - padding} ${bounds.y - padding} ${bounds.width + 2 * padding} ${bounds.height + 2 * padding}`);

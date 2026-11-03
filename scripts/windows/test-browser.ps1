@@ -85,7 +85,8 @@ try {
     } while ($true)
     $opened = $true
     $null = Invoke-Browser @('open', 'about:blank')
-    $viewport = ''; $reducedMotion = $false
+    # Unknown until explicitly emulated, including the first normal-motion case.
+    $viewport = ''; $reducedMotion = $null
     foreach ($case in $Cases) {
         if ($case -notmatch '^[a-z0-9-]+$') { throw 'Invalid browser case name.' }
         $width = '1280'; $height = '800'
@@ -94,7 +95,7 @@ try {
             $null = Invoke-Browser @('set', 'viewport', $width, $height)
             $viewport = "$width-$height"
         }
-        $reduce = $case -in @('interface-reduced-motion', 'interface-tab-scroll-reduced', 'theme-reduced-motion')
+        $reduce = $case -in @('interface-reduced-motion', 'interface-tab-scroll-reduced', 'theme-reduced-motion', 'export-diagram-bounds-reduced')
         if ($reduce -ne $reducedMotion) {
             $arguments = @('set', 'media', 'light')
             if ($reduce) { $arguments += 'reduced-motion' }
@@ -107,13 +108,14 @@ try {
         $end = (Get-Date).AddSeconds(60)
         do {
             Start-Sleep -Milliseconds 400
-            $script = '({url:location.href,status:document.querySelector("#regression-result")?.dataset.status,detail:document.querySelector("#regression-result")?.textContent})'
+            $script = '({url:location.href,status:document.querySelector("#regression-result")?.dataset.status,detail:document.querySelector("#regression-result")?.textContent,reducedMotion:matchMedia("(prefers-reduced-motion: reduce)").matches,userAgent:navigator.userAgent})'
             $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($script))
             $raw = Invoke-Browser @('eval', "eval(atob('$encoded'))", '--json')
             $report = ($raw | ConvertFrom-Json).data.result
         } while ($report.status -notin @('passed', 'failed') -and (Get-Date) -lt $end)
         if ($report.url -ne $url) { throw 'Result URL mismatch.' }
-        $results.Add(@{ case = $case; status = $report.status; detail = $report.detail; viewport = $viewport; reducedMotion = $reduce })
+        $results.Add(@{ case = $case; status = $report.status; detail = $report.detail; viewport = $viewport; reducedMotion = $report.reducedMotion; requestedReducedMotion = $reduce; userAgent = $report.userAgent })
+        if ($report.reducedMotion -ne $reduce) { throw "Browser motion preference mismatch: $case" }
         Write-Host "$case : $($report.status)"
     }
     Assert-BrowserResults $Cases ($results.ToArray())

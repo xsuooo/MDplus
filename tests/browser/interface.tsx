@@ -167,15 +167,22 @@ export async function runInterfaceRegression(testCase: InterfaceCase): Promise<s
       tabs[0].focus({ preventScroll: true });
       tabs[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }));
       await settled(); await until(() => strip.scrollLeft === 0);
-      const calls: ScrollToOptions[] = [];
+      const calls: ScrollToOptions[] = [], positions: number[] = [];
+      const focusStability: boolean[] = [];
+      const last = tabs[tabs.length - 1], focus = last.focus.bind(last);
+      last.focus = (options) => {
+        const before = strip.scrollLeft; focus(options);
+        focusStability.push(options?.preventScroll === true && strip.scrollLeft === before);
+      };
       const scrollTo = strip.scrollTo.bind(strip);
-      strip.scrollTo = ((options: ScrollToOptions) => { calls.push(options); scrollTo(options); }) as typeof strip.scrollTo;
+      strip.scrollTo = ((options: ScrollToOptions) => { positions.push(strip.scrollLeft); calls.push(options); scrollTo(options); }) as typeof strip.scrollTo;
       tabs[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }));
       await frame(); await frame();
       check(calls.length === 1 && calls[0].behavior === (reduced ? 'instant' : 'smooth'), 'Keyboard tab selection must scroll once with the motion preference');
       const target = calls[0].left!;
-      check(target > 100 && document.activeElement === tabs[tabs.length - 1], 'Keyboard did not select and focus the offscreen tab');
-      if (!reduced) check(strip.scrollLeft < target - 20, 'Tab focus jumped past the smooth-scroll animation');
+      check(target > 100 && document.activeElement === last, 'Keyboard did not select and focus the offscreen tab');
+      // Windows can make native smooth scrolling instant; observe focus itself instead.
+      check(positions[0] === 0 && focusStability.length === 1 && focusStability[0], 'Tab focus scrolled independently of the explicit navigation');
       await until(() => Math.abs(strip.scrollLeft - target) < 2);
       check(tabs[tabs.length - 1].getBoundingClientRect().right <= strip.getBoundingClientRect().right + 1, 'Active tab remained clipped');
     } else {
@@ -228,13 +235,13 @@ async function checkNavigation(reduced: boolean) {
   click('button[aria-label="打开目录"]'); await settled();
   const items = document.querySelectorAll<HTMLElement>('.outline-item');
   check(items.length === 35, 'Long document outline is incomplete');
-  const calls: ScrollToOptions[] = [];
+  const calls: ScrollToOptions[] = [], positions: number[] = [];
   const scrollTo = scroller.scrollTo.bind(scroller);
-  scroller.scrollTo = ((options: ScrollToOptions) => { calls.push(options); scrollTo(options); }) as typeof scroller.scrollTo;
+  scroller.scrollTo = ((options: ScrollToOptions) => { positions.push(scroller.scrollTop); calls.push(options); scrollTo(options); }) as typeof scroller.scrollTo;
   items[17].click(); await frame(); await frame();
   check(calls.length === 1 && calls[0].behavior === (reduced ? 'instant' : 'smooth'), 'Outline must use one preference-aware navigation scroll');
   const target = calls[0].top!;
-  if (!reduced) check(scroller.scrollTop < target - 100, 'Outline jumped before its smooth scroll');
+  check(positions[0] === 0, 'Outline focus scrolled before its explicit navigation');
   await until(() => Math.abs(scroller.scrollTop - target) < 2);
   check(source.value === original, 'Navigation edited the source document');
   check(getComputedStyle(scroller).scrollBehavior === 'auto', 'Normal editor scrolling must not be globally smoothed');

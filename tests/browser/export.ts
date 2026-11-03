@@ -5,7 +5,7 @@ import { mockIPC } from '@tauri-apps/api/mocks';
 import '../../src/styles/global.css';
 
 export const exportCases = ['export-offline', 'export-frozen-source', 'export-cancel', 'export-missing-image',
-  'export-invalid-diagram', 'export-print-isolation', 'export-print-csp', 'export-preview-csp', 'export-diagram-fonts', 'export-diagram-bounds', 'export-security', 'export-image-alignment'] as const;
+  'export-invalid-diagram', 'export-print-isolation', 'export-print-csp', 'export-preview-csp', 'export-diagram-fonts', 'export-diagram-bounds', 'export-diagram-bounds-reduced', 'export-diagram-label-bounds', 'export-security', 'export-image-alignment'] as const;
 export type ExportCase = typeof exportCases[number];
 function check(value: unknown, message: string): asserts value { if (!value) throw new Error(message); }
 async function until(test: () => unknown) {
@@ -103,15 +103,52 @@ export async function runExportRegression(testCase: ExportCase): Promise<string>
       await image.decode();
       check(media.src.startsWith('data:image/svg+xml') && image.naturalWidth > 100 && image.naturalHeight < 200,
         'Packaged-style CSP prevented inert diagram image decoding');
-    } else if (testCase === 'export-diagram-bounds') {
+    } else if (testCase === 'export-diagram-label-bounds') {
+      const { default: mermaid } = await import('mermaid');
+      const render = mermaid.render;
+      let injected = 0;
+      // Reproduce Mermaid's leaked temporary HTML-label measurement boxes.
+      mermaid.render = async (...args: Parameters<typeof render>) => {
+        const rendered = await render(...args);
+        const svg = new DOMParser().parseFromString(rendered.svg, 'text/html').querySelector('svg')!;
+        for (const label of svg.querySelectorAll('foreignObject')) {
+          label.setAttribute('width', '2000'); label.setAttribute('height', '2000'); injected++;
+        }
+        return { ...rendered, svg: svg.outerHTML };
+      };
+      try {
+        const media = await renderDiagramMedia('---\ntitle: 图表标题\n---\ngraph TD\nsubgraph 中文分组\nA[第一行<br/>第二行]-->B{Decision?}\nend\nB-->|Yes|C[Finish]', 'light', 'misans');
+        check(injected > 0, 'Placeholder regression did not exercise HTML labels');
+        check(media.width > 100 && media.width < 900 && media.height > 50 && media.height < 600,
+          `Final diagram bounds retain temporary measurement boxes: ${media.width}x${media.height}`);
+        const container = document.createElement('div'); container.innerHTML = media.svg; document.body.append(container); resources.push(container);
+        const svg = container.querySelector('svg')!, bounds = svg.getBBox(), box = svg.viewBox.baseVal;
+        check(box.x <= bounds.x && box.y <= bounds.y && box.x + box.width >= bounds.x + bounds.width
+          && box.y + box.height >= bounds.y + bounds.height, 'Normalized diagram clips its title, groups or labels');
+        for (const text of ['图表标题', '中文分组', '第一行', '第二行']) check(svg.textContent?.includes(text), `Diagram lost label: ${text}`);
+      } finally { mermaid.render = render; }
+    } else if (testCase === 'export-diagram-bounds' || testCase === 'export-diagram-bounds-reduced') {
+      check(matchMedia('(prefers-reduced-motion: reduce)').matches === (testCase === 'export-diagram-bounds-reduced'),
+        'Runner did not emulate the requested diagram motion preference');
       for (const code of ['graph LR\nA[中文起点]-->B[English endpoint]',
         '---\ntitle: 图表标题\n---\ngraph TD\nsubgraph 中文分组\nA[第一行<br/>第二行]-->B{Decision?}\nend\nB-->|Yes|C[Finish]']) {
         const media = await renderDiagramMedia(code, 'light', 'misans');
-        check(media.width > 100 && media.width < 900 && media.height > 50 && media.height < 600, 'Final diagram bounds retain temporary measurement boxes');
+        const probe = new DOMParser().parseFromString(media.svg, 'text/html').querySelector('svg')!;
+        const title = probe.querySelector('text.flowchartTitleText');
+        const largeBoxes = Array.from(probe.querySelectorAll('rect,foreignObject')).filter((element) => Number(element.getAttribute('width')) > 900)
+          .map((element) => ({ tag: element.tagName, width: element.getAttribute('width'), height: element.getAttribute('height') }));
+        check(media.width > 100 && media.width < 900 && media.height > 50 && media.height < 600,
+          `Final diagram bounds retain temporary measurement boxes: ${media.width}x${media.height}; titleX=${title?.getAttribute('x')}; largeBoxes=${JSON.stringify(largeBoxes)}; ${code}`);
         const container = document.createElement('div'); container.innerHTML = media.svg; document.body.append(container); resources.push(container);
         const svg = container.querySelector('svg')!, bounds = svg.getBBox(), box = svg.viewBox.baseVal;
         check(box.x <= bounds.x && box.y <= bounds.y && box.x + box.width >= bounds.x + bounds.width
           && box.y + box.height >= bounds.y + bounds.height, 'Diagram title, groups or nodes clipped by final bounds');
+        const caption = svg.querySelector('text.flowchartTitleText');
+        if (caption) {
+          const parent = caption.parentNode!, next = caption.nextSibling;
+          caption.remove(); const graph = svg.getBBox(); parent.insertBefore(caption, next);
+          check(Math.abs(Number(caption.getAttribute('x')) - graph.x - graph.width / 2) < 1, 'Diagram title is not centered on its visible content');
+        }
       }
     } else if (testCase === 'export-diagram-fonts') {
       for (const [font, family] of [['misans', 'MDPlus MiSans'], ['wenkai', 'MDPlus LXGW WenKai'], ['sarasa', 'MDPlus Sarasa Gothic SC']] as const) {

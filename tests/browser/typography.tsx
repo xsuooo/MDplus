@@ -199,8 +199,14 @@ export async function runTypographyRegression(testCase: TypographyCase): Promise
         host.style.width = `${width}px`;
         for (const zoom of [1, 1.2, 2]) {
           document.querySelector<HTMLElement>('.editor-area')!.style.setProperty('--editor-zoom', String(zoom));
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
           const computed = getComputedStyle(editor);
-          check(parseFloat(computed.width) <= 721, 'Reading measure exceeds 720px before zoom');
+          const wrapper = editor.closest<HTMLElement>('.milkdown')!;
+          const effectiveZoom = parseFloat(getComputedStyle(wrapper).zoom);
+          check(effectiveZoom === zoom, `Reading zoom did not settle: ${effectiveZoom} vs ${zoom}`);
+          const readingWidth = editor.getBoundingClientRect().width / effectiveZoom;
+          check(readingWidth <= 721,
+            `Reading measure exceeds 720px before zoom: container=${width}, zoom=${zoom}/${effectiveZoom}, computed=${computed.width}, normalized=${readingWidth}`);
           const text = editor.querySelector('p')!;
           check(text.getBoundingClientRect().width <= editor.getBoundingClientRect().width + 1, 'Body overflows its reading column');
           check(editor.querySelector('pre')!.scrollWidth > editor.querySelector('pre')!.clientWidth, 'Long code is not horizontally scrollable');

@@ -222,9 +222,13 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
     await until(() => document.documentElement.dataset.theme === 'dark' && ready());
     click('button[aria-label="切换主题,当前为深色"]');
     await until(() => document.documentElement.dataset.theme === 'light' && ready());
+    await document.fonts.ready;
+    await settleAnimations();
     const frame = document.querySelector<HTMLImageElement>('.md-mermaid-holder img')!;
     const scroller = document.querySelector<HTMLElement>('.milkdown-container')!;
     document.querySelector<HTMLElement>('.editor-area')!.style.setProperty('--editor-zoom', '1.2');
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
     scroller.scrollTop = 700;
     const top = scroller.scrollTop;
     const box = frame.getBoundingClientRect();
@@ -236,7 +240,7 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
       check(scroller.scrollTop === top, 'Unchanged resolved theme moved the scroll position');
       const after = frame.getBoundingClientRect();
       check(after.top === box.top && after.height === box.height && after.width === box.width,
-        'Unchanged resolved theme moved or resized the diagram at 120% zoom');
+        `Unchanged resolved theme moved or resized the diagram at 120% zoom: ${JSON.stringify(box.toJSON())} => ${JSON.stringify(after.toJSON())}`);
     } else {
       dark = true;
       media.dispatchEvent(new Event('change'));
