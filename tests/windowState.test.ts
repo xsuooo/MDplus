@@ -29,12 +29,17 @@ describe('window state defaults', () => {
 
 describe('sanitizeWindowState', () => {
   it('keeps a valid state and normalizes maximized', () => {
-    expect(sanitizeWindowState({ ...valid, maximized: true })).toEqual({ ...valid, maximized: true });
+    expect(sanitizeWindowState({ ...valid, maximized: true })).toEqual({
+      ...valid,
+      maximized: true,
+    });
     expect(sanitizeWindowState({ ...valid, maximized: 'yes' })).toEqual(valid);
   });
 
   it('rejects the minimized sentinel coordinates written by Windows', () => {
-    expect(sanitizeWindowState({ width: 144, height: 19, x: -32000, y: -32000, maximized: false })).toBeNull();
+    expect(
+      sanitizeWindowState({ width: 144, height: 19, x: -32000, y: -32000, maximized: false }),
+    ).toBeNull();
     expect(sanitizeWindowState({ ...valid, x: -32000 })).toBeNull();
     expect(sanitizeWindowState({ ...valid, y: -32000 })).toBeNull();
   });
@@ -55,7 +60,11 @@ describe('sanitizeWindowState', () => {
   });
 
   it('accepts genuine negative coordinates from a display to the left', () => {
-    expect(sanitizeWindowState({ ...valid, x: -1800, y: 40 })).toEqual({ ...valid, x: -1800, y: 40 });
+    expect(sanitizeWindowState({ ...valid, x: -1800, y: 40 })).toEqual({
+      ...valid,
+      x: -1800,
+      y: 40,
+    });
   });
 });
 
@@ -92,30 +101,38 @@ describe('clampToVisibleDisplays', () => {
 
 describe('windowStateToPersist', () => {
   it('refuses to persist while the window is minimized', () => {
-    expect(windowStateToPersist(
-      { minimized: true, maximized: false, width: 144, height: 19, x: -32000, y: -32000 },
-      [primary],
-    )).toBeNull();
+    expect(
+      windowStateToPersist(
+        { minimized: true, maximized: false, width: 144, height: 19, x: -32000, y: -32000 },
+        [primary],
+      ),
+    ).toBeNull();
   });
 
   it('refuses to persist a minimized-size snapshot even if the flag is missing', () => {
-    expect(windowStateToPersist(
-      { minimized: false, maximized: false, width: 144, height: 19, x: 10, y: 10 },
-      [primary],
-    )).toBeNull();
+    expect(
+      windowStateToPersist(
+        { minimized: false, maximized: false, width: 144, height: 19, x: 10, y: 10 },
+        [primary],
+      ),
+    ).toBeNull();
   });
 
   it('persists a valid snapshot clamped into a visible display', () => {
-    expect(windowStateToPersist(
-      { minimized: false, maximized: false, width: 1200, height: 800, x: 9000, y: 9000 },
-      [primary],
-    )).toEqual({ width: 1200, height: 800, x: 720, y: 240, maximized: false });
+    expect(
+      windowStateToPersist(
+        { minimized: false, maximized: false, width: 1200, height: 800, x: 9000, y: 9000 },
+        [primary],
+      ),
+    ).toEqual({ width: 1200, height: 800, x: 720, y: 240, maximized: false });
   });
 
   it('keeps the maximized flag and existing coordinates', () => {
-    expect(windowStateToPersist(
-      { minimized: false, maximized: true, width: 1200, height: 800, x: 100, y: 80 },
-      [primary],
-    )).toEqual({ width: 1200, height: 800, x: 100, y: 80, maximized: true });
+    expect(
+      windowStateToPersist(
+        { minimized: false, maximized: true, width: 1200, height: 800, x: 100, y: 80 },
+        [primary],
+      ),
+    ).toEqual({ width: 1200, height: 800, x: 100, y: 80, maximized: true });
   });
 });

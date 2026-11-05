@@ -1,1198 +1,135 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { invoke, isTauri } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
-import { getCurrentWebview } from '@tauri-apps/api/webview';
-import { availableMonitors, getCurrentWindow, LogicalSize, LogicalPosition } from '@tauri-apps/api/window';
-import type { Editor } from '@milkdown/kit/core';
-import { editorViewCtx } from '@milkdown/kit/core';
-import { TextSelection } from '@milkdown/prose/state';
-import { Toolbar } from './components/Toolbar';
-import { TabBar } from './components/TabBar';
-import { OutlinePanel } from './components/OutlinePanel';
-import { StatusBar } from './components/StatusBar';
-import { RecoveryModal } from './components/RecoveryModal';
-import { MediaViewer } from './components/MediaViewer';
-import type { MediaPreview } from './lib/media';
-import { EditorTab } from './components/EditorTab';
-import { SearchBar } from './components/SearchBar';
-import { NewFileModal } from './components/NewFileModal';
-import { ShortcutModal } from './components/ShortcutModal';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { CloseConfirmModal } from './components/CloseConfirmModal';
-import { RecentMenu } from './components/RecentMenu';
-import { Presence } from './lib/presence';
-import { SourceEditor } from './components/SourceEditor';
-import { readDocument, documentRevision, writeDocument, fileMtime, pickOpenFile, pickSaveFile, basename } from './lib/fileOps';
-import { clearPendingImages, commitImageMigration, migratePendingImages, saveImage, prepareImageReferences, resolveImageSource } from './lib/imageOps';
-import { captureExport, exportHTML, exportPDF } from './lib/export';
-import { refreshMermaidTheme } from './lib/mermaid';
+import { EditorTab } from './components/EditorTab';
 import { IconBrand } from './components/icons';
+import { MediaViewer } from './components/MediaViewer';
+import { NewFileModal } from './components/NewFileModal';
+import { OutlinePanel } from './components/OutlinePanel';
+import { RecentMenu } from './components/RecentMenu';
+import { RecoveryModal } from './components/RecoveryModal';
+import { SearchBar } from './components/SearchBar';
+import { SettingsNotice } from './components/SettingsNotice';
+import { ShortcutModal } from './components/ShortcutModal';
+import { SourceEditor } from './components/SourceEditor';
+import { StatusBar } from './components/StatusBar';
+import { TabBar } from './components/TabBar';
+import { Toolbar } from './components/Toolbar';
+import { useDocumentClose } from './hooks/useDocumentClose';
+import { useDocumentExport } from './hooks/useDocumentExport';
+import { useDocumentFiles } from './hooks/useDocumentFiles';
+import { useDocumentSave } from './hooks/useDocumentSave';
+import { useDocumentSession } from './hooks/useDocumentSession';
+import { useEditorView } from './hooks/useEditorView';
+import { useExternalChanges } from './hooks/useExternalChanges';
+import { usePreferences } from './hooks/usePreferences';
+import { useRecovery } from './hooks/useRecovery';
+import { useWindowLifecycle } from './hooks/useWindowLifecycle';
+import type { MediaPreview } from './lib/media';
+import { readOutlineWidth, writeOutlineWidth } from './lib/outlineWidth';
+import { pathKey } from './lib/pathIdentity';
+import { Presence } from './lib/presence';
 import {
-  getRecentFiles,
-  pushRecentFile,
-  removeRecentFile,
-  getThemeMode,
-  setThemeMode,
-  getSourceModePref,
-  setSourceModePref,
-  getWindowState,
-  setWindowState,
-  getOutlineOpen,
-  setOutlineOpen as saveOutlineOpen,
-  getShortcutBindings,
-  saveShortcutBindings,
-} from './lib/store';
-import {
-  DEFAULT_SHORTCUTS,
   createShortcutIndex,
   dispatchShortcut,
   isComposingEvent,
   type ShortcutAction,
-  type ShortcutBindings,
 } from './lib/shortcuts';
-import { getTemplate } from './lib/templates';
-import { setMarkdown, undo, redo } from './lib/editor';
-import { rebaseSourcePlace, renderedPlace, restoreRendered, restoreSource, sourcePlace, toRendered, toSource,
-  type ModeExchange, type RenderedPlace, type SourcePlace } from './lib/editorPosition';
-import { getImageUrls, isRelativeImageUrl, type PendingImageReference } from './lib/imagePaths';
-import { computeStats } from './lib/stats';
-import { showMessage, confirmDialog } from './lib/dialog';
-import { applyTheme } from './lib/theme';
-import { errorMessage } from './lib/errors';
 import { startupView } from './lib/startup';
-import { bindEditorZoomControls, nextEditorZoom, readEditorZoom, writeEditorZoom } from './lib/editorZoom';
-import { clampToVisibleDisplays, windowStateToPersist, type DisplayWorkArea } from './lib/windowState';
-import { readOutlineWidth, writeOutlineWidth } from './lib/outlineWidth';
 import { cycleTabIndex, type TabWheelDirection } from './lib/tabWheel';
-import { BODY_FONTS, CODE_FONTS, readBodyFont, readCodeFont, writeBodyFont, writeCodeFont, type BodyFont, type CodeFont } from './lib/editorFont';
-import { clearRecovery, listRecovery, protectPastedImage, restoreRecovery, scheduleRecovery,
-  type RecoveryEntry, type RecoveryStatus } from './lib/recovery';
-import type { RecentFile, Tab, ThemeMode, EditorUpdate } from './lib/types';
 import './styles/global.css';
 
-const AUTO_SAVE_DELAY = 1500; // 停输 1.5s 自动保存
-const EXTERNAL_POLL_MS = 2000; // 每 2s 检测外部文件变化
-
-/** 读取显示器工作区;权限缺失或调用失败时返回空数组,调用方跳过位置校正。 */
-async function readDisplayWorkAreas(): Promise<DisplayWorkArea[]> {
-  try {
-    const monitors = await availableMonitors();
-    return monitors.map(({ workArea }) => ({
-      x: workArea.position.x,
-      y: workArea.position.y,
-      width: workArea.size.width,
-      height: workArea.size.height,
-    }));
-  } catch {
-    return [];
-  }
-}
-
-function makeId(): string {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `t-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
-
-function pathKey(path: string): string {
-  return path.replace(/\//g, '\\').toLocaleLowerCase();
-}
-
 export default function App() {
-  const [tabs, setTabs] = useState<Tab[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [themeMode, setThemeModeState] = useState<ThemeMode>('light');
-  const [sourceMode, setSourceMode] = useState(false);
+  const session = useDocumentSession();
+  const {
+    themeMode,
+    outlineOpen,
+    shortcuts,
+    settingsError,
+    retrySettings,
+    changeThemeMode,
+    changeOutlineOpen,
+    changeShortcuts,
+    changeSourcePreference,
+  } = usePreferences(session.setSourceMode);
+  const {
+    tabs,
+    activeId,
+    sourceMode,
+    searchOpen,
+    setSearchOpen,
+    activeTab,
+    editorRegistry,
+    tabMirror,
+    blockedExternalMtime,
+    sourceRegistry,
+    sourceRewrites,
+    selectTab,
+    registerSource,
+    resolveContent,
+  } = session;
   const [mediaPreview, setMediaPreview] = useState<MediaPreview | null>(null);
-  useEffect(() => { setMediaPreview(null); }, [activeId, sourceMode]);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [outlineOpen, setOutlineOpen] = useState(false);
+  useEffect(() => {
+    setMediaPreview(null);
+  }, [activeId, sourceMode]);
   const [outlineWidth, setOutlineWidth] = useState(readOutlineWidth);
   const [newModalOpen, setNewModalOpen] = useState(false);
   const [recentMenuOpen, setRecentMenuOpen] = useState(false);
-  const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
-  const [pendingCloseTab, setPendingCloseTab] = useState<Tab | null>(null);
-  const [fileDialogBusy, setFileDialogBusy] = useState(false);
-  const [savingId, setSavingId] = useState<string | null>(null);
-  const [startupResolved, setStartupResolved] = useState(() => !isTauri());
-  const [editorZoom, setEditorZoom] = useState(readEditorZoom);
   // 快捷键表先用默认值渲染,启动后由已保存的绑定覆盖,避免首帧闪断
-  const [shortcuts, setShortcuts] = useState<ShortcutBindings>(DEFAULT_SHORTCUTS);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [codeFont, setCodeFont] = useState(readCodeFont);
-  const [recoveryEntries, setRecoveryEntries] = useState<RecoveryEntry[]>([]);
-  const [recoveryOpen, setRecoveryOpen] = useState(false);
-  const [recoveryStates, setRecoveryStates] = useState<Record<string, RecoveryStatus>>({});
-  const [bodyFont, setBodyFont] = useState(readBodyFont);
-  const [exporting, setExporting] = useState(false);
-  const exportBusy = useRef(false);
-  useEffect(() => { void refreshMermaidTheme(); }, [bodyFont]);
-
-  // 编辑器实例注册表,避免每次输入都重渲染
-  const editorRegistry = useRef<Record<string, Editor | null>>({});
-  // 各标签页最新 markdown / outline 镜像
-  const tabMirror = useRef<Record<string, EditorUpdate>>({});
-  // tabs 的同步引用,便于在异步回调中读取最新状态
-  const tabsRef = useRef<Tab[]>([]);
-  const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-  const saveQueues = useRef<Record<string, Promise<boolean>>>({});
-  // 递增令牌让已排队但尚未开始的保存在标签关闭后失效。
-  const saveGenerations = useRef<Record<string, number>>({});
-  // 内容版本用于识别另存为/磁盘写入期间是否有新编辑。
-  const contentGenerations = useRef<Record<string, number>>({});
-  const imagePreparations = useRef<Record<string, { version: number; path: string; revision: string | null; promise: Promise<boolean> }>>({});
-  const blockedExternalMtime = useRef<Record<string, number>>({});
-  const openingPaths = useRef(new Set<string>());
-  const externalChecks = useRef(new Set<string>());
-  const externalPrompts = useRef(new Set<string>());
-  const startupInitStarted = useRef(false);
-  // 输入节流:每个标签最近一次未落定的 React 渲染同步定时器
-  const tabRenderTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-  // 绑定表读盘完成前不写盘,否则默认值会覆盖用户的已存设置
-  const shortcutsLoaded = useRef(false);
-  // 异步保存/重载完成时读取当前视图,不能使用发起操作时的闭包。
-  const currentView = useRef({ activeId, sourceMode });
-  currentView.current = { activeId, sourceMode };
-
-  const editorAreaRef = useRef<HTMLElement | null>(null);
-  const activeTab = useMemo(() => tabs.find((t) => t.id === activeId) ?? null, [tabs, activeId]);
-  const sourceRegistry = useRef<Record<string, HTMLTextAreaElement | null>>({});
-  const sourceRewrites = useRef<Record<string, PendingImageReference[]>>({});
-  const positions = useRef<Record<string, { sourceMode?: boolean; source?: SourcePlace; rendered?: RenderedPlace; exchange?: ModeExchange }>>({});
-  const enteringSource = useRef(false);
-  const fontPosition = useRef<{ id: string; source?: SourcePlace; rendered?: RenderedPlace } | null>(null);
-  const syncEditor = useCallback((id: string, markdown: string, history = true) => {
-    const editor = editorRegistry.current[id];
-    if (!editor) return;
-    const update = setMarkdown(editor, markdown, history);
-    if (update) tabMirror.current[id] = { ...update, markdown, stats: computeStats(markdown) };
-  }, []);
-  const rememberActive = useCallback(() => {
-    const { activeId: id, sourceMode: source } = currentView.current;
-    if (!id) return;
-    const saved = positions.current[id] ??= {};
-    saved.sourceMode = source;
-    const input = sourceRegistry.current[id];
-    const editor = editorRegistry.current[id];
-    if (source && input) saved.source = sourcePlace(input);
-    else if (editor) saved.rendered = renderedPlace(editor);
-  }, []);
-  const selectTab = useCallback((id: string | null) => {
-    if (currentView.current.activeId === id) return;
-    rememberActive();
-    setActiveId(id);
-    setSourceMode(id ? positions.current[id]?.sourceMode ?? false : false);
-  }, [rememberActive]);
-  const registerSource = useCallback((id: string, input: HTMLTextAreaElement | null) => {
-    sourceRegistry.current[id] = input;
-  }, []);
-  const captureFontPosition = useCallback(() => {
-    rememberActive();
-    const { activeId: id, sourceMode: source } = currentView.current;
-    if (id) {
-      const saved = positions.current[id];
-      fontPosition.current = { id, source: source ? saved?.source : undefined, rendered: source ? undefined : saved?.rendered };
-    }
-  }, [rememberActive]);
-  const changeBodyFont = useCallback((font: BodyFont) => {
-    if (font === bodyFont) return;
-    captureFontPosition(); setBodyFont(font);
-  }, [bodyFont, captureFontPosition]);
-  const changeCodeFont = useCallback((font: CodeFont) => {
-    if (font === codeFont) return;
-    captureFontPosition(); setCodeFont(font);
-  }, [codeFont, captureFontPosition]);
-
-  useLayoutEffect(() => {
-    const body = BODY_FONTS.find((font) => font.id === bodyFont)!;
-    const code = CODE_FONTS.find((font) => font.id === codeFont)!;
-    // Dialogs, drag overlays and the error fallback share these document-wide roles.
-    const style = document.documentElement.style;
-    style.setProperty('--font-body', `${body.family}, var(--font-sans)`);
-    style.setProperty('--body-strong-weight', String(body.strongWeight));
-    style.setProperty('--font-code', `${code.family}, var(--font-mono)`);
-  }, [bodyFont, codeFont]);
-
-  useLayoutEffect(() => {
-    const saved = fontPosition.current;
-    fontPosition.current = null;
-    if (!saved || saved.id !== activeId) return;
-    const restore = () => {
-      const input = sourceRegistry.current[saved.id];
-      const editor = editorRegistry.current[saved.id];
-      if (input && saved.source) restoreSource(input, saved.source);
-      if (editor && saved.rendered) restoreRendered(editor, saved.rendered);
-    };
-    restore();
-    let cancelled = false;
-    const cancel = (event: Event) => {
-      const target = event.target;
-      // Radio selection emits input after React installs this effect; it is not a document edit.
-      if (event.type === 'input' && target instanceof HTMLInputElement &&
-          target.type === 'radio' && target.name === 'code-font') return;
-      cancelled = true;
-    };
-    for (const event of ['wheel', 'keydown', 'pointerdown', 'input']) window.addEventListener(event, cancel, true);
-    const body = BODY_FONTS.find((font) => font.id === bodyFont)!;
-    const families = [body.family, ...CODE_FONTS.find((font) => font.id === codeFont)!.family.split(', ')];
-    void Promise.allSettled([...families.map((family) => document.fonts.load(`400 16px ${family}`, '中文 Mixed')),
-      document.fonts.load(`${body.strongWeight} 16px ${body.family}`, '中文 Bold')])
-      .then(() => { if (!cancelled) restore(); });
-    return () => {
-      cancelled = true;
-      for (const event of ['wheel', 'keydown', 'pointerdown', 'input']) window.removeEventListener(event, cancel, true);
-    };
-  }, [bodyFont, codeFont, activeId, sourceMode]);
-
-  useLayoutEffect(() => {
-    if (!activeId) return;
-    const input = sourceRegistry.current[activeId];
-    const editor = editorRegistry.current[activeId];
-    const saved = positions.current[activeId] ??= {};
-    const markdown = tabMirror.current[activeId]?.markdown ?? activeTab?.markdown ?? '';
-    if (sourceMode && input) {
-      if (enteringSource.current && editor) {
-        // The source component first applies any newer rendered draft in its layout effect.
-        queueMicrotask(() => {
-          if (currentView.current.activeId !== activeId || !currentView.current.sourceMode || !input.isConnected) return;
-          toSource(editor, markdown, input, saved.exchange);
-          saved.exchange = { markdown, source: sourcePlace(input), rendered: renderedPlace(editor) };
-          saved.source = sourcePlace(input);
-        });
-      } else if (saved.source) restoreSource(input, saved.source);
-    } else if (editor) {
-      syncEditor(activeId, markdown);
-      // React has now removed inert, so a source-mode return can restore visible focus.
-      if (saved.rendered) restoreRendered(editor, saved.rendered, saved.sourceMode === true);
-    }
-    saved.sourceMode = sourceMode;
-    enteringSource.current = false;
-  }, [activeId, sourceMode]);
-  /**
-   * 获取标签页当前内容的权威镜像。
-   * tabMirror 由编辑器事务回调(渲染模式)与 handleSourceChange(源码模式)同步更新,
-   * 始终为最新内容;避免从编辑器实例读取时拿到源码模式下未同步的陈旧内容,
-   * 避免定时器闭包中的旧内容丢失最后一次输入。
-   */
-  const resolveContent = useCallback((tab: Tab): string => {
-    return tabMirror.current[tab.id]?.markdown ?? tab.markdown;
-  }, []);
-
-  // Preview, save and export share a staged read; only the same document may publish it.
-  const prepareCurrentImages = useCallback((id: string): Promise<boolean> => {
-    const tab = tabsRef.current.find((candidate) => candidate.id === id);
-    if (!tab) return Promise.resolve(false);
-    if (!tab.path) return Promise.resolve(true);
-    const path = tab.path, revision = tab.diskRevision;
-    const version = contentGenerations.current[id] ?? 0;
-    const content = resolveContent(tab);
-    const pending = imagePreparations.current[id];
-    if (pending?.version === version && pending.path === path && pending.revision === revision) return pending.promise;
-    const promise = prepareImageReferences(id, content, path).then((prepared) => {
-      const current = tabsRef.current.find((candidate) => candidate.id === id);
-      return !!current && current.path === path && current.diskRevision === revision
-        && (contentGenerations.current[id] ?? 0) === version && resolveContent(current) === content
-        && prepared.commit();
-    }).finally(() => {
-      if (imagePreparations.current[id]?.promise === promise) delete imagePreparations.current[id];
-    });
-    imagePreparations.current[id] = { version, path, revision, promise };
-    return promise;
-  }, [resolveContent]);
-
-  const recoveryInitialized = useRef(false);
-  const protectDraft = useCallback((tab: Tab) => {
-    const current = tabsRef.current.find((candidate) => candidate.id === tab.id);
-    if (!current) return;
-    scheduleRecovery({ ...current, markdown: resolveContent(current) }, (status) => {
-      if (tabsRef.current.some((candidate) => candidate.id === current.id)) {
-        setRecoveryStates((previous) => ({ ...previous, [current.id]: status }));
-      }
-    }, prepareCurrentImages(current.id));
-  }, [prepareCurrentImages, resolveContent]);
-  const cleanRecovery = useCallback(async (id: string) => {
-    const generation = contentGenerations.current[id];
-    try {
-      await clearRecovery(id);
-      if (contentGenerations.current[id] === generation) {
-        setRecoveryStates((previous) => ({ ...previous, [id]: 'idle' }));
-      }
-      return true;
-    } catch {
-      setRecoveryStates((previous) => ({ ...previous, [id]: 'error' }));
-      return false;
-    }
-  }, []);
-
-  const refreshRecovery = useCallback(async () => {
-    try {
-      setRecoveryEntries(await listRecovery(tabsRef.current.map((tab) => tab.id)));
-    } catch {
-      await showMessage('无法读取恢复副本，请检查应用数据目录的可用空间和权限。未删除任何文档。', 'error');
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!isTauri() || recoveryInitialized.current) return;
-    recoveryInitialized.current = true;
-    void listRecovery().then((entries) => {
-      setRecoveryEntries(entries);
-      if (entries.length) setRecoveryOpen(true);
-    }).catch(() => {
-      void showMessage('无法读取恢复副本，请检查应用数据目录的可用空间和权限。', 'error');
-    });
-  }, []);
-
-  useEffect(() => {
-    const area = editorAreaRef.current;
-    if (!area) return;
-    return bindEditorZoomControls(area, (action) => setEditorZoom((value) => nextEditorZoom(value, action)));
-  }, []);
-
-  useEffect(() => {
-    writeEditorZoom(editorZoom);
-  }, [editorZoom]);
-
-  useEffect(() => {
-    writeCodeFont(codeFont);
-  }, [codeFont]);
-  useEffect(() => { writeBodyFont(bodyFont); }, [bodyFont]);
-
-  /* ---------- 主题与偏好初始化 ---------- */
-  useEffect(() => {
-    void getThemeMode().then(setThemeModeState);
-    void getSourceModePref().then(setSourceMode);
-    void getOutlineOpen().then((open) => setOutlineOpen(open));
-  }, []);
-
-  useLayoutEffect(() => {
-    const media = window.matchMedia('(prefers-color-scheme: dark)');
-    const apply = () => {
-      const resolved = themeMode === 'system' ? (media.matches ? 'dark' : 'light') : themeMode;
-      applyTheme(resolved);
-    };
-    apply();
-    media.addEventListener('change', apply);
-    return () => media.removeEventListener('change', apply);
-  }, [themeMode]);
-
-  useEffect(() => {
-    // Persist after the startup preference read, not during the first layout.
-    void setThemeMode(themeMode);
-  }, [themeMode]);
-
-  /* ---------- 最近打开初始化 ---------- */
-  useEffect(() => {
-    void getRecentFiles().then(setRecentFiles);
-  }, []);
-
-  /* ---------- 快捷键绑定载入 / 持久化 ---------- */
-  useEffect(() => {
-    let alive = true;
-    void getShortcutBindings().then((loaded) => {
-      if (!alive) return;
-      shortcutsLoaded.current = true;
-      setShortcuts(loaded);
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!shortcutsLoaded.current) return;
-    void saveShortcutBindings(shortcuts);
-  }, [shortcuts]);
+  const { persistWindowState } = useWindowLifecycle();
+  const {
+    recentFiles,
+    setRecentFiles,
+    startupResolved,
+    openFileFromPath,
+    handleOpen,
+    handleRemoveRecent,
+    createDocument,
+  } = useDocumentFiles(session);
+  const recovery = useRecovery(session);
+  useExternalChanges(session);
+  const { doSave, scheduleAutoSave, handleSave, handleSaveAs, savingId } = useDocumentSave(
+    session,
+    recovery,
+    setRecentFiles,
+  );
+  const {
+    editorAreaRef,
+    editorZoom,
+    setEditorZoom,
+    bodyFont,
+    codeFont,
+    changeBodyFont,
+    changeCodeFont,
+    handleTabUpdate,
+    registerEditor,
+    handleImagePaste,
+    handleUndo,
+    handleRedo,
+    toggleSourceMode,
+    handleSourceChange,
+    jumpToOutline,
+  } = useEditorView(session, recovery, scheduleAutoSave, changeSourcePreference);
+  const { exporting, handleExportHTML, handleExportPDF } = useDocumentExport(
+    session,
+    recovery,
+    bodyFont,
+    codeFont,
+  );
+  const onClosing = useCallback(() => setMediaPreview(null), []);
+  const { pendingCloseTab, closeBusy, closeTabRequest, confirmClose, handleWindowClose } =
+    useDocumentClose(session, recovery, doSave, persistWindowState, onClosing);
+  const {
+    refreshRecovery,
+    handleRestore,
+    recoveryEntries,
+    recoveryOpen,
+    setRecoveryOpen,
+    recoveryStates,
+    handleRecoveryRemoved,
+  } = recovery;
 
   /* ---------- 标签页操作 ---------- */
-  const updateTab = useCallback((id: string, patch: Partial<Tab>) => {
-    tabsRef.current = tabsRef.current.map((t) => (t.id === id ? { ...t, ...patch } : t));
-    setTabs([...tabsRef.current]);
-  }, []);
-
-  const pauseAutoSave = useCallback((id: string, mtime: number) => {
-    blockedExternalMtime.current[id] = mtime;
-    setTabs([...tabsRef.current]);
-  }, []);
-
-  const addTab = useCallback(
-    (init: { title: string; path: string | null; isNew: boolean; content: string; mtime?: number; revision?: string; recovered?: boolean }, id: string = makeId()) => {
-      const tab: Tab = {
-        id,
-        title: init.title,
-        path: init.path,
-        isNew: init.isNew,
-        dirty: !!init.recovered,
-        externalMtime: init.mtime ?? 0,
-        diskRevision: init.revision ?? null,
-        externalChanged: false,
-        initialContent: init.content,
-        savedContent: init.recovered ? '' : init.content,
-        markdown: init.content,
-        stats: computeStats(init.content),
-      };
-      contentGenerations.current[id] = 0;
-      tabsRef.current = [...tabsRef.current, tab];
-      setTabs([...tabsRef.current]);
-      selectTab(id);
-      setSearchOpen(false);
-      setSourceMode(false);
-      return id;
-    },
-    [selectTab],
-  );
-
-  const handleRestore = useCallback(async (id: string) => {
-    if (tabsRef.current.some((tab) => tab.id === id)) return;
-    const snapshot = await restoreRecovery(id);
-    addTab({ title: `${basename(snapshot.title).replace(/\.md$/i, '')} (恢复).md`,
-      path: null, isNew: true, content: snapshot.markdown, recovered: true }, id);
-    setRecoveryEntries((entries) => entries.filter((entry) => entry.id !== id));
-    setRecoveryOpen(false);
-    setRecoveryStates((previous) => ({ ...previous, [id]: 'protected' }));
-  }, [addTab]);
-
-  const removeTab = useCallback((id: string) => {
-    // 同步更新 tabsRef,确保关闭窗口流程里 onCloseRequested 能读到最新状态,
-    // 否则保存后再次 close() 会因读到旧 dirty 标签而再次拦截,陷入死循环
-    tabsRef.current = tabsRef.current.filter((t) => t.id !== id);
-    saveGenerations.current[id] = (saveGenerations.current[id] ?? 0) + 1;
-    delete contentGenerations.current[id];
-    delete imagePreparations.current[id];
-    setTabs([...tabsRef.current]);
-    delete editorRegistry.current[id];
-    delete tabMirror.current[id];
-    delete blockedExternalMtime.current[id];
-    externalPrompts.current.delete(id);
-    clearPendingImages(id);
-    delete positions.current[id];
-    delete sourceRegistry.current[id];
-    delete sourceRewrites.current[id];
-    const timer = saveTimers.current[id];
-    if (timer) clearTimeout(timer);
-    delete saveTimers.current[id];
-    if (currentView.current.activeId === id) {
-      const next = tabsRef.current[tabsRef.current.length - 1];
-      setSourceMode(next ? positions.current[next.id]?.sourceMode ?? false : false);
-      setActiveId(next?.id ?? null);
-    }
-  }, []);
-
-  const closeTabRequest = useCallback(
-    (id: string) => {
-      // 从 tabsRef 读取,保证输入节流期间未落定到 state 的 dirty 也能被正确拦截
-      const tab = tabsRef.current.find((t) => t.id === id);
-      if (!tab) return;
-      if (tab.dirty || (tab.isNew && !!tab.markdown.trim())) {
-        setPendingCloseTab(tab);
-      } else {
-        const generation = contentGenerations.current[id];
-        void cleanRecovery(id).then((clean) => {
-          const current = tabsRef.current.find((item) => item.id === id);
-          if (current && contentGenerations.current[id] !== generation) {
-            protectDraft(current);
-            setPendingCloseTab(current);
-          } else if (clean) removeTab(id);
-          else void showMessage('无法清理恢复副本，本次关闭已取消。请重试。', 'error');
-        });
-      }
-    },
-    [removeTab, cleanRecovery, protectDraft],
-  );
-
-  // 关闭窗口流程:拦截 close 事件后,逐个确认未保存标签,全部处理完再真正关闭
-  const pendingWindowClose = useRef(false);
-  const pendingCloseQueue = useRef<string[]>([]);
-
-  const persistWindowState = useCallback(async () => {
-    if (!isTauri()) return;
-    try {
-      const win = getCurrentWindow();
-      // 最小化窗口上报 -32000 坐标和极小尺寸,写回会毁掉上一次有效状态。
-      if (await win.isMinimized()) return;
-      const size = await win.innerSize();
-      const position = await win.outerPosition();
-      const maximized = await win.isMaximized();
-      // 读取期间被最小化(用户点了最小化)时同样放弃本次写入。
-      const minimized = await win.isMinimized();
-      const previous = maximized ? await getWindowState() : null;
-      const next = windowStateToPersist(
-        {
-          minimized,
-          maximized,
-          width: previous?.width ?? size.width,
-          height: previous?.height ?? size.height,
-          x: previous?.x ?? position.x,
-          y: previous?.y ?? position.y,
-        },
-        await readDisplayWorkAreas(),
-      );
-      if (!next) return;
-      await setWindowState(next);
-    } catch {
-      // 忽略错误
-    }
-  }, []);
-
-  /* ---------- 保存 ---------- */
-  /**
-   * 将图片迁移后的内容同步回编辑器实例、内容镜像与源码视图。
-   * 仅在确认「写入期间没有新编辑」后调用;迁移未改变内容时直接返回。
-   * 源码模式下同步内容镜像,避免另存为后 textarea 仍显示旧占位,
-   * 否则下一次源码编辑会用过期文本覆写镜像、把迁移结果静默回退。
-   */
-  const applyMigratedContent = useCallback(
-    (tabId: string, migratedContent: string, originalContent: string): void => {
-      if (migratedContent === originalContent) return;
-      syncEditor(tabId, migratedContent, false);
-      const saved = positions.current[tabId];
-      const references = sourceRewrites.current[tabId] ?? [];
-      if (saved?.source) {
-        saved.source = rebaseSourcePlace(saved.source, originalContent, migratedContent, references);
-      }
-      if (saved?.exchange?.markdown === originalContent) {
-        const exchange = saved.exchange;
-        exchange.source = rebaseSourcePlace(exchange.source, originalContent, migratedContent, references);
-        exchange.markdown = migratedContent;
-        const editor = editorRegistry.current[tabId];
-        if (editor) exchange.rendered.doc = renderedPlace(editor).doc;
-      }
-      tabMirror.current[tabId] = {
-        ...(tabMirror.current[tabId] ?? {
-          markdown: migratedContent,
-          outline: [],
-          stats: computeStats(migratedContent),
-          canUndo: false,
-          canRedo: false,
-        }),
-        markdown: migratedContent,
-        stats: computeStats(migratedContent),
-      };
-    },
-    [syncEditor],
-  );
-
-  const handleSaveAsFor = useCallback(
-    async (tab: Tab, generation: number, saveCurrent: () => Promise<boolean>): Promise<boolean> => {
-      const isCurrentSave = () =>
-        (saveGenerations.current[tab.id] ?? 0) === generation && tabsRef.current.some((candidate) => candidate.id === tab.id);
-      try {
-        if (!isCurrentSave()) return false;
-        const target = await pickSaveFile(tab.path ?? `${tab.title}`);
-        if (!target || !isCurrentSave()) return false;
-        const latestBeforeWrite = tabsRef.current.find((candidate) => candidate.id === tab.id)!;
-        // Choosing the current path must keep the normal external-change checks.
-        if (latestBeforeWrite.path && pathKey(latestBeforeWrite.path) === pathKey(target)) {
-          return saveCurrent();
-        }
-        const collision = tabsRef.current.find(
-          (candidate) =>
-            candidate.id !== tab.id &&
-            candidate.path &&
-            pathKey(candidate.path) === pathKey(target),
-        );
-        if (collision) {
-          await showMessage(`「${collision.title}」已经打开,不能将两个标签保存到同一文件。`, 'error');
-          return false;
-        }
-
-        const destination = await documentRevision(target);
-        if (destination.revision !== null && !await confirmDialog(`「${basename(target)}」已存在。是否用当前文档替换这个磁盘版本？`)) return false;
-        if (!isCurrentSave()) return false;
-        const content = resolveContent(latestBeforeWrite);
-        const contentGeneration = contentGenerations.current[tab.id] ?? 0;
-        const imagesReady = await prepareCurrentImages(tab.id);
-        if (!isCurrentSave()) return false;
-        if (!imagesReady || (contentGenerations.current[tab.id] ?? 0) !== contentGeneration) {
-          await showMessage('图片准备期间文稿已变化，本次另存为已取消。编辑内容仍保留，请重试。', 'info');
-          return false;
-        }
-        const migration = await migratePendingImages(tab.id, target, content);
-        const migratedContent = migration.markdown;
-        if (!isCurrentSave()) return false;
-        const latestDestination = await documentRevision(target);
-        if (latestDestination.revision !== destination.revision) {
-          await showMessage('另存为目标在准备期间发生变化，本次保存已取消，编辑内容仍保留。请重新选择保存位置。', 'error');
-          return false;
-        }
-        if (!isCurrentSave()) return false;
-        const receipt = await writeDocument(target, migratedContent, destination.revision);
-        if (!isCurrentSave()) return false;
-        const contentChangedDuringWrite =
-          (contentGenerations.current[tab.id] ?? 0) !== contentGeneration;
-        const latestContent = resolveContent(latestBeforeWrite);
-        if (contentChangedDuringWrite && latestBeforeWrite.path
-            && getImageUrls(latestContent).some(isRelativeImageUrl)) {
-          // The snapshot exists, but adopting its path would rebase a newer draft's relative images.
-          saveGenerations.current[tab.id] = (saveGenerations.current[tab.id] ?? 0) + 1;
-          clearTimeout(saveTimers.current[tab.id]);
-          delete saveTimers.current[tab.id];
-          pauseAutoSave(tab.id, -1);
-          updateTab(tab.id, { dirty: true });
-          protectDraft(tabsRef.current.find((candidate) => candidate.id === tab.id)!);
-          await showMessage(`副本已写入「${target}」。保存期间又有含相对图片的新编辑，当前标签仍保留原文件位置和新稿，自动保存已暂停。请重新另存为以保存最新内容。`, 'info');
-          return false;
-        }
-        if (!contentChangedDuringWrite) {
-          commitImageMigration(migration);
-          sourceRewrites.current[tab.id] = migration.references ?? [];
-          applyMigratedContent(tab.id, migratedContent, content);
-        }
-        updateTab(tab.id, {
-          path: target,
-          title: basename(target),
-          isNew: false,
-          externalMtime: receipt.mtime,
-          diskRevision: receipt.revision,
-          externalChanged: false,
-          markdown: contentChangedDuringWrite ? latestContent : migratedContent,
-          savedContent: migratedContent,
-          dirty: contentChangedDuringWrite ? latestContent !== migratedContent : false,
-        });
-        delete blockedExternalMtime.current[tab.id];
-        if (!contentChangedDuringWrite) {
-          await cleanRecovery(tab.id);
-          const latest = tabsRef.current.find((item) => item.id === tab.id);
-          if (latest?.dirty) protectDraft(latest);
-        }
-        await pushRecentFile(target, basename(target));
-        setRecentFiles(await getRecentFiles());
-        return true;
-      } catch (err) {
-        if (!isCurrentSave()) return false;
-        console.error('另存为失败', err);
-        updateTab(tab.id, { dirty: true });
-        const latest = tabsRef.current.find((item) => item.id === tab.id);
-        if (latest) protectDraft(latest);
-        await showMessage(`另存为失败:${errorMessage(err)}`, 'error');
-        return false;
-      }
-    },
-    [resolveContent, prepareCurrentImages, updateTab, applyMigratedContent, cleanRecovery, protectDraft, pauseAutoSave],
-  );
-
-  const performSave = useCallback(
-    async (id: string, manual = false, generation = saveGenerations.current[id] ?? 0, saveAs = false): Promise<boolean> => {
-      const isCurrentSave = () =>
-        (saveGenerations.current[id] ?? 0) === generation && tabsRef.current.some((tab) => tab.id === id);
-
-      if (!isCurrentSave()) return false;
-      const tab = tabsRef.current.find((candidate) => candidate.id === id);
-      if (!tab || (!manual && id in blockedExternalMtime.current)) return false;
-      if (saveAs || !tab.path) {
-        return manual
-          ? handleSaveAsFor(tab, generation, () => performSave(id, true, generation))
-          : false;
-      }
-
-      try {
-        const disk = await documentRevision(tab.path);
-        const diskMtime = disk.mtime ?? 0;
-        const blockedMtime = blockedExternalMtime.current[id];
-        const hasBlockedExternalChange = blockedMtime !== undefined && blockedMtime >= 0 && diskMtime === blockedMtime;
-        const hasExternalConflict = disk.revision !== tab.diskRevision || hasBlockedExternalChange;
-        if (hasExternalConflict) {
-          if (!manual) {
-            if (blockedExternalMtime.current[id] !== diskMtime) {
-              pauseAutoSave(id, diskMtime);
-              await showMessage(`「${tab.title}」的磁盘版本已变化，自动保存已暂停。请按 Ctrl+S 确认，或另存为保留两份。`, 'error');
-            }
-            return false;
-          }
-          pauseAutoSave(id, diskMtime);
-          const overwrite = await confirmDialog(disk.revision === null
-            ? `「${tab.title}」已不在原位置。是否在原位置重新创建？选择取消保留编辑内容。`
-            : `「${tab.title}」已在磁盘上被修改。\n\n选择「确定」用当前编辑内容覆盖这个磁盘版本；选择「取消」保留未保存内容。`);
-          if (!overwrite) return false;
-        }
-
-        if (!isCurrentSave()) return false;
-        const rawContent = resolveContent(tab);
-        const contentGeneration = contentGenerations.current[id] ?? 0;
-        const imagesReady = await prepareCurrentImages(id);
-        if (!isCurrentSave()) return false;
-        if (!imagesReady || (contentGenerations.current[id] ?? 0) !== contentGeneration) {
-          if (manual) await showMessage('图片准备期间文稿已变化，本次保存已取消。编辑内容仍保留，请重试。', 'info');
-          return false;
-        }
-        const migration = await migratePendingImages(id, tab.path, rawContent);
-        const content = migration.markdown;
-        if (!isCurrentSave()) return false;
-        // The native writer also checks these bytes and preserves copies on an uncertain replacement.
-        const latestDisk = await documentRevision(tab.path);
-        if (latestDisk.revision !== disk.revision) {
-          pauseAutoSave(id, latestDisk.mtime ?? 0);
-          await showMessage(`「${tab.title}」在确认或图片保存期间再次被修改，本次保存已取消。编辑内容仍保留，请重新确认。`, 'error');
-          return false;
-        }
-        if (!isCurrentSave()) return false;
-        const receipt = await writeDocument(tab.path, content, disk.revision);
-        if (!isCurrentSave()) return false;
-        const contentChangedDuringWrite =
-          (contentGenerations.current[id] ?? 0) !== contentGeneration;
-        if (!contentChangedDuringWrite) {
-          commitImageMigration(migration);
-          sourceRewrites.current[id] = migration.references ?? [];
-          applyMigratedContent(id, content, rawContent);
-        }
-        const latest = contentChangedDuringWrite
-          ? (tabMirror.current[id]?.markdown ?? rawContent)
-          : content;
-        updateTab(id, {
-          dirty: latest !== content,
-          markdown: latest,
-          externalMtime: receipt.mtime,
-          diskRevision: receipt.revision,
-          externalChanged: false,
-          savedContent: content,
-        });
-        delete blockedExternalMtime.current[id];
-        if (!contentChangedDuringWrite) {
-          await cleanRecovery(id);
-          const current = tabsRef.current.find((item) => item.id === id);
-          if (current?.dirty) protectDraft(current);
-        }
-        return true;
-      } catch (err) {
-        if (!isCurrentSave()) return false;
-        console.error('保存失败', err);
-        pauseAutoSave(id, -1);
-        updateTab(id, { dirty: true });
-        const latest = tabsRef.current.find((item) => item.id === id);
-        if (latest) protectDraft(latest);
-        await showMessage(`保存失败:${errorMessage(err)}`, 'error');
-        return false;
-      }
-    },
-    [handleSaveAsFor, resolveContent, prepareCurrentImages, updateTab, applyMigratedContent, cleanRecovery, protectDraft, pauseAutoSave],
-  );
-
-  const doSave = useCallback(
-    (id: string, manual = false, saveAs = false): Promise<boolean> => {
-      const timer = saveTimers.current[id];
-      if (timer) clearTimeout(timer);
-      delete saveTimers.current[id];
-      const previous = saveQueues.current[id] ?? Promise.resolve(true);
-      const generation = saveGenerations.current[id] ?? 0;
-      setSavingId(id);
-      const next = previous.catch(() => false).then(() => performSave(id, manual, generation, saveAs));
-      saveQueues.current[id] = next;
-      void next.finally(() => {
-        if (saveQueues.current[id] === next) {
-          delete saveQueues.current[id];
-          setSavingId((current) => (current === id ? null : current));
-        }
-      });
-      return next;
-    },
-    [performSave],
-  );
-
-  const confirmClose = useCallback(
-    async (action: 'save' | 'discard' | 'cancel') => {
-      if (!pendingCloseTab) return;
-      if (action === 'cancel') {
-        setPendingCloseTab(null);
-        pendingWindowClose.current = false;
-        pendingCloseQueue.current = [];
-        return;
-      }
-      if (action === 'save') {
-        const tab = pendingCloseTab;
-        const saved = await doSave(tab.id, true);
-        if (!saved || tabsRef.current.find((candidate) => candidate.id === tab.id)?.dirty) return;
-      }
-      const closedId = pendingCloseTab.id;
-      const closingGeneration = contentGenerations.current[closedId];
-      if (!await cleanRecovery(closedId)) {
-        await showMessage('无法清理恢复副本，本次关闭已取消。请重试。', 'error');
-        return;
-      }
-      if (contentGenerations.current[closedId] !== closingGeneration) {
-        const current = tabsRef.current.find((tab) => tab.id === closedId);
-        if (current) { protectDraft(current); setPendingCloseTab(current); }
-        return;
-      }
-      setPendingCloseTab(null);
-      removeTab(closedId);
-      // 关闭窗口流程:继续处理下一个未保存标签,全部完成后真正关闭窗口
-      if (pendingWindowClose.current) {
-        pendingCloseQueue.current = pendingCloseQueue.current.filter((id) => id !== closedId);
-        const nextId = pendingCloseQueue.current[0];
-        if (nextId) {
-          const next = tabsRef.current.find((t) => t.id === nextId);
-          if (next) setPendingCloseTab(next);
-          else pendingWindowClose.current = false;
-        } else {
-          pendingWindowClose.current = false;
-          try {
-            await persistWindowState();
-            await getCurrentWindow().destroy();
-          } catch (err) {
-            console.error('关闭窗口失败', err);
-            await showMessage(`关闭窗口失败:${errorMessage(err)}`, 'error');
-          }
-        }
-      }
-    },
-    [pendingCloseTab, removeTab, doSave, persistWindowState, cleanRecovery, protectDraft],
-  );
-
-  /* ---------- 打开 / 新建 ---------- */
-  const openFileFromPath = useCallback(
-    async (path: string) => {
-      const key = pathKey(path);
-      const alreadyOpen = tabsRef.current.find((t) => t.path && pathKey(t.path) === key);
-      if (alreadyOpen) {
-        selectTab(alreadyOpen.id);
-        return;
-      }
-      if (openingPaths.current.has(key)) return;
-      openingPaths.current.add(key);
-      try {
-        const { content, mtime, revision } = await readDocument(path);
-        const existing = tabsRef.current.find((t) => t.path && pathKey(t.path) === key);
-        if (existing) {
-          selectTab(existing.id);
-        } else {
-          const id = makeId();
-          try {
-            const images = await prepareImageReferences(id, content, path, { refresh: true });
-            const currentDisk = await documentRevision(path);
-            if (currentDisk.revision !== revision || !images.commit()) {
-              throw new Error('文档在图片读取期间已变化，请重新打开；未改写任何文件');
-            }
-            addTab({ title: basename(path), path, isNew: false, content, mtime, revision }, id);
-          } catch (error) {
-            clearPendingImages(id);
-            throw error;
-          }
-        }
-        // 最近文件持久化不应阻塞文档标签创建或启动窗口显示。
-        void pushRecentFile(path, basename(path)).then(async () => {
-          setRecentFiles(await getRecentFiles());
-        });
-      } catch (err) {
-        console.error('打开文件失败', err);
-        await removeRecentFile(path);
-        setRecentFiles(await getRecentFiles());
-        await showMessage(`无法打开文件:${errorMessage(err)}\n\n如果该文件来自最近列表,已将失效记录移除。`, 'error');
-      } finally {
-        openingPaths.current.delete(key);
-      }
-    },
-    [addTab, selectTab],
-  );
-
-  const handleOpen = useCallback(async () => {
-    if (fileDialogBusy) return; // 防止重复打开
-    setFileDialogBusy(true);
-    try {
-      const path = await pickOpenFile();
-      if (path) await openFileFromPath(path);
-    } catch (err) {
-      console.error('文件选择器打开失败', err);
-      await showMessage(`无法打开文件选择器:${errorMessage(err)}`, 'error');
-    } finally {
-      setFileDialogBusy(false);
-    }
-  }, [openFileFromPath, fileDialogBusy]);
-
-  /* ---------- 启动时打开命令行传递的文件 ---------- */
-  useEffect(() => {
-    if (!isTauri() || startupInitStarted.current) return;
-    startupInitStarted.current = true;
-
-    // 恢复窗口状态
-    void getWindowState().then(async (state) => {
-      const win = getCurrentWindow();
-      if (state) {
-        // 保存的坐标可能来自已拔掉的显示器:拉回当前某块显示器的工作区内。
-        const placement = clampToVisibleDisplays(state, await readDisplayWorkAreas());
-        void win.setSize(new LogicalSize(placement.width, placement.height)).catch(() => {});
-        void win.setPosition(new LogicalPosition(placement.x, placement.y)).catch(() => {});
-        if (placement.maximized) void win.maximize().catch(() => {});
-      }
-      // 系统可能沿用上次的最小化状态创建窗口,而 Rust 侧只负责 show:
-      // 不显式还原的话,改尺寸和位置都不会让窗口出现,用户看到的是"打不开"。
-      if (await win.isMinimized()) await win.unminimize().catch(() => {});
-    });
-
-    void invoke<string[]>('take_startup_files')
-      .then((startupFiles) => {
-        if (!Array.isArray(startupFiles) || startupFiles.length === 0) {
-          setStartupResolved(true);
-          return;
-        }
-
-        // 确保窗口可见
-        const win = getCurrentWindow();
-        void win.show();
-        void win.setFocus();
-
-        // 打开所有通过命令行传递的文件
-        const openPromises = startupFiles.map(filePath => openFileFromPath(filePath));
-        void Promise.all(openPromises).then(() => setStartupResolved(true));
-      })
-      .catch((err) => {
-        console.error('读取启动文件失败', err);
-        // 命令调用失败时仍结束启动占位,避免应用保持空白。
-        setStartupResolved(true);
-      });
-  }, [openFileFromPath]);
-
-  /* ---------- 监听单实例传递的文件 ---------- */
-  useEffect(() => {
-    if (!isTauri()) return;
-
-    let unlisten: (() => void) | undefined;
-    let drainQueue = Promise.resolve();
-    const drainPendingFiles = async () => {
-      const openFiles = await invoke<string[]>('take_pending_open_files');
-      if (Array.isArray(openFiles) && openFiles.length > 0) {
-        // 窗口置顶并获得焦点
-        const win = getCurrentWindow();
-        void win.show();
-        void win.setFocus();
-        void win.unminimize();
-
-        // 打开新传递的文件
-        for (const filePath of openFiles) {
-          void openFileFromPath(filePath);
-        }
-      }
-    };
-    const enqueueDrain = () => {
-      drainQueue = drainQueue
-        .then(drainPendingFiles)
-        .catch((err) => console.error('读取单实例文件队列失败', err));
-    };
-
-    void listen('open-files', enqueueDrain)
-      .then((dispose) => {
-        unlisten = dispose;
-        // 监听注册前到达的事件会留在后端队列,注册完成后主动补取一次。
-        enqueueDrain();
-      })
-      .catch((err) => {
-        console.error('注册单实例文件监听失败', err);
-      });
-
-    return () => unlisten?.();
-  }, [openFileFromPath]);
-
-  const handleRemoveRecent = useCallback(async (path: string) => {
-    await removeRecentFile(path);
-    setRecentFiles(await getRecentFiles());
-  }, []);
-
-  const handleNew = useCallback(
-    (kind: 'blank' | 'basic') => {
-      const content = getTemplate(kind);
-      const count = tabsRef.current.filter((t) => t.isNew).length;
-      const title = count === 0 ? '未命名文档.md' : `未命名文档 ${count + 1}.md`;
-      addTab({ title, path: null, isNew: true, content, mtime: 0 });
-      setNewModalOpen(false);
-    },
-    [addTab],
-  );
-
-  const handleSave = useCallback(async () => {
-    if (activeId) await doSave(activeId, true);
-  }, [activeId, doSave]);
-
-  const handleSaveAs = useCallback(async () => {
-    if (!activeTab) return;
-    await doSave(activeTab.id, true, true);
-  }, [activeTab, doSave]);
-
-  /* ---------- 导出功能 ---------- */
-  const handleExport = useCallback(async (format: 'html' | 'pdf') => {
-    if (!activeTab || exportBusy.current) return;
-    exportBusy.current = true;
-    setExporting(true);
-    try {
-      await saveQueues.current[activeTab.id];
-      const tab = tabsRef.current.find((candidate) => candidate.id === activeTab.id);
-      const editor = editorRegistry.current[activeTab.id];
-      if (!tab || !editor) throw new Error('编辑器尚未就绪，请稍后重试');
-      const content = resolveContent(tab), version = contentGenerations.current[tab.id] ?? 0;
-      const imagesReady = await prepareCurrentImages(tab.id);
-      const current = tabsRef.current.find((candidate) => candidate.id === tab.id);
-      if (!imagesReady || !current || current.path !== tab.path || current.diskRevision !== tab.diskRevision
-          || (contentGenerations.current[tab.id] ?? 0) !== version || resolveContent(current) !== content) {
-        throw new Error('图片准备期间文稿已变化，请重新导出');
-      }
-      const snapshot = captureExport(editor, content, tab.title || '未命名', bodyFont, codeFont,
-        (src) => resolveImageSource(tab.id, src));
-      if (format === 'html') {
-        if (await exportHTML(snapshot)) await showMessage('HTML 导出成功', 'info');
-      } else await exportPDF(snapshot);
-    } catch (err) {
-      console.error('导出失败', err);
-      await showMessage(`导出失败: ${errorMessage(err)}`, 'error');
-    } finally {
-      exportBusy.current = false;
-      setExporting(false);
-    }
-  }, [activeTab, bodyFont, codeFont, resolveContent, prepareCurrentImages]);
-  const handleExportHTML = useCallback(() => handleExport('html'), [handleExport]);
-  const handleExportPDF = useCallback(() => handleExport('pdf'), [handleExport]);
-
-  /* ---------- 编辑器更新回传 ---------- */
-  const scheduleAutoSave = useCallback(
-    (id: string) => {
-      const timer = saveTimers.current[id];
-      if (timer) clearTimeout(timer);
-      saveTimers.current[id] = setTimeout(() => void doSave(id), AUTO_SAVE_DELAY);
-    },
-    [doSave],
-  );
-
-  // 输入节流:tabsRef 始终即时更新(保存/关闭等正确性路径读取它),
-  // 仅节流 React setTabs(视觉渲染),避免每次敲键都重渲染整个 App。
-  const scheduleTabRender = useCallback((id: string) => {
-    const existing = tabRenderTimers.current[id];
-    if (existing) clearTimeout(existing);
-    tabRenderTimers.current[id] = setTimeout(() => {
-      delete tabRenderTimers.current[id];
-      setTabs([...tabsRef.current]);
-    }, 120);
-  }, []);
-
-  const handleTabUpdate = useCallback(
-    (id: string, update: EditorUpdate, isInitial = false) => {
-      if (isInitial && (contentGenerations.current[id] ?? 0) > 0) {
-        const latest = tabMirror.current[id]?.markdown;
-        if (latest !== undefined) syncEditor(id, latest);
-        scheduleTabRender(id);
-        return;
-      }
-      const prev = tabsRef.current.find((t) => t.id === id);
-      // 初始化只更新派生状态，不能用序列化结果改写尚未编辑的原文。
-      const markdown = isInitial
-        ? (tabMirror.current[id]?.markdown ?? prev?.markdown ?? update.markdown)
-        : update.markdown;
-      const currentUpdate = isInitial
-        ? { ...update, markdown, stats: computeStats(markdown) }
-        : update;
-      tabMirror.current[id] = currentUpdate;
-      if (isInitial) {
-        contentGenerations.current[id] ??= 0;
-      } else {
-        contentGenerations.current[id] = (contentGenerations.current[id] ?? 0) + 1;
-      }
-      // 以「最近一次保存成功的内容」为基线判定 dirty,避免编辑又回到打开时内容后误判为已保存
-      const dirty = isInitial ? (prev?.dirty ?? false) : prev ? markdown !== prev.savedContent : true;
-      tabsRef.current = tabsRef.current.map((t) =>
-        t.id === id ? { ...t, markdown, stats: currentUpdate.stats, dirty } : t,
-      );
-      if (isInitial) {
-        const tab = tabsRef.current.find((tab) => tab.id === id);
-        if (tab && (tab.dirty || (tab.isNew && !!tab.markdown.trim()))) protectDraft(tab);
-        setTabs([...tabsRef.current]);
-        return;
-      }
-      void prepareCurrentImages(id).catch((error) => console.warn('图片引用准备失败', error));
-      if (dirty) scheduleAutoSave(id);
-      const changed = tabsRef.current.find((tab) => tab.id === id);
-      if (changed && (dirty || changed.isNew)) protectDraft(changed);
-      else if (changed) void cleanRecovery(id);
-      scheduleTabRender(id);
-    },
-    [scheduleAutoSave, scheduleTabRender, protectDraft, cleanRecovery, syncEditor, prepareCurrentImages],
-  );
-
-  const registerEditor = useCallback((id: string, editor: Editor | null) => {
-    editorRegistry.current[id] = editor;
-  }, []);
-
-  /* ---------- 图片粘贴处理 ---------- */
-  const handleImagePaste = useCallback(async (tabId: string, file: File): Promise<string> => {
-    try {
-      const imagePath = await saveImage(file, tabId);
-      await protectPastedImage(tabId, imagePath);
-      if (!tabsRef.current.some((tab) => tab.id === tabId)) return '';
-      return imagePath;
-    } catch (err) {
-      console.error('保存图片失败', err);
-      await showMessage(`保存图片失败: ${errorMessage(err)}`, 'error');
-      throw err;
-    }
-  }, []);
-
-  /* ---------- 撤销 / 重做 ---------- */
-  const handleUndo = useCallback(() => {
-    const editor = activeId ? editorRegistry.current[activeId] : null;
-    if (editor) undo(editor);
-  }, [activeId]);
-
-  const handleRedo = useCallback(() => {
-    const editor = activeId ? editorRegistry.current[activeId] : null;
-    if (editor) redo(editor);
-  }, [activeId]);
-
-  /* ---------- 源码模式 ---------- */
-  const toggleSourceMode = useCallback(() => {
-    const { activeId: id, sourceMode: wasSource } = currentView.current;
-    rememberActive();
-    if (id && wasSource) {
-      const tab = tabsRef.current.find((tab) => tab.id === id);
-      const input = sourceRegistry.current[id];
-      const editor = editorRegistry.current[id];
-      const markdown = tabMirror.current[id]?.markdown ?? tab?.markdown ?? '';
-      syncEditor(id, markdown);
-      if (input && editor) {
-        const saved = positions.current[id] ??= {};
-        toRendered(editor, markdown, input, saved.exchange);
-        saved.rendered = renderedPlace(editor);
-        saved.exchange = { markdown, source: sourcePlace(input), rendered: saved.rendered };
-      }
-    } else {
-      enteringSource.current = true;
-      setSearchOpen(false);
-    }
-    setSourceMode(!wasSource);
-    void setSourceModePref(!wasSource);
-  }, [rememberActive, syncEditor]);
-
-  const handleSourceChange = useCallback(
-    (id: string, text: string) => {
-      const activeId = id;
-      if (activeId) {
-        contentGenerations.current[activeId] = (contentGenerations.current[activeId] ?? 0) + 1;
-        const prev = tabsRef.current.find((t) => t.id === activeId);
-        const dirty = prev ? text !== prev.savedContent : true;
-        const stats = computeStats(text);
-        tabMirror.current[activeId] = {
-          ...(tabMirror.current[activeId] ?? {
-            markdown: text,
-            outline: [],
-            stats: { chars: 0, words: 0, lines: 1 },
-            canUndo: false,
-            canRedo: false,
-          }),
-          markdown: text,
-          stats,
-        };
-        tabsRef.current = tabsRef.current.map((t) =>
-          t.id === activeId ? { ...t, markdown: text, stats, dirty } : t,
-        );
-        void prepareCurrentImages(activeId).catch((error) => console.warn('图片引用准备失败', error));
-        if (dirty) scheduleAutoSave(activeId);
-        const changed = tabsRef.current.find((tab) => tab.id === activeId);
-        if (changed && (dirty || changed.isNew)) protectDraft(changed);
-        else if (changed) void cleanRecovery(activeId);
-        setTabs([...tabsRef.current]);
-      }
-    },
-    [scheduleAutoSave, protectDraft, cleanRecovery, prepareCurrentImages],
-  );
-
-  /* ---------- 大纲面板状态持久化 ---------- */
-  useEffect(() => {
-    void saveOutlineOpen(outlineOpen);
-  }, [outlineOpen]);
-
   useEffect(() => {
     writeOutlineWidth(outlineWidth);
   }, [outlineWidth]);
@@ -1206,230 +143,11 @@ export default function App() {
       // 搜索框、mermaid 编辑框、对话框等已经消费了这次 Esc,不要再关大纲
       if (event.defaultPrevented) return;
       event.preventDefault();
-      setOutlineOpen(false);
+      changeOutlineOpen(false);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [outlineOpen]);
-
-  /* ---------- 窗口状态持久化 ---------- */
-  useEffect(() => {
-    if (!isTauri()) return;
-    let disposed = false;
-    let unlistenResized: (() => void) | undefined;
-    let unlistenMoved: (() => void) | undefined;
-    // 移动/缩放事件高频触发,节流合并为一次持久化,避免持续空写 store。
-    let pending = false;
-    const throttled = () => {
-      if (pending || disposed) return;
-      pending = true;
-      setTimeout(() => {
-        pending = false;
-        if (!disposed) void persistWindowState();
-      }, 500);
-    };
-    void (async () => {
-      try {
-        const win = getCurrentWindow();
-        unlistenResized = await win.onResized(throttled);
-        if (disposed) {
-          unlistenResized();
-          unlistenResized = undefined;
-          return;
-        }
-        unlistenMoved = await win.onMoved(throttled);
-        if (disposed) {
-          unlistenMoved();
-          unlistenMoved = undefined;
-        }
-      } catch (err) {
-        console.warn('窗口状态监听不可用', err);
-      }
-    })();
-    return () => {
-      disposed = true;
-      unlistenResized?.();
-      unlistenMoved?.();
-    };
-  }, [persistWindowState]);
-
-  /* ---------- 大纲跳转 ---------- */
-  const jumpToOutline = useCallback(
-    (pos: number) => {
-      const editor = activeId ? editorRegistry.current[activeId] : null;
-      if (!editor) return;
-      editor.action((ctx) => {
-        const view = ctx.get(editorViewCtx);
-        const target = pos + 1;
-        if (target < 0 || target > view.state.doc.content.size) return;
-        view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(target))));
-        view.focus();
-        // Navigate once; normal editing and selection restoration remain instant.
-        requestAnimationFrame(() => {
-          const dom = view.nodeDOM(pos);
-          const scroller = view.dom.closest<HTMLElement>('.milkdown-container');
-          if (dom instanceof HTMLElement && scroller) {
-            scroller.scrollTo({
-              top: scroller.scrollTop + dom.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 24,
-              behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
-            });
-          }
-        });
-      });
-    },
-    [activeId],
-  );
-
-  /* ---------- 外部文件变化检测 ---------- */
-  const promptExternalReload = useCallback(
-    async (tabId: string, detectedMtime: number) => {
-      if (externalPrompts.current.has(tabId)) return;
-      externalPrompts.current.add(tabId);
-      try {
-        const tab = tabsRef.current.find((candidate) => candidate.id === tabId);
-        if (!tab?.path || tab.dirty || tabId in saveQueues.current) return;
-        const version = contentGenerations.current[tabId] ?? 0;
-        const saveGeneration = saveGenerations.current[tabId] ?? 0;
-        const isCurrentDocument = () => {
-          const latest = tabsRef.current.find((candidate) => candidate.id === tabId);
-          return !!latest && latest.path === tab.path
-            && (saveGenerations.current[tabId] ?? 0) === saveGeneration;
-        };
-        const canApply = () => isCurrentDocument()
-          && (contentGenerations.current[tabId] ?? 0) === version
-          && !tabsRef.current.find((candidate) => candidate.id === tabId)?.dirty
-          && !(tabId in saveQueues.current);
-        const cancelReload = async () => {
-          if (!isCurrentDocument()) return;
-          // 不推进已知 mtime:下次检测仍需确认,自动保存也必须保留冲突保护。
-          pauseAutoSave(tabId, detectedMtime);
-          await showMessage(`「${tab.title}」在重新加载期间发生变化,本次重载已取消,已保留本地内容。请按 Ctrl+S 手动处理。`, 'info');
-        };
-
-        const reload = await confirmDialog(
-          `「${tab.title}」已在磁盘上被修改。\n\n选择「确定」重新加载文件;选择「取消」保留本地内容。`,
-        );
-        if (!canApply()) { await cancelReload(); return; }
-        if (reload) {
-          const snapshot = await readDocument(tab.path);
-          if (!canApply()) { await cancelReload(); return; }
-          const images = await prepareImageReferences(tabId, snapshot.content, tab.path, { refresh: true });
-          if (!canApply()) { await cancelReload(); return; }
-          const currentDisk = await documentRevision(tab.path);
-          const content = snapshot.content;
-          const loadedMtime = snapshot.mtime;
-          // Never pair a previously read body with a newer file's revision.
-          if (!canApply() || currentDisk.revision !== snapshot.revision || loadedMtime !== detectedMtime
-              || !images.commit()) { await cancelReload(); return; }
-          const previous = tabMirror.current[tabId];
-          const nextStats = computeStats(content);
-          const timer = saveTimers.current[tabId];
-          if (timer) clearTimeout(timer);
-          delete saveTimers.current[tabId];
-          contentGenerations.current[tabId] = version + 1;
-          delete blockedExternalMtime.current[tabId];
-          // 先提交新基线,避免同步编辑器回调把重载当作未保存输入。
-          tabMirror.current[tabId] = {
-            markdown: content,
-            outline: previous?.outline ?? [],
-            stats: nextStats,
-            canUndo: previous?.canUndo ?? false,
-            canRedo: previous?.canRedo ?? false,
-          };
-          updateTab(tabId, {
-            markdown: content,
-            stats: nextStats,
-            dirty: false,
-            externalMtime: loadedMtime,
-            diskRevision: snapshot.revision,
-            externalChanged: false,
-            savedContent: content,
-          });
-          syncEditor(tabId, content);
-          setTabs([...tabsRef.current]);
-        } else {
-          // 保留本地内容时记录冲突 mtime,避免后续自动保存静默覆盖外部版本。
-          pauseAutoSave(tabId, detectedMtime);
-          updateTab(tabId, {
-            externalMtime: detectedMtime,
-            externalChanged: tabId !== currentView.current.activeId,
-          });
-        }
-      } catch (error) {
-        const tab = tabsRef.current.find((candidate) => candidate.id === tabId);
-        if (blockedExternalMtime.current[tabId] !== -1) {
-          pauseAutoSave(tabId, -1);
-          if (tab?.id === activeId) {
-            await showMessage(
-              `无法读取「${tab.title}」的磁盘状态,文件可能已被删除或权限已变化。请按 Ctrl+S 手动处理。`,
-              'error',
-            );
-          } else {
-            updateTab(tabId, { externalChanged: true });
-          }
-        }
-        console.warn('检测外部文件变化失败', error);
-      } finally {
-        externalPrompts.current.delete(tabId);
-      }
-    },
-    [activeId, sourceMode, updateTab, syncEditor, pauseAutoSave],
-  );
-
-  // 切回后台已变化的标签时再询问,避免后台标签弹窗打断当前编辑。
-  useEffect(() => {
-    if (!activeTab?.externalChanged || activeTab.dirty) return;
-    void promptExternalReload(activeTab.id, activeTab.externalMtime);
-  }, [activeTab?.dirty, activeTab?.externalChanged, activeTab?.externalMtime, activeTab?.id, promptExternalReload]);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      const candidates = tabsRef.current.filter(
-        (tab) => tab.path && !tab.dirty && !externalChecks.current.has(tab.id),
-      );
-      for (const candidate of candidates) {
-        externalChecks.current.add(candidate.id);
-        void (async () => {
-          try {
-            const mtime = await fileMtime(candidate.path!);
-            const latest = tabsRef.current.find((tab) => tab.id === candidate.id);
-            if (!latest || latest.path !== candidate.path || latest.dirty) return;
-            if (latest.externalMtime === 0) {
-              updateTab(latest.id, { externalMtime: mtime });
-              return;
-            }
-            if (mtime === 0 || mtime === latest.externalMtime) return;
-            if (latest.id === activeId) {
-              await promptExternalReload(latest.id, mtime);
-            } else {
-              updateTab(latest.id, { externalMtime: mtime, externalChanged: true });
-            }
-          } catch (error) {
-            const latest = tabsRef.current.find((tab) => tab.id === candidate.id);
-            if (
-              latest &&
-              latest.path === candidate.path &&
-              blockedExternalMtime.current[latest.id] !== -1
-            ) {
-              pauseAutoSave(latest.id, -1);
-              if (latest.id === activeId) {
-                await showMessage(
-                  `无法读取「${latest.title}」的磁盘状态,文件可能已被删除或权限已变化。请按 Ctrl+S 手动处理。`,
-                  'error',
-                );
-              } else {
-                updateTab(latest.id, { externalChanged: true });
-              }
-            }
-            console.warn('检测外部文件变化失败', error);
-          } finally {
-            externalChecks.current.delete(candidate.id);
-          }
-        })();
-      }
-    }, EXTERNAL_POLL_MS);
-    return () => clearInterval(timer);
-  }, [activeId, promptExternalReload, updateTab, pauseAutoSave]);
+  }, [outlineOpen, changeOutlineOpen]);
 
   /* ---------- 全局快捷键(唯一分发点) ---------- */
   const cycleTab = useCallback(
@@ -1461,7 +179,7 @@ export default function App() {
           setSearchOpen((v) => !v);
           return;
         case 'toggleOutline':
-          setOutlineOpen((v) => !v);
+          changeOutlineOpen((v) => !v);
           return;
         case 'toggleSource':
           toggleSourceMode();
@@ -1485,6 +203,7 @@ export default function App() {
     },
     [
       activeId,
+      changeOutlineOpen,
       closeTabRequest,
       cycleTab,
       handleExportHTML,
@@ -1492,6 +211,7 @@ export default function App() {
       handleOpen,
       handleSave,
       handleSaveAs,
+      setSearchOpen,
       toggleSourceMode,
     ],
   );
@@ -1517,7 +237,8 @@ export default function App() {
         // 源码组件自行处理撤销;其它 textarea/input 交给浏览器。
         const target = e.target as HTMLElement | null;
         const inEditable =
-          !!target && (target.isContentEditable || target.tagName === 'TEXTAREA' || target.tagName === 'INPUT');
+          !!target &&
+          (target.isContentEditable || target.tagName === 'TEXTAREA' || target.tagName === 'INPUT');
         if (inEditable) return;
         e.preventDefault();
         if (key === 'y' || e.shiftKey) handleRedo();
@@ -1541,119 +262,29 @@ export default function App() {
     runShortcut,
   ]);
 
-  /* ---------- 拖拽打开 ---------- */
-  useEffect(() => {
-    if (!isTauri()) return;
-    let unlisten: (() => void) | undefined;
-    void (async () => {
-      try {
-        unlisten = await getCurrentWebview().onDragDropEvent((event) => {
-          if (event.payload.type === 'over') {
-            document.body.classList.add('dragging');
-          } else if (event.payload.type === 'drop') {
-            document.body.classList.remove('dragging');
-            const md = event.payload.paths.filter((p) => /\.(md|markdown)$/i.test(p));
-            const ignored = event.payload.paths.length - md.length;
-            void (async () => {
-              for (const path of md) await openFileFromPath(path);
-              if (ignored) await showMessage(`已忽略 ${ignored} 个非 Markdown 路径。仅支持 .md 和 .markdown 文件。`, 'info');
-            })();
-          } else if (event.payload.type === 'leave') {
-            document.body.classList.remove('dragging');
-          }
-        });
-      } catch (err) {
-        console.warn('拖拽监听不可用', err);
-      }
-    })();
-    return () => unlisten?.();
-  }, [openFileFromPath]);
-
-  /* ---------- 关闭窗口时确认未保存改动 ---------- */
-  const beginWindowClose = useCallback(async () => {
-    setMediaPreview(null);
-    if (pendingWindowClose.current) return;
-    const dirty = tabsRef.current.filter((tab) => tab.dirty || (tab.isNew && !!tab.markdown.trim()));
-    if (dirty.length === 0) {
-      try {
-        const cleaned = await Promise.all(tabsRef.current.map((tab) => cleanRecovery(tab.id)));
-        if (cleaned.some((success) => !success)) {
-          await showMessage('无法清理恢复副本，本次退出已取消。请重试。', 'error');
-          return;
-        }
-        const changed = tabsRef.current.find((tab) => tab.dirty || (tab.isNew && !!tab.markdown.trim()));
-        if (changed) {
-          protectDraft(changed);
-          setPendingCloseTab(changed);
-          return;
-        }
-        await persistWindowState();
-        const editedDuringClose = tabsRef.current.find((tab) => tab.dirty || (tab.isNew && !!tab.markdown.trim()));
-        if (editedDuringClose) {
-          protectDraft(editedDuringClose);
-          setPendingCloseTab(editedDuringClose);
-          return;
-        }
-        await getCurrentWindow().destroy();
-      } catch (err) {
-        console.error('关闭窗口失败', err);
-        await showMessage(`关闭窗口失败:${errorMessage(err)}`, 'error');
-      }
-      return;
-    }
-
-    pendingWindowClose.current = true;
-    pendingCloseQueue.current = dirty.map((tab) => tab.id);
-    setPendingCloseTab(dirty[0]);
-  }, [persistWindowState, cleanRecovery, protectDraft]);
-
-  useEffect(() => {
-    if (!isTauri()) return;
-    let unlisten: (() => void) | undefined;
-    try {
-      void getCurrentWindow()
-        .onCloseRequested((event) => {
-          event.preventDefault();
-          void beginWindowClose();
-        })
-        .then((dispose) => {
-          unlisten = dispose;
-        })
-        .catch((err) => {
-          console.error('注册窗口关闭监听失败', err);
-        });
-    } catch {
-      // 浏览器预览没有 Tauri 窗口事件,不影响编辑器使用。
-    }
-    return () => unlisten?.();
-  }, [beginWindowClose]);
-
-  const handleWindowClose = useCallback(() => {
-    void beginWindowClose();
-  }, [beginWindowClose]);
-
   /* ---------- 渲染 ---------- */
   const openRecents = useMemo(
-    () => recentFiles.filter((f) => !tabs.some((t) => t.path && pathKey(t.path) === pathKey(f.path))),
+    () =>
+      recentFiles.filter((f) => !tabs.some((t) => t.path && pathKey(t.path) === pathKey(f.path))),
     [recentFiles, tabs],
   );
 
-  const activeSaveState =
-    !activeTab
-      ? 'idle'
-      : savingId === activeTab.id
-        ? 'saving'
-        : activeTab.id in blockedExternalMtime.current || activeTab.externalChanged
-          ? 'paused'
-          : activeTab.isNew
-            ? 'unsaved'
-            : activeTab.dirty
-              ? 'dirty'
-              : 'saved';
+  const activeSaveState = !activeTab
+    ? 'idle'
+    : savingId === activeTab.id
+      ? 'saving'
+      : activeTab.id in blockedExternalMtime.current || activeTab.externalChanged
+        ? 'paused'
+        : activeTab.isNew
+          ? 'unsaved'
+          : activeTab.dirty
+            ? 'dirty'
+            : 'saved';
   const view = startupView(startupResolved, tabs.length);
 
   return (
     <div className="app" data-body-font={bodyFont}>
+      <SettingsNotice error={settingsError} onRetry={retrySettings} />
       <Toolbar
         exporting={exporting}
         onOpen={() => void handleOpen()}
@@ -1667,7 +298,7 @@ export default function App() {
         saving={savingId === activeTab?.id}
         onSearch={() => setSearchOpen((v) => !v)}
         searchOpen={searchOpen}
-        onToggleOutline={() => setOutlineOpen((v) => !v)}
+        onToggleOutline={() => changeOutlineOpen((v) => !v)}
         outlineOpen={outlineOpen}
         sourceMode={sourceMode}
         onToggleSource={toggleSourceMode}
@@ -1690,14 +321,14 @@ export default function App() {
         <Presence present={outlineOpen}>
           <button
             className="outline-backdrop"
-            onClick={() => setOutlineOpen(false)}
+            onClick={() => changeOutlineOpen(false)}
             aria-label="关闭目录"
             tabIndex={-1}
           />
         </Presence>
         <OutlinePanel
           open={outlineOpen}
-          onToggle={() => setOutlineOpen((v) => !v)}
+          onToggle={() => changeOutlineOpen((v) => !v)}
           width={outlineWidth}
           onWidthChange={setOutlineWidth}
           items={activeTab ? (tabMirror.current[activeId ?? '']?.outline ?? []) : []}
@@ -1732,7 +363,11 @@ export default function App() {
                 <div className="welcome-recents">
                   <div className="welcome-recents-title">最近打开</div>
                   {openRecents.slice(0, 5).map((f) => (
-                    <button key={f.path} className="welcome-recent-item" onClick={() => void openFileFromPath(f.path)}>
+                    <button
+                      key={f.path}
+                      className="welcome-recent-item"
+                      onClick={() => void openFileFromPath(f.path)}
+                    >
                       {f.name}
                     </button>
                   ))}
@@ -1757,8 +392,15 @@ export default function App() {
 
           <Presence key={activeId} present={Boolean(activeTab) && searchOpen}>
             <SearchBar
-              editor={!sourceMode && activeId ? editorRegistry.current[activeId] ?? null : null}
-              source={sourceMode && activeTab ? { input: sourceRegistry.current[activeTab.id] ?? null, text: resolveContent(activeTab) } : undefined}
+              editor={!sourceMode && activeId ? (editorRegistry.current[activeId] ?? null) : null}
+              source={
+                sourceMode && activeTab
+                  ? {
+                      input: sourceRegistry.current[activeTab.id] ?? null,
+                      text: resolveContent(activeTab),
+                    }
+                  : undefined
+              }
               onClose={() => setSearchOpen(false)}
             />
           </Presence>
@@ -1782,7 +424,7 @@ export default function App() {
       <StatusBar
         tab={activeTab}
         themeMode={themeMode}
-        onThemeMode={setThemeModeState}
+        onThemeMode={changeThemeMode}
         sourceMode={sourceMode}
         saveState={activeSaveState}
         zoom={editorZoom}
@@ -1792,34 +434,49 @@ export default function App() {
         onBodyFont={changeBodyFont}
         onCodeFont={changeCodeFont}
         recoveryStatus={activeId ? recoveryStates[activeId] : undefined}
-        onRecovery={() => { setRecoveryOpen(true); void refreshRecovery(); }}
+        onRecovery={() => {
+          setRecoveryOpen(true);
+          void refreshRecovery();
+        }}
       />
 
       <Presence present={Boolean(mediaPreview)}>
         {mediaPreview && <MediaViewer media={mediaPreview} onClose={() => setMediaPreview(null)} />}
       </Presence>
       <Presence present={newModalOpen}>
-        <NewFileModal onCancel={() => setNewModalOpen(false)} onConfirm={handleNew} />
+        <NewFileModal
+          onCancel={() => setNewModalOpen(false)}
+          onConfirm={(kind) => {
+            createDocument(kind);
+            setNewModalOpen(false);
+          }}
+        />
       </Presence>
       <Presence present={recoveryOpen}>
-        <RecoveryModal entries={recoveryEntries} onRestore={handleRestore}
-          onRemove={(id) => setRecoveryEntries((entries) => entries.filter((entry) => entry.id !== id))}
-          onClose={() => setRecoveryOpen(false)} />
+        <RecoveryModal
+          entries={recoveryEntries}
+          onRestore={handleRestore}
+          onRemove={handleRecoveryRemoved}
+          onClose={() => setRecoveryOpen(false)}
+        />
       </Presence>
 
       <Presence present={shortcutsOpen}>
         <ShortcutModal
           bindings={shortcuts}
-          onChange={setShortcuts}
+          onChange={changeShortcuts}
           onClose={() => setShortcutsOpen(false)}
         />
       </Presence>
 
       <Presence present={Boolean(pendingCloseTab)}>
-        {pendingCloseTab && <CloseConfirmModal
-          title={pendingCloseTab.title}
-          onConfirm={(action) => void confirmClose(action)}
-        />}
+        {pendingCloseTab && (
+          <CloseConfirmModal
+            title={pendingCloseTab.title}
+            busy={closeBusy}
+            onConfirm={(action) => void confirmClose(action)}
+          />
+        )}
       </Presence>
 
       <Presence present={recentMenuOpen}>

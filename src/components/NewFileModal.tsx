@@ -23,15 +23,21 @@ export const NewFileModal = memo(function NewFileModal({ onCancel, onConfirm }: 
         tabIndex={-1}
       >
         <h3 id="new-document-title">新建文档</h3>
-        <p id="new-document-description" className="modal-description">选择一个起点,之后仍可随时修改内容。</p>
+        <p id="new-document-description" className="modal-description">
+          选择一个起点,之后仍可随时修改内容。
+        </p>
         <div className="newfile-options">
           <button type="button" className="newfile-card" onClick={() => onConfirm('blank')}>
-            <span className="newfile-icon"><IconNew size={20} /></span>
+            <span className="newfile-icon">
+              <IconNew size={20} />
+            </span>
             <span className="newfile-name">空白文档</span>
             <span className="newfile-desc">从一个空白的页面开始</span>
           </button>
           <button type="button" className="newfile-card" onClick={() => onConfirm('basic')}>
-            <span className="newfile-icon"><IconCode size={20} /></span>
+            <span className="newfile-icon">
+              <IconCode size={20} />
+            </span>
             <span className="newfile-name">基础模板</span>
             <span className="newfile-desc">包含标题、代码、公式、图表示例</span>
           </button>

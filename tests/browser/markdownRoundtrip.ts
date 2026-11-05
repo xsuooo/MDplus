@@ -5,7 +5,7 @@ import { createEditor, getCurrentState, setMarkdown, undo } from '../../src/lib/
 import { getImageUrls } from '../../src/lib/imagePaths';
 
 export const markdownCases = ['markdown-images', 'markdown-lists'] as const;
-export type MarkdownCase = typeof markdownCases[number];
+export type MarkdownCase = (typeof markdownCases)[number];
 
 function check(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
@@ -38,20 +38,34 @@ export async function runMarkdownRoundtrip(testCase: MarkdownCase): Promise<stri
       if (index > 0) setMarkdown(editor, markdown);
       const first = getCurrentState(editor).markdown;
       if (testCase === 'markdown-images') {
-        check(JSON.stringify(getImageUrls(first)) === JSON.stringify(getImageUrls(markdown)),
-          `Image lost during Markdown parsing: ${markdown} => ${first}`);
+        check(
+          JSON.stringify(getImageUrls(first)) === JSON.stringify(getImageUrls(markdown)),
+          `Image lost during Markdown parsing: ${markdown} => ${first}`,
+        );
       } else {
-        check(first.includes('first') && first.includes('second'), `List lost: ${markdown} => ${first}`);
-        check(first.includes('\n\n') === markdown.includes('\n\n'), `List spacing changed: ${markdown} => ${first}`);
+        check(
+          first.includes('first') && first.includes('second'),
+          `List lost: ${markdown} => ${first}`,
+        );
+        check(
+          first.includes('\n\n') === markdown.includes('\n\n'),
+          `List spacing changed: ${markdown} => ${first}`,
+        );
         if (markdown.startsWith('3.')) check(first.startsWith('3.'), 'Ordered list start was lost');
-        if (markdown.includes('[x]')) check(first.includes('[x]') && first.includes('[ ]'), 'Task state was lost');
+        if (markdown.includes('[x]'))
+          check(first.includes('[x]') && first.includes('[ ]'), 'Task state was lost');
       }
       setMarkdown(editor, first);
-      check(getCurrentState(editor).markdown === first, 'A second mode switch changed the document');
+      check(
+        getCurrentState(editor).markdown === first,
+        'A second mode switch changed the document',
+      );
       editor.action((ctx) => {
         const view = ctx.get(editorViewCtx);
         const dom = document.createElement('div');
-        dom.append(DOMSerializer.fromSchema(view.state.schema).serializeFragment(view.state.doc.content));
+        dom.append(
+          DOMSerializer.fromSchema(view.state.schema).serializeFragment(view.state.doc.content),
+        );
         const parsed = DOMParser.fromSchema(view.state.schema).parse(dom);
         parsed.check();
         check(parsed.eq(view.state.doc), 'Rendered DOM did not round-trip through its schema');
@@ -61,14 +75,20 @@ export async function runMarkdownRoundtrip(testCase: MarkdownCase): Promise<stri
         const paragraph = checkbox.parentElement!.querySelector('p')!;
         const lineHeight = parseFloat(getComputedStyle(paragraph).lineHeight);
         const box = checkbox.getBoundingClientRect();
-        check(Math.abs(box.y + box.height / 2 - paragraph.getBoundingClientRect().y - lineHeight / 2) < 2,
-          'Task checkbox is not aligned with its text');
+        check(
+          Math.abs(box.y + box.height / 2 - paragraph.getBoundingClientRect().y - lineHeight / 2) <
+            2,
+          'Task checkbox is not aligned with its text',
+        );
         editor.action((ctx) => {
           const view = ctx.get(editorViewCtx);
           view.dispatch(closeHistory(view.state.tr));
         });
         checkbox.click();
-        check(!getCurrentState(editor).markdown.includes('[x]'), 'Task checkbox did not update the document');
+        check(
+          !getCurrentState(editor).markdown.includes('[x]'),
+          'Task checkbox did not update the document',
+        );
         undo(editor);
         check(getCurrentState(editor).markdown === first, 'Undo did not restore task state');
       }

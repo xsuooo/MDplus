@@ -8,12 +8,7 @@ import {
   editorViewCtx,
 } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
-import {
-  undo as pmUndo,
-  redo as pmRedo,
-  undoDepth,
-  redoDepth,
-} from '@milkdown/prose/history';
+import { undo as pmUndo, redo as pmRedo, undoDepth, redoDepth } from '@milkdown/prose/history';
 import { Plugin, PluginKey, Selection } from '@milkdown/prose/state';
 import { commonmark, imageSchema, headingIdGenerator } from '@milkdown/kit/preset/commonmark';
 import { Transform } from '@milkdown/prose/transform';
@@ -59,7 +54,10 @@ function extractOutline(doc: import('@milkdown/prose/model').Node): OutlineItem[
 }
 
 /** 读取撤销/重做深度(history 插件未启用时安全返回 false) */
-function historyState(doc: import('@milkdown/prose/state').EditorState): { canUndo: boolean; canRedo: boolean } {
+function historyState(doc: import('@milkdown/prose/state').EditorState): {
+  canUndo: boolean;
+  canRedo: boolean;
+} {
   try {
     return { canUndo: undoDepth(doc) > 0, canRedo: redoDepth(doc) > 0 };
   } catch {
@@ -68,7 +66,11 @@ function historyState(doc: import('@milkdown/prose/state').EditorState): { canUn
 }
 
 /** 构建 Milkdown 编辑器 */
-export function createEditor(root: HTMLElement, content: string, callbacks: EditorCallbacks): Editor {
+export function createEditor(
+  root: HTMLElement,
+  content: string,
+  callbacks: EditorCallbacks,
+): Editor {
   const editor = Editor.make()
     .config((ctx) => {
       ctx.set(rootCtx, root);
@@ -80,26 +82,31 @@ export function createEditor(root: HTMLElement, content: string, callbacks: Edit
     .use(history)
     // Milkdown 的 listener 会防抖 200ms，不能作为保存/关闭的内容源。
     // view.update 在事务提交后同步执行；仅 UI 渲染仍由 App 节流。
-    .use($prose((ctx) => new Plugin({
-      key: synchronization,
-      state: {
-        init: () => false,
-        apply: (transaction) => transaction.getMeta(synchronization) === true,
-      },
-      view: () => ({
-        update: (view, previous) => {
-          if (synchronization.getState(view.state)) return;
-          if (view.state.doc.eq(previous.doc)) return;
-          const markdown = ctx.get(serializerCtx)(view.state.doc);
-          callbacks.onUpdate({
-            markdown,
-            outline: extractOutline(view.state.doc),
-            stats: computeStats(markdown),
-            ...historyState(view.state),
-          });
-        },
-      }),
-    })))
+    .use(
+      $prose(
+        (ctx) =>
+          new Plugin({
+            key: synchronization,
+            state: {
+              init: () => false,
+              apply: (transaction) => transaction.getMeta(synchronization) === true,
+            },
+            view: () => ({
+              update: (view, previous) => {
+                if (synchronization.getState(view.state)) return;
+                if (view.state.doc.eq(previous.doc)) return;
+                const markdown = ctx.get(serializerCtx)(view.state.doc);
+                callbacks.onUpdate({
+                  markdown,
+                  outline: extractOutline(view.state.doc),
+                  stats: computeStats(markdown),
+                  ...historyState(view.state),
+                });
+              },
+            }),
+          }),
+      ),
+    )
     .use(math)
     .use(prism)
     .use(nord as unknown as import('@milkdown/kit/ctx').MilkdownPlugin)
@@ -108,9 +115,15 @@ export function createEditor(root: HTMLElement, content: string, callbacks: Edit
     .use($prose(() => imageLayoutPlugin))
     .use($prose(() => taskListPlugin));
 
-  editor.use($view(imageSchema.node, () => imageView(
-    callbacks.resolveImageSource ?? ((src) => src), callbacks.onMediaPreview, callbacks.subscribeImageSources,
-  )));
+  editor.use(
+    $view(imageSchema.node, () =>
+      imageView(
+        callbacks.resolveImageSource ?? ((src) => src),
+        callbacks.onMediaPreview,
+        callbacks.subscribeImageSources,
+      ),
+    ),
+  );
 
   // 添加图片粘贴支持
   if (callbacks.onImagePaste) {
@@ -135,8 +148,14 @@ export function createEditor(root: HTMLElement, content: string, callbacks: Edit
           const isCurrent = callbacks.captureImagePaste?.();
           try {
             const imagePath = await callbacks.onImagePaste(file);
-            if (!imagePath || !view.dom.isConnected || view.isDestroyed || view.state !== original
-              || isCurrent?.() === false) return;
+            if (
+              !imagePath ||
+              !view.dom.isConnected ||
+              view.isDestroyed ||
+              view.state !== original ||
+              isCurrent?.() === false
+            )
+              return;
             const { state, dispatch } = view;
             // 插入真正的 image 节点而非纯文本,否则 Markdown 不会渲染成图片。
             const imageType = state.schema.nodes.image;
@@ -184,7 +203,8 @@ export function setMarkdown(editor: Editor, markdown: string, addToHistory = tru
     const normalized = new Transform(parsed);
     const headingId = ctx.get(headingIdGenerator.key);
     parsed.descendants((node, pos) => {
-      if (node.type.name === 'heading') normalized.setNodeMarkup(pos, undefined, { ...node.attrs, id: headingId(node) });
+      if (node.type.name === 'heading')
+        normalized.setNodeMarkup(pos, undefined, { ...node.attrs, id: headingId(node) });
     });
     const doc = normalized.doc;
     if (doc.eq(view.state.doc)) return;
@@ -196,7 +216,8 @@ export function setMarkdown(editor: Editor, markdown: string, addToHistory = tru
     view.state.doc.descendants((node, pos) => {
       if (node.type.name !== 'image') return;
       const next = doc.nodeAt(pos);
-      if (next?.type === node.type && !next.eq(node)) tr.setNodeMarkup(pos, undefined, next.attrs, next.marks);
+      if (next?.type === node.type && !next.eq(node))
+        tr.setNodeMarkup(pos, undefined, next.attrs, next.marks);
     });
     if (tr.doc.eq(doc)) {
       tr.setSelection(Selection.fromJSON(tr.doc, view.state.selection.toJSON()));
@@ -205,7 +226,10 @@ export function setMarkdown(editor: Editor, markdown: string, addToHistory = tru
       const end = view.state.doc.content.findDiffEnd(doc.content);
       if (start == null || !end) return;
       const overlap = start - Math.min(end.a, end.b);
-      if (overlap > 0) { end.a += overlap; end.b += overlap; }
+      if (overlap > 0) {
+        end.a += overlap;
+        end.b += overlap;
+      }
       tr = view.state.tr.replace(start, end.a, doc.slice(start, end.b));
     }
     tr.setMeta(synchronization, true).setMeta('addToHistory', addToHistory);

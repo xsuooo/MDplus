@@ -1,8 +1,10 @@
 // MDPlus - Tauri backend commands
+mod config;
 mod recovery;
 mod safe_files;
 #[cfg(test)]
 mod safe_files_tests;
+mod settings;
 mod update_guard;
 
 use std::fs::{self, File, OpenOptions};
@@ -11,8 +13,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State};
 
-const MAX_TEXT_FILE_BYTES: u64 = 32 * 1024 * 1024;
-const MAX_IMAGE_FILE_BYTES: u64 = 64 * 1024 * 1024;
+use config::{MAX_IMAGE_FILE_BYTES, MAX_TEXT_FILE_BYTES};
 
 #[derive(Default)]
 struct StartupFiles(Mutex<Vec<String>>);
@@ -59,7 +60,7 @@ fn take_pending_open_files(state: State<'_, PendingOpenFiles>) -> Vec<String> {
 /// 3. 带 BOM 的 UTF-16 LE/BE 按对应编码解码;
 /// 4. 其余(常见 GBK/GB2312 编码的中文文件)按 GBK 解码,保留中文内容。
 ///
-/// 写回时统一为 UTF-8(见 write_file),GBK 文件保存后转码为 UTF-8,内容不再丢失。
+/// 写回时统一为 UTF-8(见 safe_files::write_document),GBK 文件保存后转码为 UTF-8,内容不再丢失。
 fn decode_text(bytes: &[u8]) -> Result<String, String> {
     if let Some(data) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
         return std::str::from_utf8(data)
@@ -106,14 +107,6 @@ fn looks_binary(bytes: &[u8]) -> bool {
         return false;
     }
     bytes.iter().take(8192).any(|byte| *byte == 0)
-}
-
-/// Read a file's text content from disk.
-#[tauri::command]
-fn read_file(path: String) -> Result<String, String> {
-    safe_files::read_document(path)
-        .map(|snapshot| snapshot.content)
-        .map_err(|error| error.message)
 }
 
 fn create_temp_file(target: &Path) -> io::Result<(File, PathBuf)> {
@@ -198,31 +191,22 @@ fn write_file_atomic(path: &Path, content: &[u8]) -> io::Result<()> {
     result
 }
 
-/// Write text content to a file on disk (always UTF-8).
-/// 兼容输出：先写并同步临时文件再替换，不是跨进程内容事务。
-/// 文稿编辑必须使用 safe_files::write_document 的版本核对与恢复副本。
+/// Export HTML only. Document saves use the conditional document command.
 #[tauri::command]
-fn write_file(path: String, content: String) -> Result<(), String> {
-    write_file_atomic(Path::new(&path), content.as_bytes()).map_err(|e| e.to_string())
-}
-
-/// Return a file's last-modified time in milliseconds since UNIX_EPOCH.
-#[tauri::command]
-fn file_mtime(path: String) -> Result<u64, String> {
-    let mtime = std::fs::metadata(&path)
-        .and_then(|m| m.modified())
-        .map_err(|e| e.to_string())?;
-    let millis = mtime
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
-    Ok(millis)
-}
-
-/// Save binary data (e.g., images) to a file.
-#[tauri::command]
-fn save_binary_file(path: String, data: Vec<u8>) -> Result<(), String> {
-    write_file_atomic(Path::new(&path), &data).map_err(|e| e.to_string())
+fn export_html(path: String, content: String) -> Result<(), String> {
+    if !Path::new(&path)
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("html"))
+    {
+        return Err("HTML export requires an .html target".into());
+    }
+    if content.len() as u64 > MAX_TEXT_FILE_BYTES {
+        return Err("HTML export exceeds the configured text-file limit".into());
+    }
+    let target = safe_files::document_revision(path).map_err(|error| error.message)?;
+    safe_files::write_document(target.path, content, target.revision)
+        .map(|_| ())
+        .map_err(|error| error.message)
 }
 
 #[derive(serde::Serialize)]
@@ -239,7 +223,10 @@ fn document_image_path(doc_path: &Path, relative_path: &Path) -> Result<PathBuf,
     {
         return Err("image reference must be a relative path".to_owned());
     }
-    let document = fs::canonicalize(doc_path).map_err(|e| e.to_string())?;
+    let document = safe_files::target_path(doc_path).map_err(|error| error.message)?;
+    if !document.is_file() {
+        return Err("image references require an existing regular document".into());
+    }
     let directory = document
         .parent()
         .ok_or("document has no parent directory")?;
@@ -324,26 +311,26 @@ fn read_image_file(doc_path: String, relative_path: String) -> Result<ImageFile,
         return Err("path is not a regular file".to_owned());
     }
     if metadata.len() > MAX_IMAGE_FILE_BYTES {
-        return Err("image is larger than the 64 MiB image-file limit".to_owned());
+        return Err(format!(
+            "image exceeds the {} byte limit",
+            MAX_IMAGE_FILE_BYTES
+        ));
     }
     let mut data = Vec::new();
     file.take(MAX_IMAGE_FILE_BYTES + 1)
         .read_to_end(&mut data)
         .map_err(|e| e.to_string())?;
     if data.len() as u64 > MAX_IMAGE_FILE_BYTES {
-        return Err("image is larger than the 64 MiB image-file limit".to_owned());
+        return Err(format!(
+            "image exceeds the {} byte limit",
+            MAX_IMAGE_FILE_BYTES
+        ));
     }
     Ok(ImageFile {
         mime: image_mime(&path, &data)?,
         path: path.to_string_lossy().into_owned(),
         data,
     })
-}
-
-/// Create a directory (and parent directories if needed).
-#[tauri::command]
-fn create_directory(path: String) -> Result<(), String> {
-    fs::create_dir_all(&path).map_err(|e| e.to_string())
 }
 
 fn markdown_files_from_args<I, F>(args: I, path_exists: F) -> Vec<String>
@@ -403,7 +390,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(StartupFiles::new(startup_files))
         .manage(PendingOpenFiles::default())
-        .plugin(tauri_plugin_opener::init())
+        .manage(settings::SettingsResource::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
@@ -445,16 +432,13 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            read_file,
-            write_file,
             safe_files::read_document,
             safe_files::document_revision,
             safe_files::write_document,
             safe_files::save_image_asset,
-            file_mtime,
-            save_binary_file,
             read_image_file,
-            create_directory,
+            export_html,
+            settings::load_settings,
             take_startup_files,
             take_pending_open_files,
             recovery::cache_recovery_image,
@@ -468,278 +452,9 @@ pub fn run() {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+#[path = "lib_tests.rs"]
+mod tests;
 
-    struct TestDirectory(PathBuf);
-
-    impl TestDirectory {
-        fn new() -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "mdplus-image-test-{}-{}",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            ));
-            fs::create_dir(&path).unwrap();
-            Self(path)
-        }
-    }
-
-    impl Drop for TestDirectory {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
-    #[test]
-    fn image_paths_are_limited_to_the_document_directory() {
-        let root = TestDirectory::new();
-        let docs = root.0.join("docs");
-        fs::create_dir_all(docs.join("img")).unwrap();
-        let document = docs.join("note.md");
-        fs::write(&document, "document").unwrap();
-        fs::write(docs.join("img/picture.png"), b"image").unwrap();
-        fs::write(root.0.join("secret.png"), b"secret").unwrap();
-
-        assert!(document_image_path(&document, Path::new("img/picture.png")).is_ok());
-        assert!(document_image_path(&document, Path::new("../secret.png")).is_err());
-        assert!(document_image_path(&document, &root.0.join("secret.png")).is_err());
-        assert!(document_image_path(&document, Path::new("img/missing.png")).is_err());
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn windows_absolute_and_drive_relative_image_paths_are_rejected() {
-        let root = TestDirectory::new();
-        let document = root.0.join("note.md");
-        fs::write(&document, "document").unwrap();
-        for reference in [
-            r"C:\private\secret.png",
-            r"C:private\secret.png",
-            r"\private\secret.png",
-            r"\\server\share\secret.png",
-            r"\\?\C:\private\secret.png",
-        ] {
-            assert!(document_image_path(&document, Path::new(reference)).is_err());
-        }
-    }
-
-    #[test]
-    fn directory_links_cannot_escape_the_document_directory() {
-        let root = TestDirectory::new();
-        let docs = root.0.join("docs");
-        let outside = root.0.join("outside");
-        fs::create_dir(&docs).unwrap();
-        fs::create_dir(&outside).unwrap();
-        let document = docs.join("note.md");
-        fs::write(&document, "document").unwrap();
-        fs::write(outside.join("secret.png"), b"secret").unwrap();
-        let link = docs.join("linked");
-        #[cfg(windows)]
-        {
-            let output = std::process::Command::new("cmd")
-                .args(["/c", "mklink", "/J"])
-                .arg(&link)
-                .arg(&outside)
-                .output()
-                .unwrap();
-            assert!(output.status.success());
-        }
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&outside, &link).unwrap();
-
-        assert!(document_image_path(&document, Path::new("linked/secret.png")).is_err());
-        #[cfg(windows)]
-        fs::remove_dir(&link).unwrap();
-        #[cfg(unix)]
-        fs::remove_file(&link).unwrap();
-    }
-
-    #[test]
-    fn image_content_must_match_a_supported_extension() {
-        let png = [
-            0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, b'I', b'H', b'D', b'R',
-        ];
-        assert_eq!(image_mime(Path::new("image.png"), &png), Ok("image/png"));
-        assert!(image_mime(Path::new("secret.png"), b"PRIVATE_KEY=secret").is_err());
-        assert!(image_mime(Path::new("secret.txt"), &png).is_err());
-        assert!(image_mime(Path::new("image.jpg"), &png).is_err());
-        assert!(image_mime(Path::new("image.svg"), b"not an image").is_err());
-        assert!(image_mime(Path::new("image.svg"), b"<html/>").is_err());
-        assert!(image_mime(Path::new("image.svg"), b"<svg><g>").is_err());
-        assert!(image_mime(Path::new("image.svg"), b"<!DOCTYPE svg><svg/>").is_err());
-        assert_eq!(
-            image_mime(
-                Path::new("image.svg"),
-                br#"<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/></svg>"#
-            ),
-            Ok("image/svg+xml")
-        );
-    }
-
-    #[test]
-    fn image_command_rejects_disguised_non_images() {
-        let root = TestDirectory::new();
-        let document = root.0.join("note.md");
-        fs::write(&document, "document").unwrap();
-        fs::write(root.0.join("secret.png"), "PRIVATE_KEY=secret").unwrap();
-        assert!(read_image_file(
-            document.to_string_lossy().into_owned(),
-            "secret.png".to_owned()
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn startup_files_are_consumed_only_once() {
-        let startup_files = StartupFiles::new(vec!["README.md".to_string()]);
-
-        assert_eq!(startup_files.take(), vec!["README.md"]);
-        assert!(startup_files.take().is_empty());
-    }
-
-    #[test]
-    fn pending_open_files_survive_before_frontend_listener_is_ready() {
-        let pending = PendingOpenFiles::default();
-        pending.push(vec!["first.md".to_string()]);
-        pending.push(vec!["second.md".to_string()]);
-
-        assert_eq!(pending.take(), vec!["first.md", "second.md"]);
-        assert!(pending.take().is_empty());
-    }
-
-    #[test]
-    fn startup_file_arguments_are_detected_before_webview_creation() {
-        let files = markdown_files_from_args(
-            vec![
-                "mdplus.exe".to_string(),
-                "README.md".to_string(),
-                "notes.txt".to_string(),
-                "missing.md".to_string(),
-            ],
-            |path| path == "README.md",
-        );
-
-        assert_eq!(files, vec!["README.md"]);
-    }
-
-    #[test]
-    fn utf8_passthrough_unchanged() {
-        assert_eq!(
-            decode_text("你好 MDPlus".as_bytes()).unwrap(),
-            "你好 MDPlus"
-        );
-    }
-
-    #[test]
-    fn utf8_bom_is_stripped() {
-        let mut bytes = vec![0xEF, 0xBB, 0xBF];
-        bytes.extend_from_slice("中文".as_bytes());
-        assert_eq!(decode_text(&bytes).unwrap(), "中文");
-    }
-
-    #[test]
-    fn gbk_roundtrip_preserves_chinese() {
-        // GBK 编码的中文文件不再被 from_utf8_lossy 打成 U+FFFD
-        let (gbk, _, _) = encoding_rs::GBK.encode("中文测试内容 123");
-        let text = decode_text(&gbk).unwrap();
-        assert_eq!(text, "中文测试内容 123");
-        assert!(!text.contains('\u{FFFD}'));
-    }
-
-    #[test]
-    fn utf16le_bom_is_decoded() {
-        let mut bytes = vec![0xFF, 0xFE];
-        for u in "你好 UTF-16".encode_utf16() {
-            bytes.extend_from_slice(&u.to_le_bytes());
-        }
-        assert_eq!(decode_text(&bytes).unwrap(), "你好 UTF-16");
-    }
-
-    #[test]
-    fn utf16be_bom_is_decoded() {
-        let mut bytes = vec![0xFE, 0xFF];
-        for u in "你好 UTF-16".encode_utf16() {
-            bytes.extend_from_slice(&u.to_be_bytes());
-        }
-        assert_eq!(decode_text(&bytes).unwrap(), "你好 UTF-16");
-    }
-
-    #[test]
-    fn binary_payload_is_detected_but_utf16_is_allowed() {
-        assert!(looks_binary(b"text\0payload"));
-        assert!(!looks_binary(&[0xFF, 0xFE, 0x00, 0x4E]));
-    }
-
-    #[test]
-    fn completion_decode_rejects_odd_utf16le_without_changing_source() {
-        let root = TestDirectory::new();
-        let path = root.0.join("odd-le.md");
-        let bytes = [0xFF, 0xFE, b'a', 0, b'b'];
-        fs::write(&path, bytes).unwrap();
-        assert!(read_file(path.to_string_lossy().into_owned()).is_err());
-        assert_eq!(fs::read(path).unwrap(), bytes);
-    }
-
-    #[test]
-    fn completion_decode_rejects_odd_utf16be_without_changing_source() {
-        let root = TestDirectory::new();
-        let path = root.0.join("odd-be.md");
-        let bytes = [0xFE, 0xFF, 0, b'a', 0];
-        fs::write(&path, bytes).unwrap();
-        assert!(read_file(path.to_string_lossy().into_owned()).is_err());
-        assert_eq!(fs::read(path).unwrap(), bytes);
-    }
-
-    #[test]
-    fn completion_decode_rejects_invalid_utf16_surrogates_without_gbk_fallback() {
-        let root = TestDirectory::new();
-        for (index, bytes) in [vec![0xFF, 0xFE, 0x00, 0xD8], vec![0xFE, 0xFF, 0xDC, 0x00]]
-            .into_iter()
-            .enumerate()
-        {
-            let path = root.0.join(format!("surrogate-{index}.md"));
-            fs::write(&path, &bytes).unwrap();
-            assert!(read_file(path.to_string_lossy().into_owned()).is_err());
-            assert_eq!(fs::read(path).unwrap(), bytes);
-        }
-    }
-
-    #[test]
-    fn completion_decode_rejects_gbk_replacement_characters() {
-        let root = TestDirectory::new();
-        let path = root.0.join("invalid-gbk.md");
-        fs::write(&path, [0x81]).unwrap();
-        assert!(read_file(path.to_string_lossy().into_owned()).is_err());
-        assert_eq!(fs::read(path).unwrap(), [0x81]);
-    }
-
-    #[test]
-    fn completion_decode_honors_utf8_bom_instead_of_falling_back_to_gbk() {
-        let root = TestDirectory::new();
-        let path = root.0.join("invalid-utf8.md");
-        let bytes = [0xEF, 0xBB, 0xBF, 0xC4, 0xE3];
-        fs::write(&path, bytes).unwrap();
-        assert!(read_file(path.to_string_lossy().into_owned()).is_err());
-        assert_eq!(fs::read(path).unwrap(), bytes);
-    }
-
-    #[test]
-    fn atomic_write_replaces_existing_file() {
-        let path = std::env::temp_dir().join(format!(
-            "mdplus-atomic-write-{}-{}.md",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::write(&path, "旧内容").unwrap();
-        write_file_atomic(&path, "新内容".as_bytes()).unwrap();
-        assert_eq!(fs::read_to_string(&path).unwrap(), "新内容");
-        let _ = fs::remove_file(path);
-    }
-}
+#[cfg(test)]
+#[path = "export_validation_tests.rs"]
+mod export_validation_tests;

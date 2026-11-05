@@ -56,6 +56,7 @@ impl FileError {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentSnapshot {
+    pub path: String,
     pub content: String,
     pub revision: String,
     pub mtime: u64,
@@ -63,12 +64,14 @@ pub struct DocumentSnapshot {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RevisionState {
+    pub path: String,
     pub revision: Option<String>,
     pub mtime: Option<u64>,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WriteReceipt {
+    pub path: String,
     pub revision: String,
     pub mtime: u64,
     pub backup_path: Option<String>,
@@ -130,7 +133,28 @@ fn is_link(metadata: &fs::Metadata) -> bool {
     metadata.file_type().is_symlink()
 }
 
-fn target_path(path: &Path) -> Result<PathBuf, Box<FileError>> {
+pub(crate) fn target_path(path: &Path) -> Result<PathBuf, Box<FileError>> {
+    let input = path.to_string_lossy();
+    if input.is_empty()
+        || input.encode_utf16().count() > 32767
+        || input.chars().any(char::is_control)
+    {
+        return Err(FileError::new(
+            "INVALID_PATH",
+            path,
+            "文件路径为空、过长或包含控制字符",
+        ));
+    }
+    #[cfg(windows)]
+    if matches!(path.components().next(), Some(std::path::Component::Prefix(prefix))
+        if matches!(prefix.kind(), std::path::Prefix::DeviceNS(_) | std::path::Prefix::Verbatim(_)))
+    {
+        return Err(FileError::new(
+            "INVALID_PATH",
+            path,
+            "不支持设备命名空间作为文件路径",
+        ));
+    }
     let name = path
         .file_name()
         .and_then(|value| value.to_str())
@@ -190,7 +214,11 @@ fn raw_snapshot(path: &Path) -> Result<RawSnapshot, Box<FileError>> {
         return Err(FileError::new("INVALID_PATH", path, "不是常规文件"));
     }
     if metadata.len() > MAX_TEXT_FILE_BYTES {
-        return Err(FileError::new("TOO_LARGE", path, "文稿超过 32 MiB 上限"));
+        return Err(FileError::new(
+            "TOO_LARGE",
+            path,
+            format!("文稿超过 {} 字节上限", MAX_TEXT_FILE_BYTES),
+        ));
     }
     #[cfg(test)]
     hooks::run(hooks::Checkpoint::ReadLocked, path);
@@ -200,7 +228,11 @@ fn raw_snapshot(path: &Path) -> Result<RawSnapshot, Box<FileError>> {
         .read_to_end(&mut bytes)
         .map_err(|error| FileError::io(path, error))?;
     if bytes.len() as u64 > MAX_TEXT_FILE_BYTES {
-        return Err(FileError::new("TOO_LARGE", path, "文稿超过 32 MiB 上限"));
+        return Err(FileError::new(
+            "TOO_LARGE",
+            path,
+            format!("文稿超过 {} 字节上限", MAX_TEXT_FILE_BYTES),
+        ));
     }
     let after = file
         .metadata()
@@ -254,6 +286,7 @@ pub fn read_document(path: String) -> Result<DocumentSnapshot, Box<FileError>> {
     let content = decode_text(&raw.bytes)
         .map_err(|message| FileError::new("INVALID_ENCODING", &path, message))?;
     Ok(DocumentSnapshot {
+        path: display(&path),
         content,
         revision: raw.revision,
         mtime: raw.mtime,
@@ -265,6 +298,7 @@ pub fn document_revision(path: String) -> Result<RevisionState, Box<FileError>> 
     let path = target_path(Path::new(&path))?;
     let raw = optional_snapshot(&path)?;
     Ok(RevisionState {
+        path: display(&path),
         revision: raw.as_ref().map(|value| value.revision.clone()),
         mtime: raw.map(|value| value.mtime),
     })
@@ -390,7 +424,11 @@ pub fn write_document(
 ) -> Result<WriteReceipt, Box<FileError>> {
     let target = target_path(Path::new(&path))?;
     if content.len() as u64 > MAX_TEXT_FILE_BYTES {
-        return Err(FileError::new("TOO_LARGE", &target, "文稿超过 32 MiB 上限"));
+        return Err(FileError::new(
+            "TOO_LARGE",
+            &target,
+            format!("文稿超过 {} 字节上限", MAX_TEXT_FILE_BYTES),
+        ));
     }
     let _lock = DOCUMENT_WRITES
         .lock()
@@ -471,6 +509,7 @@ pub fn write_document(
         return Err(copies.retain(error));
     }
     let receipt = WriteReceipt {
+        path: display(&target),
         revision: committed.revision.clone(),
         mtime: committed.mtime,
         backup_path: None,
@@ -501,7 +540,7 @@ pub fn save_image_asset(
         return Err(FileError::new(
             "TOO_LARGE",
             &document,
-            "图片超过 64 MiB 上限",
+            format!("图片超过 {} 字节上限", MAX_IMAGE_FILE_BYTES),
         ));
     }
     image_mime(Path::new(&filename), &data)

@@ -12,7 +12,14 @@ interface TabBarProps {
   onWheelSwitch?: (direction: TabWheelDirection) => void;
 }
 
-export const TabBar = memo(function TabBar({ tabs, activeId, onSelect, onClose, onNew, onWheelSwitch }: TabBarProps) {
+export const TabBar = memo(function TabBar({
+  tabs,
+  activeId,
+  onSelect,
+  onClose,
+  onNew,
+  onWheelSwitch,
+}: TabBarProps) {
   const tabRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const barRef = useRef<HTMLDivElement | null>(null);
   const stripRef = useRef<HTMLDivElement | null>(null);
@@ -27,9 +34,15 @@ export const TabBar = memo(function TabBar({ tabs, activeId, onSelect, onClose, 
     if (!tab || !strip) return;
     const box = tab.getBoundingClientRect();
     const visible = strip.getBoundingClientRect();
-    const delta = box.left < visible.left ? box.left - visible.left : Math.max(0, box.right - visible.right);
-    if (delta) strip.scrollTo({ left: strip.scrollLeft + delta,
-      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
+    const delta =
+      box.left < visible.left ? box.left - visible.left : Math.max(0, box.right - visible.right);
+    if (delta)
+      strip.scrollTo({
+        left: strip.scrollLeft + delta,
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          ? 'instant'
+          : 'smooth',
+      });
   }, [activeId, tabCount]);
 
   // 滚轮监听需要 passive: false 才能阻止页面滚动,而 React 的 onWheel 是 passive 的,
@@ -121,7 +134,12 @@ export const TabBar = memo(function TabBar({ tabs, activeId, onSelect, onClose, 
           </div>
         ))}
       </div>
-      <button className="tabbar-new" onClick={onNew} title="新建文档 (Ctrl+N)" aria-label="新建文档">
+      <button
+        className="tabbar-new"
+        onClick={onNew}
+        title="新建文档 (Ctrl+N)"
+        aria-label="新建文档"
+      >
         +
       </button>
     </div>

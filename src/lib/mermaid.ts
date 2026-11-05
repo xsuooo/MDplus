@@ -23,321 +23,365 @@ export async function refreshMermaidTheme(): Promise<void> {
  *  - language 为 mermaid 时渲染为图表，选中、查看与编辑分别操作;
  *  - 其它语言渲染为普通可编辑代码块。
  */
-const mermaidView = (onPreview?: (media: MediaPreview) => void): NodeViewConstructor =>
+const mermaidView =
+  (onPreview?: (media: MediaPreview) => void): NodeViewConstructor =>
   (node: PMNode, view: EditorView, getPos: () => number | undefined) => {
-  const lang = String(node.attrs.language ?? '').toLowerCase();
+    const lang = String(node.attrs.language ?? '').toLowerCase();
 
-  /* ---------- 非 mermaid:普通代码块 ---------- */
-  if (lang !== 'mermaid') {
-    const dom = document.createElement('div');
-    dom.className = 'md-code-block';
-    const controls = document.createElement('div');
-    controls.className = 'md-code-controls';
-    controls.contentEditable = 'false';
-    const label = document.createElement('span');
-    label.className = 'md-code-language';
-    label.textContent = lang || '文本';
-    const status = document.createElement('span');
-    status.className = 'md-code-status';
-    status.setAttribute('role', 'status');
-    status.setAttribute('aria-live', 'polite');
-    status.setAttribute('aria-atomic', 'true');
-    const copy = document.createElement('button');
-    copy.type = 'button';
-    copy.className = 'md-code-copy';
-    copy.textContent = '复制';
-    copy.title = '复制代码块内容';
-    copy.setAttribute('aria-label', '复制代码块内容');
-    controls.append(label, status, copy);
-    const pre = document.createElement('pre');
-    const code = document.createElement('code');
-    if (lang) code.className = `language-${lang}`;
-    pre.appendChild(code);
-    dom.append(controls, pre);
+    /* ---------- 非 mermaid:普通代码块 ---------- */
+    if (lang !== 'mermaid') {
+      const dom = document.createElement('div');
+      dom.className = 'md-code-block';
+      const controls = document.createElement('div');
+      controls.className = 'md-code-controls';
+      controls.contentEditable = 'false';
+      const label = document.createElement('span');
+      label.className = 'md-code-language';
+      label.textContent = lang || '文本';
+      const status = document.createElement('span');
+      status.className = 'md-code-status';
+      status.setAttribute('role', 'status');
+      status.setAttribute('aria-live', 'polite');
+      status.setAttribute('aria-atomic', 'true');
+      const copy = document.createElement('button');
+      copy.type = 'button';
+      copy.className = 'md-code-copy';
+      copy.textContent = '复制';
+      copy.title = '复制代码块内容';
+      copy.setAttribute('aria-label', '复制代码块内容');
+      controls.append(label, status, copy);
+      const pre = document.createElement('pre');
+      const code = document.createElement('code');
+      if (lang) code.className = `language-${lang}`;
+      pre.appendChild(code);
+      dom.append(controls, pre);
 
-    let currentNode = node;
-    let isDestroyed = false;
-    let copying = false;
-    let resetTimer: ReturnType<typeof setTimeout> | undefined;
-    // Keep pointer copying out of the document selection and undo history.
-    controls.onmousedown = (event) => event.preventDefault();
-    copy.onclick = async () => {
-      if (copying || isDestroyed) return;
-      copying = true;
-      clearTimeout(resetTimer);
-      copy.setAttribute('aria-disabled', 'true');
-      copy.setAttribute('aria-busy', 'true');
-      copy.textContent = '复制中…';
-      delete copy.dataset.state;
-      status.textContent = '';
-      try {
-        await navigator.clipboard.writeText(currentNode.textContent);
-        if (isDestroyed) return;
-        copy.textContent = '已复制';
-        copy.dataset.state = 'copied';
-        copy.title = '已复制到剪贴板';
-        status.textContent = '代码块内容已复制到剪贴板';
-        resetTimer = setTimeout(() => {
-          copy.textContent = '复制';
-          copy.title = '复制代码块内容';
-          delete copy.dataset.state;
-          status.textContent = '';
-        }, 2000);
-      } catch {
-        if (isDestroyed) return;
-        copy.textContent = '复制失败';
-        copy.dataset.state = 'error';
-        copy.title = '请点击重试，或选中文本后按 Ctrl+C 复制';
-        status.textContent = '复制失败。请点击重试，或选中文本后按 Ctrl+C 复制。';
-      } finally {
-        copying = false;
-        if (!isDestroyed) {
-          copy.removeAttribute('aria-disabled');
-          copy.removeAttribute('aria-busy');
+      let currentNode = node;
+      let isDestroyed = false;
+      let copying = false;
+      let resetTimer: ReturnType<typeof setTimeout> | undefined;
+      // Keep pointer copying out of the document selection and undo history.
+      controls.onmousedown = (event) => event.preventDefault();
+      copy.onclick = async () => {
+        if (copying || isDestroyed) return;
+        copying = true;
+        clearTimeout(resetTimer);
+        copy.setAttribute('aria-disabled', 'true');
+        copy.setAttribute('aria-busy', 'true');
+        copy.textContent = '复制中…';
+        delete copy.dataset.state;
+        status.textContent = '';
+        try {
+          await navigator.clipboard.writeText(currentNode.textContent);
+          if (isDestroyed) return;
+          copy.textContent = '已复制';
+          copy.dataset.state = 'copied';
+          copy.title = '已复制到剪贴板';
+          status.textContent = '代码块内容已复制到剪贴板';
+          resetTimer = setTimeout(() => {
+            copy.textContent = '复制';
+            copy.title = '复制代码块内容';
+            delete copy.dataset.state;
+            status.textContent = '';
+          }, 2000);
+        } catch {
+          if (isDestroyed) return;
+          copy.textContent = '复制失败';
+          copy.dataset.state = 'error';
+          copy.title = '请点击重试，或选中文本后按 Ctrl+C 复制';
+          status.textContent = '复制失败。请点击重试，或选中文本后按 Ctrl+C 复制。';
+        } finally {
+          copying = false;
+          if (!isDestroyed) {
+            copy.removeAttribute('aria-disabled');
+            copy.removeAttribute('aria-busy');
+          }
         }
+      };
+      return {
+        dom,
+        contentDOM: code,
+        update(next: PMNode): boolean {
+          const nextLang = String(next.attrs.language ?? '').toLowerCase();
+          if (next.type !== node.type || nextLang === 'mermaid') return false;
+          currentNode = next;
+          code.className = nextLang ? `language-${nextLang}` : '';
+          label.textContent = nextLang || '文本';
+          return true;
+        },
+        // View-owned attributes/chrome are not code edits; keep observing text and selection.
+        ignoreMutation: (mutation) =>
+          mutation.type !== 'selection' &&
+          (mutation.type === 'attributes' || !code.contains(mutation.target)),
+        stopEvent: (event) => event.target instanceof Node && controls.contains(event.target),
+        destroy: () => {
+          isDestroyed = true;
+          clearTimeout(resetTimer);
+          copy.onclick = null;
+        },
+      };
+    }
+
+    /* ---------- mermaid 图表视图 ---------- */
+    const dom = document.createElement('div');
+    dom.className = 'md-mermaid-node';
+    const holder = document.createElement('div');
+    holder.className = 'md-mermaid-holder';
+    const contentPre = document.createElement('pre');
+    contentPre.className = 'md-mermaid-contentdom';
+    const contentCode = document.createElement('code');
+    contentPre.appendChild(contentCode);
+    dom.appendChild(holder);
+    dom.appendChild(contentPre);
+    const controls = document.createElement('div');
+    controls.className = 'md-media-controls';
+    controls.contentEditable = 'false';
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'md-mermaid-edit';
+    edit.textContent = '编辑图表';
+    const enlarge = document.createElement('button');
+    enlarge.type = 'button';
+    enlarge.className = 'md-mermaid-enlarge';
+    enlarge.textContent = '放大查看';
+    enlarge.setAttribute('aria-label', '放大查看图表');
+    enlarge.disabled = true;
+    controls.append(edit, enlarge);
+    dom.append(controls);
+
+    let currentCode = node.textContent;
+    let isDestroyed = false;
+    let isEditing = false;
+    let renderToken = 0;
+    let finishPendingLoad: (() => void) | undefined;
+    let media: MediaPreview | undefined;
+    let layout: { identity: string; width: number; height: number } | undefined;
+    let sourceInput: HTMLTextAreaElement | undefined;
+    const select = () => {
+      const pos = getPos();
+      if (pos == null || view.isDestroyed) return;
+      view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos)));
+      view.focus();
+    };
+    holder.onclick = (event) => {
+      if (!isEditing) {
+        event.stopPropagation();
+        select();
       }
     };
+    controls.addEventListener('mousedown', (event) => event.preventDefault());
+    edit.onclick = () => {
+      select();
+      showEditor(holder, currentCode);
+    };
+    enlarge.onclick = () => {
+      select();
+      if (media) onPreview?.(media);
+    };
+
+    /** 当前主题,mermaid 也跟随 */
+    function diagramTheme(): 'dark' | 'light' {
+      const theme = document.documentElement.dataset.theme;
+      return theme === 'dark' ? 'dark' : 'light';
+    }
+
+    /** 异步渲染图表 */
+    async function renderDiagram(code: string, fade = false): Promise<void> {
+      const token = ++renderToken;
+      finishPendingLoad?.();
+      if (isDestroyed) return;
+      dom.classList.add('loading');
+      let preview: HTMLDivElement | undefined;
+
+      try {
+        // The constructor starts rendering before ProseMirror attaches this node.
+        // Read inherited font settings only after it belongs to its actual tab.
+        await Promise.resolve();
+        if (isDestroyed || token !== renderToken) return;
+        const font = normalizeBodyFont(
+          dom.closest<HTMLElement>('[data-body-font]')?.dataset.bodyFont,
+        );
+        const nextMedia = await renderDiagramMedia(code, diagramTheme(), font);
+        if (isDestroyed || token !== renderToken) return;
+        // Mermaid themes can differ by a few border pixels. Only content/font
+        // changes may resize the document; a color change retains its layout box.
+        const identity = `${font}\0${code}`;
+        if (layout?.identity === identity) {
+          nextMedia.width = layout.width;
+          nextMedia.height = layout.height;
+        } else layout = { identity, width: nextMedia.width, height: nextMedia.height };
+        // Load the replacement invisibly without collapsing the current diagram.
+        preview = document.createElement('div');
+        preview.className = 'md-mermaid-preview md-mermaid-preview-pending';
+        const image = document.createElement('img');
+        image.src = nextMedia.src;
+        image.draggable = false;
+        image.alt = 'Mermaid 图表预览';
+        image.style.width = `${nextMedia.width}px`;
+        image.style.aspectRatio = `${nextMedia.width} / ${nextMedia.height}`;
+        preview.append(image);
+        const ready = new Promise<void>((resolve, reject) => {
+          const cleanup = () => {
+            image.removeEventListener('load', finish);
+            image.removeEventListener('error', fail);
+            if (finishPendingLoad === finish) finishPendingLoad = undefined;
+          };
+          const finish = () => {
+            cleanup();
+            resolve();
+          };
+          const fail = () => {
+            cleanup();
+            reject(new Error('图表图像无法解码'));
+          };
+          finishPendingLoad = finish;
+          image.addEventListener('load', finish, { once: true });
+          image.addEventListener('error', fail, { once: true });
+        });
+        holder.appendChild(preview);
+        await ready;
+        if (isDestroyed || token !== renderToken) {
+          preview.remove();
+          return;
+        }
+        if (
+          fade &&
+          holder.querySelector('.md-mermaid-preview:not(.md-mermaid-preview-pending)') &&
+          !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        ) {
+          preview.classList.add('md-mermaid-preview-revealing');
+          const motion = getComputedStyle(dom);
+          await preview
+            .animate([{ opacity: 0 }, { opacity: 1 }], {
+              duration: parseFloat(motion.getPropertyValue('--motion-enter')) || 220,
+              easing: motion.getPropertyValue('--ease-out').trim() || 'ease-out',
+              fill: 'forwards',
+            })
+            .finished.catch(() => {});
+          if (isDestroyed || token !== renderToken) {
+            preview.remove();
+            return;
+          }
+          preview.classList.remove('md-mermaid-preview-revealing');
+        }
+        preview.classList.remove('md-mermaid-preview-pending');
+        holder.className = 'md-mermaid-holder';
+        holder.replaceChildren(preview);
+        media = nextMedia;
+        enlarge.disabled = !onPreview;
+        dom.classList.remove('loading');
+      } catch (err) {
+        preview?.remove();
+        if (isDestroyed || token !== renderToken) return;
+        media = undefined;
+        enlarge.disabled = true;
+        holder.textContent = `图表无法预览。请点击“编辑图表”修正源码。\n${errorMessage(err)}`;
+        holder.className = 'md-mermaid-holder md-mermaid-error';
+        dom.classList.remove('loading');
+      }
+    }
+
+    /** 显示源码编辑区 */
+    function showEditor(holder: HTMLElement, code: string): void {
+      isEditing = true;
+      controls.hidden = true;
+      renderToken += 1;
+      finishPendingLoad?.();
+      dom.classList.remove('loading');
+      holder.className = 'md-mermaid-holder md-mermaid-editing';
+      const ta = document.createElement('textarea');
+      sourceInput = ta;
+      ta.className = 'md-mermaid-textarea';
+      ta.setAttribute('aria-label', 'Mermaid 图表源码');
+      ta.value = code;
+      const bar = document.createElement('div');
+      bar.className = 'md-mermaid-bar';
+      const hint = document.createElement('span');
+      hint.className = 'md-mermaid-hint';
+      hint.textContent = '编辑 Mermaid 源码,失焦或点击预览生效';
+      const btn = document.createElement('button');
+      btn.className = 'md-mermaid-commit';
+      btn.textContent = '预览';
+      bar.appendChild(hint);
+      bar.appendChild(btn);
+
+      holder.innerHTML = '';
+      holder.appendChild(bar);
+      holder.appendChild(ta);
+
+      const write = (): void => {
+        if (isDestroyed || !isEditing) return;
+        const value = ta.value;
+        const changed = value !== currentCode;
+        currentCode = value;
+        const pos = getPos();
+        // 内容有变化才 dispatch(避免 blur 产生无意义的撤销历史);
+        // pos 为 null 说明节点已销毁/替换,直接跳过写回
+        if (pos != null) {
+          const nodeAt = view.state.doc.nodeAt(pos);
+          if (
+            nodeAt?.type.name === 'code_block' &&
+            String(nodeAt.attrs.language).toLowerCase() === 'mermaid' &&
+            changed
+          ) {
+            const tr = view.state.tr.insertText(value, pos + 1, pos + nodeAt.nodeSize - 1);
+            view.dispatch(tr);
+          }
+        }
+      };
+      const commit = (): void => {
+        if (isDestroyed || !isEditing) return;
+        write();
+        isEditing = false;
+        sourceInput = undefined;
+        controls.hidden = false;
+        // 无论内容是否变化,都退出编辑态并重新渲染
+        void renderDiagram(currentCode);
+      };
+      // Save/recovery must see the draft even when Ctrl+S never blurs this textarea.
+      ta.addEventListener('input', write);
+      btn.addEventListener('mousedown', (e) => e.preventDefault());
+      btn.addEventListener('click', commit);
+      ta.addEventListener('blur', commit);
+      ta.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !e.defaultPrevented && !isComposingEvent(e)) {
+          e.preventDefault();
+          ta.blur();
+        }
+      });
+      ta.focus();
+    }
+
+    void renderDiagram(currentCode);
+
+    // 注册到主题刷新集合,销毁时移除
+    const renderer = () => (isEditing ? Promise.resolve() : renderDiagram(currentCode, true));
+    activeRenderers.add(renderer);
+
     return {
       dom,
-      contentDOM: code,
-      update(next: PMNode): boolean {
-        const nextLang = String(next.attrs.language ?? '').toLowerCase();
-        if (next.type !== node.type || nextLang === 'mermaid') return false;
-        currentNode = next;
-        code.className = nextLang ? `language-${nextLang}` : '';
-        label.textContent = nextLang || '文本';
+      // 隐藏的 contentDOM,让 ProseMirror 与文档文本保持同步
+      contentDOM: contentCode,
+      update(node: PMNode): boolean {
+        if (String(node.attrs.language ?? '').toLowerCase() !== 'mermaid') return false;
+        if (node.textContent !== currentCode) {
+          currentCode = node.textContent;
+          if (isEditing && sourceInput) sourceInput.value = currentCode;
+          else void renderDiagram(currentCode);
+        }
         return true;
       },
-      // View-owned attributes/chrome are not code edits; keep observing text and selection.
-      ignoreMutation: (mutation) => mutation.type !== 'selection'
-        && (mutation.type === 'attributes' || !code.contains(mutation.target)),
-      stopEvent: (event) => event.target instanceof Node && controls.contains(event.target),
+      ignoreMutation: () => true,
+      stopEvent: (event) =>
+        event.target instanceof Element &&
+        !!event.target.closest('.md-media-controls, .md-mermaid-textarea, .md-mermaid-bar'),
       destroy: () => {
         isDestroyed = true;
-        clearTimeout(resetTimer);
-        copy.onclick = null;
+        finishPendingLoad?.();
+        activeRenderers.delete(renderer);
       },
     };
-  }
-
-  /* ---------- mermaid 图表视图 ---------- */
-  const dom = document.createElement('div');
-  dom.className = 'md-mermaid-node';
-  const holder = document.createElement('div');
-  holder.className = 'md-mermaid-holder';
-  const contentPre = document.createElement('pre');
-  contentPre.className = 'md-mermaid-contentdom';
-  const contentCode = document.createElement('code');
-  contentPre.appendChild(contentCode);
-  dom.appendChild(holder);
-  dom.appendChild(contentPre);
-  const controls = document.createElement('div');
-  controls.className = 'md-media-controls';
-  controls.contentEditable = 'false';
-  const edit = document.createElement('button');
-  edit.type = 'button'; edit.className = 'md-mermaid-edit';
-  edit.textContent = '编辑图表';
-  const enlarge = document.createElement('button');
-  enlarge.type = 'button'; enlarge.className = 'md-mermaid-enlarge';
-  enlarge.textContent = '放大查看'; enlarge.setAttribute('aria-label', '放大查看图表');
-  enlarge.disabled = true;
-  controls.append(edit, enlarge); dom.append(controls);
-
-  let currentCode = node.textContent;
-  let isDestroyed = false;
-  let isEditing = false;
-  let renderToken = 0;
-  let finishPendingLoad: (() => void) | undefined;
-  let media: MediaPreview | undefined;
-  let layout: { identity: string; width: number; height: number } | undefined;
-  let sourceInput: HTMLTextAreaElement | undefined;
-  const select = () => {
-    const pos = getPos();
-    if (pos == null || view.isDestroyed) return;
-    view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos)));
-    view.focus();
   };
-  holder.onclick = (event) => { if (!isEditing) { event.stopPropagation(); select(); } };
-  controls.addEventListener('mousedown', (event) => event.preventDefault());
-  edit.onclick = () => { select(); showEditor(holder, currentCode); };
-  enlarge.onclick = () => { select(); if (media) onPreview?.(media); };
 
-  /** 当前主题,mermaid 也跟随 */
-  function diagramTheme(): 'dark' | 'light' {
-    const theme = document.documentElement.dataset.theme;
-    return theme === 'dark' ? 'dark' : 'light';
-  }
-
-  /** 异步渲染图表 */
-  async function renderDiagram(code: string, fade = false): Promise<void> {
-    const token = ++renderToken;
-    finishPendingLoad?.();
-    if (isDestroyed) return;
-    dom.classList.add('loading');
-    let preview: HTMLDivElement | undefined;
-
-    try {
-      // The constructor starts rendering before ProseMirror attaches this node.
-      // Read inherited font settings only after it belongs to its actual tab.
-      await Promise.resolve();
-      if (isDestroyed || token !== renderToken) return;
-      const font = normalizeBodyFont(dom.closest<HTMLElement>('[data-body-font]')?.dataset.bodyFont);
-      const nextMedia = await renderDiagramMedia(code, diagramTheme(), font);
-      if (isDestroyed || token !== renderToken) return;
-      // Mermaid themes can differ by a few border pixels. Only content/font
-      // changes may resize the document; a color change retains its layout box.
-      const identity = `${font}\0${code}`;
-      if (layout?.identity === identity) {
-        nextMedia.width = layout.width; nextMedia.height = layout.height;
-      } else layout = { identity, width: nextMedia.width, height: nextMedia.height };
-      // Load the replacement invisibly without collapsing the current diagram.
-      preview = document.createElement('div');
-      preview.className = 'md-mermaid-preview md-mermaid-preview-pending';
-      const image = document.createElement('img');
-      image.src = nextMedia.src; image.draggable = false;
-      image.alt = 'Mermaid 图表预览';
-      image.style.width = `${nextMedia.width}px`;
-      image.style.aspectRatio = `${nextMedia.width} / ${nextMedia.height}`;
-      preview.append(image);
-      const ready = new Promise<void>((resolve, reject) => {
-        const cleanup = () => {
-          image.removeEventListener('load', finish);
-          image.removeEventListener('error', fail);
-          if (finishPendingLoad === finish) finishPendingLoad = undefined;
-        };
-        const finish = () => { cleanup(); resolve(); };
-        const fail = () => { cleanup(); reject(new Error('图表图像无法解码')); };
-        finishPendingLoad = finish;
-        image.addEventListener('load', finish, { once: true });
-        image.addEventListener('error', fail, { once: true });
-      });
-      holder.appendChild(preview);
-      await ready;
-      if (isDestroyed || token !== renderToken) {
-        preview.remove();
-        return;
-      }
-      if (fade && holder.querySelector('.md-mermaid-preview:not(.md-mermaid-preview-pending)')
-        && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        preview.classList.add('md-mermaid-preview-revealing');
-        const motion = getComputedStyle(dom);
-        await preview.animate([{ opacity: 0 }, { opacity: 1 }],
-          { duration: parseFloat(motion.getPropertyValue('--motion-enter')) || 220,
-            easing: motion.getPropertyValue('--ease-out').trim() || 'ease-out', fill: 'forwards' }).finished.catch(() => {});
-        if (isDestroyed || token !== renderToken) { preview.remove(); return; }
-        preview.classList.remove('md-mermaid-preview-revealing');
-      }
-      preview.classList.remove('md-mermaid-preview-pending');
-      holder.className = 'md-mermaid-holder';
-      holder.replaceChildren(preview);
-      media = nextMedia;
-      enlarge.disabled = !onPreview;
-      dom.classList.remove('loading');
-    } catch (err) {
-      preview?.remove();
-      if (isDestroyed || token !== renderToken) return;
-      media = undefined; enlarge.disabled = true;
-      holder.textContent = `图表无法预览。请点击“编辑图表”修正源码。\n${errorMessage(err)}`;
-      holder.className = 'md-mermaid-holder md-mermaid-error';
-      dom.classList.remove('loading');
-    }
-  }
-
-  /** 显示源码编辑区 */
-  function showEditor(holder: HTMLElement, code: string): void {
-    isEditing = true;
-    controls.hidden = true;
-    renderToken += 1;
-    finishPendingLoad?.();
-    dom.classList.remove('loading');
-    holder.className = 'md-mermaid-holder md-mermaid-editing';
-    const ta = document.createElement('textarea');
-    sourceInput = ta;
-    ta.className = 'md-mermaid-textarea';
-    ta.setAttribute('aria-label', 'Mermaid 图表源码');
-    ta.value = code;
-    const bar = document.createElement('div');
-    bar.className = 'md-mermaid-bar';
-    const hint = document.createElement('span');
-    hint.className = 'md-mermaid-hint';
-    hint.textContent = '编辑 Mermaid 源码,失焦或点击预览生效';
-    const btn = document.createElement('button');
-    btn.className = 'md-mermaid-commit';
-    btn.textContent = '预览';
-    bar.appendChild(hint);
-    bar.appendChild(btn);
-
-    holder.innerHTML = '';
-    holder.appendChild(bar);
-    holder.appendChild(ta);
-
-    const write = (): void => {
-      if (isDestroyed || !isEditing) return;
-      const value = ta.value;
-      const changed = value !== currentCode;
-      currentCode = value;
-      const pos = getPos();
-      // 内容有变化才 dispatch(避免 blur 产生无意义的撤销历史);
-      // pos 为 null 说明节点已销毁/替换,直接跳过写回
-      if (pos != null) {
-        const nodeAt = view.state.doc.nodeAt(pos);
-        if (nodeAt?.type.name === 'code_block' && String(nodeAt.attrs.language).toLowerCase() === 'mermaid' && changed) {
-          const tr = view.state.tr.insertText(value, pos + 1, pos + nodeAt.nodeSize - 1);
-          view.dispatch(tr);
-        }
-      }
-    };
-    const commit = (): void => {
-      if (isDestroyed || !isEditing) return;
-      write();
-      isEditing = false;
-      sourceInput = undefined;
-      controls.hidden = false;
-      // 无论内容是否变化,都退出编辑态并重新渲染
-      void renderDiagram(currentCode);
-    };
-    // Save/recovery must see the draft even when Ctrl+S never blurs this textarea.
-    ta.addEventListener('input', write);
-    btn.addEventListener('mousedown', (e) => e.preventDefault());
-    btn.addEventListener('click', commit);
-    ta.addEventListener('blur', commit);
-    ta.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && !e.defaultPrevented && !isComposingEvent(e)) {
-        e.preventDefault();
-        ta.blur();
-      }
-    });
-    ta.focus();
-  }
-
-  void renderDiagram(currentCode);
-
-  // 注册到主题刷新集合,销毁时移除
-  const renderer = () => isEditing ? Promise.resolve() : renderDiagram(currentCode, true);
-  activeRenderers.add(renderer);
-
-  return {
-    dom,
-    // 隐藏的 contentDOM,让 ProseMirror 与文档文本保持同步
-    contentDOM: contentCode,
-    update(node: PMNode): boolean {
-      if (String(node.attrs.language ?? '').toLowerCase() !== 'mermaid') return false;
-      if (node.textContent !== currentCode) {
-        currentCode = node.textContent;
-        if (isEditing && sourceInput) sourceInput.value = currentCode;
-        else void renderDiagram(currentCode);
-      }
-      return true;
-    },
-    ignoreMutation: () => true,
-    stopEvent: (event) => event.target instanceof Element
-      && !!event.target.closest('.md-media-controls, .md-mermaid-textarea, .md-mermaid-bar'),
-    destroy: () => {
-      isDestroyed = true;
-      finishPendingLoad?.();
-      activeRenderers.delete(renderer);
-    },
-  };
-};
-
-export const mermaidPlugin = (onPreview?: (media: MediaPreview) => void) => $view(codeBlockSchema.node, () => mermaidView(onPreview));
+export const mermaidPlugin = (onPreview?: (media: MediaPreview) => void) =>
+  $view(codeBlockSchema.node, () => mermaidView(onPreview));

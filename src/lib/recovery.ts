@@ -1,9 +1,14 @@
+import { RECOVERY_DELAY_MS } from '../config/constants';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getPendingImages, restorePendingImages } from './imageOps';
 import { getImageUrls, isRelativeImageUrl, rewriteImageReferences } from './imagePaths';
 import type { Tab } from './types';
 
-export interface RecoveryImage { placeholder: string; filename: string; key: string }
+export interface RecoveryImage {
+  placeholder: string;
+  filename: string;
+  key: string;
+}
 export interface RecoverySnapshot {
   id: string;
   title: string;
@@ -12,7 +17,11 @@ export interface RecoverySnapshot {
   images: RecoveryImage[];
 }
 export interface RecoveryEntry {
-  id: string; title: string; originalPath: string | null; updatedAt: number; damaged: boolean;
+  id: string;
+  title: string;
+  originalPath: string | null;
+  updatedAt: number;
+  damaged: boolean;
 }
 export type RecoveryStatus = 'pending' | 'protected' | 'error' | 'idle';
 
@@ -41,7 +50,11 @@ function imageKey(image: { placeholder: string; filename: string }): string {
   return `${image.placeholder.slice('mdplus-image:'.length)}.${image.filename.split('.').pop()!.toLowerCase()}`;
 }
 
-async function cacheImage(id: string, image: { placeholder: string; filename: string; data: number[] }, entry: Journal) {
+async function cacheImage(
+  id: string,
+  image: { placeholder: string; filename: string; data: number[] },
+  entry: Journal,
+) {
   const key = imageKey(image);
   if (!entry.cached.has(key)) {
     await invoke('cache_recovery_image', { id, key, data: image.data });
@@ -61,40 +74,66 @@ export async function protectPastedImage(id: string, placeholder: string): Promi
 function capture(tab: Pick<Tab, 'id' | 'title' | 'path' | 'markdown'>) {
   const urls = new Set(getImageUrls(tab.markdown));
   const images = getPendingImages(tab.id)
-    .filter((image) => urls.has(image.placeholder) || (!!image.source && urls.has(image.source.url)))
+    .filter(
+      (image) => urls.has(image.placeholder) || (!!image.source && urls.has(image.source.url)),
+    )
     .map((image) => ({
-      placeholder: image.placeholder, filename: image.filename, key: imageKey(image),
-      sourceUrl: image.source?.url, data: image.data,
+      placeholder: image.placeholder,
+      filename: image.filename,
+      key: imageKey(image),
+      sourceUrl: image.source?.url,
+      data: image.data,
     }));
   for (const url of urls) {
-    if ((url.startsWith('mdplus-image:') || isRelativeImageUrl(url))
-      && !images.some((image) => (image.placeholder === url || image.sourceUrl === url) && image.data.length > 0)) {
+    if (
+      (url.startsWith('mdplus-image:') || isRelativeImageUrl(url)) &&
+      !images.some(
+        (image) => (image.placeholder === url || image.sourceUrl === url) && image.data.length > 0,
+      )
+    ) {
       throw new Error('恢复快照缺少图片数据，请立即手动保存文档');
     }
   }
-  const markdown = rewriteImageReferences(tab.markdown, images.filter((image) => image.sourceUrl)
-    .map((image) => ({ placeholder: image.sourceUrl!, relativePath: image.placeholder })));
+  const markdown = rewriteImageReferences(
+    tab.markdown,
+    images
+      .filter((image) => image.sourceUrl)
+      .map((image) => ({ placeholder: image.sourceUrl!, relativePath: image.placeholder })),
+  );
   const snapshot: RecoverySnapshot = {
-    id: tab.id, title: tab.title, originalPath: tab.path, markdown,
+    id: tab.id,
+    title: tab.title,
+    originalPath: tab.path,
+    markdown,
     images: images.map(({ placeholder, filename, key }) => ({ placeholder, filename, key })),
   };
   return { snapshot, images };
 }
 
-export function scheduleRecovery(tab: Pick<Tab, 'id' | 'title' | 'path' | 'markdown'>,
-  onStatus: (status: RecoveryStatus) => void, ready?: Promise<boolean>): void {
+export function scheduleRecovery(
+  tab: Pick<Tab, 'id' | 'title' | 'path' | 'markdown'>,
+  onStatus: (status: RecoveryStatus) => void,
+  ready?: Promise<boolean>,
+): void {
   if (!isTauri()) return;
   const entry = journal(tab.id);
   const generation = ++entry.generation;
   clearTimeout(entry.timer);
   entry.timer = undefined;
   onStatus('pending');
-  const fail = () => { if (entry.generation === generation) onStatus('error'); };
+  const fail = () => {
+    if (entry.generation === generation) onStatus('error');
+  };
   const captureAndSchedule = () => {
     if (entry.generation !== generation) return;
     // Without a preparation barrier, freeze aliases synchronously before Save As changes them.
     let data: ReturnType<typeof capture>;
-    try { data = capture(tab); } catch { fail(); return; }
+    try {
+      data = capture(tab);
+    } catch {
+      fail();
+      return;
+    }
     entry.timer = setTimeout(() => {
       entry.timer = undefined;
       void enqueue(entry, async () => {
@@ -104,9 +143,13 @@ export function scheduleRecovery(tab: Pick<Tab, 'id' | 'title' | 'path' | 'markd
         await invoke('write_recovery_snapshot', { snapshot: data.snapshot });
         if (entry.generation === generation) onStatus('protected');
       }).catch(fail);
-    }, 1000);
+    }, RECOVERY_DELAY_MS);
   };
-  if (ready) void ready.then((prepared) => { if (prepared) captureAndSchedule(); else fail(); }, fail);
+  if (ready)
+    void ready.then((prepared) => {
+      if (prepared) captureAndSchedule();
+      else fail();
+    }, fail);
   else captureAndSchedule();
 }
 

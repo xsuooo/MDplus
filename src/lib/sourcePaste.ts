@@ -1,5 +1,8 @@
 type ImagePasteEvent = Pick<ClipboardEvent, 'clipboardData' | 'preventDefault'>;
-type SourceInput = Pick<HTMLTextAreaElement, 'value' | 'selectionStart' | 'selectionEnd' | 'isConnected' | 'setSelectionRange'>;
+type SourceInput = Pick<
+  HTMLTextAreaElement,
+  'value' | 'selectionStart' | 'selectionEnd' | 'isConnected' | 'setSelectionRange'
+>;
 
 export function firstClipboardImage(clipboard: DataTransfer | null): File | null {
   const items = clipboard?.items;
@@ -25,8 +28,15 @@ export async function pasteSourceImage(
   const { value, selectionStart, selectionEnd } = input;
   try {
     const url = await save(file);
-    if (!url || !isCurrent() || !input.isConnected || input.value !== value
-      || input.selectionStart !== selectionStart || input.selectionEnd !== selectionEnd) return;
+    if (
+      !url ||
+      !isCurrent() ||
+      !input.isConnected ||
+      input.value !== value ||
+      input.selectionStart !== selectionStart ||
+      input.selectionEnd !== selectionEnd
+    )
+      return;
     const reference = `![](${url})`;
     const text = value.slice(0, selectionStart) + reference + value.slice(selectionEnd);
     input.value = text;

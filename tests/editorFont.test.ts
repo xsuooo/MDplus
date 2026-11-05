@@ -1,6 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BODY_FONTS, CODE_FONTS, BODY_FONT_STORAGE_KEY, CODE_FONT_STORAGE_KEY, DEFAULT_BODY_FONT, DEFAULT_CODE_FONT,
-  normalizeBodyFont, normalizeCodeFont, readBodyFont, readCodeFont, writeBodyFont, writeCodeFont } from '../src/lib/editorFont';
+import {
+  BODY_FONTS,
+  CODE_FONTS,
+  BODY_FONT_STORAGE_KEY,
+  CODE_FONT_STORAGE_KEY,
+  DEFAULT_BODY_FONT,
+  DEFAULT_CODE_FONT,
+  normalizeBodyFont,
+  normalizeCodeFont,
+  readBodyFont,
+  readCodeFont,
+  writeBodyFont,
+  writeCodeFont,
+} from '../src/lib/editorFont';
 
 describe('editor font preferences', () => {
   it.each(CODE_FONTS)('accepts the bundled $id code preset', ({ id }) => {
@@ -26,13 +38,17 @@ describe('editor font preferences', () => {
   });
 
   it('keeps the old pair choice for code without overriding body defaults', () => {
-    const storage = { getItem: (key: string) => key === 'mdplus-editor-font' ? 'cascadia-misans' : null };
+    const storage = {
+      getItem: (key: string) => (key === 'mdplus-editor-font' ? 'cascadia-misans' : null),
+    };
     expect(readCodeFont(storage)).toBe('cascadia-misans');
     expect(readBodyFont(storage)).toBe('misans');
   });
 
   it('does not interrupt editing when preference storage fails', () => {
-    const fail = () => { throw new Error('Storage disabled'); };
+    const fail = () => {
+      throw new Error('Storage disabled');
+    };
     expect(readCodeFont({ getItem: fail })).toBe(DEFAULT_CODE_FONT);
     expect(readBodyFont({ getItem: fail })).toBe(DEFAULT_BODY_FONT);
     expect(() => writeCodeFont('cascadia-misans', { setItem: fail })).not.toThrow();

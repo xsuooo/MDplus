@@ -19,16 +19,16 @@ that every native acceptance checkpoint was executed.
 
 ## Current validation
 
-| Check | Evidence and boundary |
-| --- | --- |
-| Frontend TypeScript + unit tests | 26 files, 322 tests passed in this closeout |
-| Frontend production build + browser TypeScript | Both passed; no new native application package built |
-| Complete browser regression | 94 cases passed, including all 9 typography cases; real CSS/fonts, mocked native IPC; persistence case remounts React, not Windows |
-| Rust formatting, tests and Clippy | Formatting and Clippy passed; 27 tests passed with process-local writable TEMP/TMP |
-| Delivery-script regression | 18 checks passed on PowerShell 7: versions, atomic copy/backup, Chinese/space paths, locks, hash rejection, junction rejection, archive preservation and explicit-install refusal |
-| Real package export | Existing accepted package exported as fresh bytes outside the workspace; actual NSIS payload re-extracted; package, payload and PE version matched |
-| Mandatory integrity | Normal exported package accepted; actual low-integrity workspace file rejected; no ACL/security settings changed |
-| Native automation availability | Initialize and fresh-session retry both failed: native pipe not found, Windows error 2 |
+| Check                                          | Evidence and boundary                                                                                                                                                             |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frontend TypeScript + unit tests               | 26 files, 322 tests passed in this closeout                                                                                                                                       |
+| Frontend production build + browser TypeScript | Both passed; no new native application package built                                                                                                                              |
+| Complete browser regression                    | 94 cases passed, including all 9 typography cases; real CSS/fonts, mocked native IPC; persistence case remounts React, not Windows                                                |
+| Rust formatting, tests and Clippy              | Formatting and Clippy passed; 27 tests passed with process-local writable TEMP/TMP                                                                                                |
+| Delivery-script regression                     | 18 checks passed on PowerShell 7: versions, atomic copy/backup, Chinese/space paths, locks, hash rejection, junction rejection, archive preservation and explicit-install refusal |
+| Real package export                            | Existing accepted package exported as fresh bytes outside the workspace; actual NSIS payload re-extracted; package, payload and PE version matched                                |
+| Mandatory integrity                            | Normal exported package accepted; actual low-integrity workspace file rejected; no ACL/security settings changed                                                                  |
+| Native automation availability                 | Initialize and fresh-session retry both failed: native pipe not found, Windows error 2                                                                                            |
 
 Initial Rust execution against normal TEMP failed 15 filesystem tests with
 PermissionDenied because the workspace-built test EXE inherits Low integrity.
@@ -125,13 +125,13 @@ snapshots, private receipts/profiles and local logs do not.
 
 ## Self-check
 
-| Axis | Score | Evidence / next improvement |
-| --- | --- | --- |
-| Accuracy | 4/5 | Executed tests and binary hashes are recorded; true native font/restart verification remains manual |
-| Completeness | 4/5 | Frozen tooling, source baseline and docs are covered; new install wrapper is not falsely counted as host-tested |
-| Clarity | 4/5 | README has one current entry; historical stage reports necessarily retain older outcomes |
-| Actionability | 4/5 | Reusable commands, stop conditions and four manual checks are provided; unsigned 5.1 execution still depends on local policy |
-| Conciseness | 4/5 | Detailed evidence is separated from README; the safety runbook is longer than a simple build guide |
+| Axis          | Score | Evidence / next improvement                                                                                                  |
+| ------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Accuracy      | 4/5   | Executed tests and binary hashes are recorded; true native font/restart verification remains manual                          |
+| Completeness  | 4/5   | Frozen tooling, source baseline and docs are covered; new install wrapper is not falsely counted as host-tested              |
+| Clarity       | 4/5   | README has one current entry; historical stage reports necessarily retain older outcomes                                     |
+| Actionability | 4/5   | Reusable commands, stop conditions and four manual checks are provided; unsigned 5.1 execution still depends on local policy |
+| Conciseness   | 4/5   | Detailed evidence is separated from README; the safety runbook is longer than a simple build guide                           |
 
 Overall: 4.0/5. Next opportunities are native font/restart verification when the
 desktop helper works, and an isolated execution of the new install wrapper at

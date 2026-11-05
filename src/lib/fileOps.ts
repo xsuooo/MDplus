@@ -6,11 +6,30 @@ const MD_FILTERS = [
   { name: '所有文件', extensions: ['*'] },
 ];
 
-/** Shapes follow src-tauri/src/file_contract.json; document writes never fall back to write_file. */
-export interface DocumentSnapshot { content: string; revision: string; mtime: number }
-export interface RevisionState { revision: string | null; mtime: number | null }
-export interface WriteReceipt { revision: string; mtime: number; backupPath: string | null }
-export interface ImageReceipt { filename: string; relativePath: string; path: string }
+/** Shapes follow src-tauri/src/file_contract.json; document writes never fall back to HTML export. */
+/** path is the native validated absolute target, including for missing files. */
+export interface DocumentSnapshot {
+  path: string;
+  content: string;
+  revision: string;
+  mtime: number;
+}
+export interface RevisionState {
+  path: string;
+  revision: string | null;
+  mtime: number | null;
+}
+export interface WriteReceipt {
+  path: string;
+  revision: string;
+  mtime: number;
+  backupPath: string | null;
+}
+export interface ImageReceipt {
+  filename: string;
+  relativePath: string;
+  path: string;
+}
 
 export async function readDocument(path: string): Promise<DocumentSnapshot> {
   return invoke<DocumentSnapshot>('read_document', { path });
@@ -20,17 +39,19 @@ export async function documentRevision(path: string): Promise<RevisionState> {
   return invoke<RevisionState>('document_revision', { path });
 }
 
-export async function writeDocument(path: string, content: string, expectedRevision: string | null): Promise<WriteReceipt> {
+export async function writeDocument(
+  path: string,
+  content: string,
+  expectedRevision: string | null,
+): Promise<WriteReceipt> {
   return invoke<WriteReceipt>('write_document', { path, content, expectedRevision });
 }
 
-/** 读取文件文本内容 */
-export async function readFile(path: string): Promise<string> {
-  return invoke<string>('read_file', { path });
-}
-
 /** 由后端验证目录边界及图片格式,不提供任意文件二进制读取。 */
-export async function readImageFile(docPath: string, relativePath: string): Promise<{
+export async function readImageFile(
+  docPath: string,
+  relativePath: string,
+): Promise<{
   path: string;
   mime: string;
   data: number[];
@@ -38,14 +59,9 @@ export async function readImageFile(docPath: string, relativePath: string): Prom
   return invoke('read_image_file', { docPath, relativePath });
 }
 
-/** 写入文件文本内容 */
-export async function writeFile(path: string, content: string): Promise<void> {
-  return invoke<void>('write_file', { path, content });
-}
-
-/** 获取文件修改时间(毫秒) */
-export async function fileMtime(path: string): Promise<number> {
-  return invoke<number>('file_mtime', { path });
+/** Export HTML to a validated .html target; never used for document saves. */
+export async function exportHtmlFile(path: string, content: string): Promise<void> {
+  return invoke<void>('export_html', { path, content });
 }
 
 /** 弹出打开文件对话框,返回路径或 null */

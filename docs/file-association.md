@@ -2,7 +2,7 @@
 
 ## 功能说明
 
-MDPlus 支持双击 `.md` 或 `.markdown` 文件直接在应用中打开。应用采用单实例模式：如果 MDPlus 已在运行，双击文件会在已有窗口中新建标签页打开，并把窗口带到前台，不会启动第二个进程。
+MDPlus 支持双击 `.md` 或 `.markdown` 文件直接在应用中打开。应用采用单实例模式：如果 MDPlus 已在运行，双击文件会在已有窗口中打开或切换到该文档的标签页，并把窗口带到前台，不会启动第二个进程。
 
 ## 实现细节
 
@@ -30,7 +30,7 @@ MDPlus 支持双击 `.md` 或 `.markdown` 文件直接在应用中打开。应�
 
 - `src-tauri/src/lib.rs` 在 **WebView 创建之前**用 `markdown_files_from_args()` 从 `std::env::args()` 里筛出存在的 `.md` / `.markdown` 路径
 - 路径存入 Tauri 托管状态 `StartupFiles`
-- 前端 `src/App.tsx` 启动时 `invoke('take_startup_files')` 读取。该命令**只消费一次**（取出后清空），避免重复打开
+- 前端 `src/hooks/useDocumentFiles.ts` 启动时 `invoke('take_startup_files')` 读取。该命令**只消费一次**（取出后清空），避免重复打开
 - 命令返回空数组或调用失败时，`startupResolved` 仍会置为 `true`，不会让界面卡在空白
 
 启动期间界面由 `src/lib/startup.ts` 的 `startupView()` 决定：未解析完显示占位视图，解析完毕后按标签数量决定进编辑器还是欢迎页。这样双击文件时不会先闪一下欢迎页。
@@ -42,10 +42,16 @@ MDPlus 支持双击 `.md` 或 `.markdown` 文件直接在应用中打开。应�
 - 第二实例的命令行参数同样经 `markdown_files_from_args()` 筛选
 - 已有窗口执行 `show()` / `unminimize()` / `set_focus()` 带到前台
 - 文件路径先写入后端 `PendingOpenFiles` 队列，再发送 `open-files` 事件通知前端
-- 前端通过 `take_pending_open_files` 取出并清空队列，串行处理通知
+- 前端 `useDocumentFiles` 通过 `take_pending_open_files` 取出并清空队列，串行处理通知
 - 监听注册完成后主动读取一次队列，避免漏掉启动期间先于监听到达的文件
 
 两条路径的参数筛选逻辑共用 `markdown_files_from_args()`，并有 cargo 测试覆盖「启动文件只消费一次」和「参数在 WebView 创建前被识别」。
+
+### 4. 文档路径身份与重复请求
+
+`read_document` 返回经过原生校验的绝对目标 `path`，其父目录已经规范化。前端统一处理分隔符、大小写、`.`／`..`、Windows 扩展路径前缀和 UNC 路径；相对路径先经原生解析，再比较文档身份。已有标签和进行中的打开请求均按该身份去重，并把成功解析后的路径写入最近列表。
+
+另存为使用 `document_revision` 返回的同一身份检查其他标签的目标冲突；选择当前文档的等价路径时沿用普通保存的磁盘版本确认。接口响应与回归说明见 [IPC 契约与安全边界](ipc.md) 和 [审查修复记录](quality-fixes-2026-11-05.md)。
 
 ## 使用方法
 

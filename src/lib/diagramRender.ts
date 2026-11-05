@@ -5,7 +5,11 @@ import { diagramPreview, type MediaPreview } from './media';
 let queue: Promise<unknown> = Promise.resolve();
 let fontCache: { font: BodyFont; promise: ReturnType<typeof embeddedFonts> } | undefined;
 
-export async function renderDiagramMedia(code: string, theme: 'light' | 'dark', font: BodyFont): Promise<MediaPreview & { kind: 'diagram' }> {
+export async function renderDiagramMedia(
+  code: string,
+  theme: 'light' | 'dark',
+  font: BodyFont,
+): Promise<MediaPreview & { kind: 'diagram' }> {
   if (fontCache?.font !== font) fontCache = { font, promise: embeddedFonts(font) };
   const pending = fontCache.promise;
   const resources = await pending.catch((error) => {
@@ -13,21 +17,37 @@ export async function renderDiagramMedia(code: string, theme: 'light' | 'dark', 
     throw error;
   });
   const body = BODY_FONTS.find((entry) => entry.id === font)!;
-  await Promise.all([document.fonts.load(`400 16px ${body.family}`, '中文 Mixed'),
-    document.fonts.load(`${body.strongWeight} 16px ${body.family}`, '中文 Bold')]);
+  await Promise.all([
+    document.fonts.load(`400 16px ${body.family}`, '中文 Mixed'),
+    document.fonts.load(`${body.strongWeight} 16px ${body.family}`, '中文 Bold'),
+  ]);
   await document.fonts.ready;
   const { default: mermaid } = await import('mermaid');
   const task = queue.then(async () => {
     // Strict rendering measures loaded app fonts; previews use inert SVG images.
     // Never call Mermaid's interactive bindFunctions.
     mermaid.initialize({
-      startOnLoad: false, securityLevel: 'strict', theme: theme === 'dark' ? 'dark' : 'default',
-      suppressErrorRendering: true, fontFamily: bodyFamily(font),
-      secure: ['secure', 'securityLevel', 'startOnLoad', 'maxTextSize', 'maxEdges', 'suppressErrorRendering', 'fontFamily', 'themeCSS'],
+      startOnLoad: false,
+      securityLevel: 'strict',
+      theme: theme === 'dark' ? 'dark' : 'default',
+      suppressErrorRendering: true,
+      fontFamily: bodyFamily(font),
+      secure: [
+        'secure',
+        'securityLevel',
+        'startOnLoad',
+        'maxTextSize',
+        'maxEdges',
+        'suppressErrorRendering',
+        'fontFamily',
+        'themeCSS',
+      ],
     });
     const host = document.createElement('div');
-    host.style.cssText = 'position:fixed;left:0;top:0;width:720px;opacity:0;pointer-events:none;z-index:-1';
-    host.setAttribute('aria-hidden', 'true'); document.body.append(host);
+    host.style.cssText =
+      'position:fixed;left:0;top:0;width:720px;opacity:0;pointer-events:none;z-index:-1';
+    host.setAttribute('aria-hidden', 'true');
+    document.body.append(host);
     const sheets = new Set<CSSStyleSheet>();
     const seen = new Set<Element>();
     // Packaged Tauri pages use style hashes: Mermaid's dynamic <style> would
@@ -36,8 +56,10 @@ export async function renderDiagramMedia(code: string, theme: 'light' | 'dark', 
       for (const style of host.querySelectorAll('style')) {
         if (seen.has(style)) continue;
         seen.add(style);
-        const sheet = new CSSStyleSheet(); sheet.replaceSync(style.textContent ?? '');
-        sheets.add(sheet); document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync(style.textContent ?? '');
+        sheets.add(sheet);
+        document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
       }
     };
     const observer = new MutationObserver(applyStyles);
@@ -48,7 +70,8 @@ export async function renderDiagramMedia(code: string, theme: 'light' | 'dark', 
       if (parsed?.classList.contains('flowchart')) {
         // WebView2 can retain Mermaid's temporary label bounds in its live SVG.
         // Measure the completed, strict-sanitized tree with final node positions.
-        host.replaceChildren(parsed); applyStyles();
+        host.replaceChildren(parsed);
+        applyStyles();
         parsed.getBoundingClientRect();
         await document.fonts.ready;
         for (const label of parsed.querySelectorAll('foreignObject')) {
@@ -58,7 +81,8 @@ export async function renderDiagramMedia(code: string, theme: 'light' | 'dark', 
           // Shrink HTML content before replacing a leaked measurement box.
           content.style.display = 'inline-block';
           const box = content.getBoundingClientRect();
-          const scaleX = Math.hypot(matrix.a, matrix.b), scaleY = Math.hypot(matrix.c, matrix.d);
+          const scaleX = Math.hypot(matrix.a, matrix.b),
+            scaleY = Math.hypot(matrix.c, matrix.d);
           if (scaleX > 0 && scaleY > 0) {
             label.setAttribute('width', String(box.width / scaleX));
             label.setAttribute('height', String(box.height / scaleY));
@@ -67,7 +91,8 @@ export async function renderDiagramMedia(code: string, theme: 'light' | 'dark', 
         const title = parsed.querySelector('text.flowchartTitleText');
         if (title) {
           // Mermaid can center the title on its temporary 16384px label bounds.
-          const parent = title.parentNode!, next = title.nextSibling;
+          const parent = title.parentNode!,
+            next = title.nextSibling;
           title.remove();
           const graph = parsed.getBBox();
           title.setAttribute('x', String(graph.x + graph.width / 2));
@@ -75,14 +100,23 @@ export async function renderDiagramMedia(code: string, theme: 'light' | 'dark', 
         }
         const bounds = parsed.getBBox();
         const padding = mermaid.mermaidAPI.getConfig().flowchart?.diagramPadding ?? 8;
-        parsed.setAttribute('viewBox', `${bounds.x - padding} ${bounds.y - padding} ${bounds.width + 2 * padding} ${bounds.height + 2 * padding}`);
+        parsed.setAttribute(
+          'viewBox',
+          `${bounds.x - padding} ${bounds.y - padding} ${bounds.width + 2 * padding} ${bounds.height + 2 * padding}`,
+        );
         svg = parsed.outerHTML;
       }
       const { imageSVG, ...preview } = diagramPreview(svg, resources.css);
-      return { ...preview, src: await blobDataURL(new Blob([imageSVG], { type: 'image/svg+xml;charset=utf-8' })) };
+      return {
+        ...preview,
+        src: await blobDataURL(new Blob([imageSVG], { type: 'image/svg+xml;charset=utf-8' })),
+      };
     } finally {
-      observer.disconnect(); host.remove();
-      document.adoptedStyleSheets = document.adoptedStyleSheets.filter((sheet) => !sheets.has(sheet));
+      observer.disconnect();
+      host.remove();
+      document.adoptedStyleSheets = document.adoptedStyleSheets.filter(
+        (sheet) => !sheets.has(sheet),
+      );
     }
   });
   queue = task.catch(() => {});

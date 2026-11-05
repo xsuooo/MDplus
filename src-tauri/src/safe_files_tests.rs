@@ -83,6 +83,52 @@ fn completion_snapshot_and_revision_describe_the_same_raw_bytes() {
 }
 
 #[test]
+fn document_commands_return_one_absolute_identity_for_path_aliases() {
+    // Keep cwd unchanged: other filesystem tests run concurrently.
+    let root = tempfile::Builder::new()
+        .prefix(".mdplus-identity-")
+        .tempdir_in(std::env::current_dir().unwrap())
+        .unwrap();
+    let document = root.path().join("note.md");
+    fs::create_dir(root.path().join("sub")).unwrap();
+    fs::write(&document, "original").unwrap();
+    let canonical = fs::canonicalize(&document).unwrap();
+    let relative = PathBuf::from(root.path().file_name().unwrap()).join("note.md");
+    for alias in [
+        document.clone(),
+        root.path().join(".").join("note.md"),
+        root.path().join("sub").join("..").join("note.md"),
+        relative,
+        canonical.clone(),
+    ] {
+        let request = alias.to_string_lossy().into_owned();
+        let snapshot = serde_json::to_value(read_document(request.clone()).unwrap()).unwrap();
+        let state = serde_json::to_value(document_revision(request).unwrap()).unwrap();
+        assert_eq!(snapshot["path"], canonical.to_string_lossy().as_ref());
+        assert_eq!(state["path"], snapshot["path"]);
+        assert_eq!(state["revision"], snapshot["revision"]);
+    }
+    let missing = root.path().join("sub").join("..").join("new.md");
+    let state = document_revision(missing.to_string_lossy().into_owned()).unwrap();
+    let state_json = serde_json::to_value(&state).unwrap();
+    let receipt = write_document(
+        missing.to_string_lossy().into_owned(),
+        "new document".into(),
+        state.revision,
+    )
+    .unwrap();
+    let receipt_json = serde_json::to_value(receipt).unwrap();
+    assert_eq!(state_json["path"], receipt_json["path"]);
+    assert_eq!(
+        receipt_json["path"],
+        fs::canonicalize(root.path().join("new.md"))
+            .unwrap()
+            .to_string_lossy()
+            .as_ref()
+    );
+}
+
+#[test]
 fn completion_missing_revision_is_not_a_permission_or_directory_error() {
     let root = TestDir::new();
     let missing = document_revision(root.document()).unwrap();
@@ -561,10 +607,46 @@ fn completion_declared_commands_are_registered_in_the_real_handler() {
     let schema: serde_json::Value =
         serde_json::from_str(include_str!("file_contract.json")).unwrap();
     let source = include_str!("lib.rs");
+    let handler: Vec<_> = source
+        .split("tauri::generate_handler![")
+        .nth(1)
+        .unwrap()
+        .split(']')
+        .next()
+        .unwrap()
+        .split(',')
+        .map(|item| item.trim().rsplit("::").next().unwrap())
+        .filter(|item| !item.is_empty())
+        .collect();
+    assert_eq!(
+        handler.len(),
+        schema["x-commands"].as_object().unwrap().len()
+    );
     for command in schema["x-commands"].as_object().unwrap().keys() {
         assert!(
-            source.contains(&format!("safe_files::{command},")),
+            handler.contains(&command.as_str()),
             "missing IPC registration: {command}"
+        );
+    }
+}
+
+#[test]
+fn document_commands_reject_empty_control_and_oversized_paths() {
+    for path in [String::new(), "bad\0name.md".into(), "x".repeat(32768)] {
+        assert_eq!(document_revision(path).unwrap_err().code, "INVALID_PATH");
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn document_commands_reject_device_namespaces_before_accessing_them() {
+    for path in [
+        r"\\.\pipe\mdplus-never-open",
+        r"\\?\GLOBALROOT\Device\HarddiskVolume1\note.md",
+    ] {
+        assert_eq!(
+            document_revision(path.into()).unwrap_err().code,
+            "INVALID_PATH"
         );
     }
 }

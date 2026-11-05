@@ -8,14 +8,17 @@ const hooks = vi.hoisted(() => ({
   effects: [] as (() => void)[],
 }));
 vi.mock('react', async (original) => ({
-  ...await original<typeof import('react')>(),
+  ...(await original<typeof import('react')>()),
   memo: (component: unknown) => component,
-  useRef: (current: unknown) => hooks.slots[hooks.cursor++] ??= { current },
+  useRef: (current: unknown) => (hooks.slots[hooks.cursor++] ??= { current }),
   useState: (initial: unknown) => {
-    const state = hooks.slots[hooks.cursor++] ??= { value: initial };
-    return [state.value, (next: any) => {
-      state.value = typeof next === 'function' ? next(state.value) : next;
-    }];
+    const state = (hooks.slots[hooks.cursor++] ??= { value: initial });
+    return [
+      state.value,
+      (next: any) => {
+        state.value = typeof next === 'function' ? next(state.value) : next;
+      },
+    ];
   },
   useEffect: (effect: () => (() => void) | void, deps: unknown[]) => {
     const slot = hooks.cursor++;
@@ -54,17 +57,22 @@ function mount() {
       listeners.delete(listener);
     }),
   });
-  const change = vi.fn((next: ShortcutBindings) => { bindings = next; });
+  const change = vi.fn((next: ShortcutBindings) => {
+    bindings = next;
+  });
   const close = vi.fn();
   const render = () => {
     hooks.cursor = 0;
     nodes = elements(ShortcutModal({ bindings, onChange: change, onClose: close }));
     hooks.effects.splice(0).forEach((effect) => effect());
   };
-  const button = (name: string) => nodes.find((node) => node.type === 'button' && node.props['aria-label'] === name);
+  const button = (name: string) =>
+    nodes.find((node) => node.type === 'button' && node.props['aria-label'] === name);
   render();
   return {
-    change, close, button,
+    change,
+    close,
+    button,
     bindings: () => bindings,
     listeners: () => listeners.size,
     click(name: string) {
@@ -75,9 +83,16 @@ function mount() {
     },
     press(key: string, extra = {}) {
       const event = {
-        key, ctrlKey: false, shiftKey: false, metaKey: false, altKey: false,
-        repeat: false, getModifierState: () => false,
-        preventDefault: vi.fn(), stopPropagation: vi.fn(), ...extra,
+        key,
+        ctrlKey: false,
+        shiftKey: false,
+        metaKey: false,
+        altKey: false,
+        repeat: false,
+        getModifierState: () => false,
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        ...extra,
       };
       [...listeners].forEach((listener) => listener(event));
       render();
@@ -128,21 +143,24 @@ describe('ShortcutModal capture interactions', () => {
     expect(modal.bindings().save).toEqual(['ctrl+q']);
   });
 
-  it.each(['escape', 'button'])('cancels replacement through %s without changing bindings or closing the modal', (method) => {
-    const modal = mount();
-    modal.click('修改「切换大纲」的 F11');
-    if (method === 'escape') {
-      const event = modal.press('Escape');
-      expect(event.preventDefault).toHaveBeenCalledOnce();
-      expect(event.stopPropagation).toHaveBeenCalledOnce();
-    } else {
-      modal.click('取消录制「切换大纲」快捷键');
-    }
-    expect(modal.change).not.toHaveBeenCalled();
-    expect(modal.close).not.toHaveBeenCalled();
-    expect(modal.bindings()).toEqual(DEFAULT_SHORTCUTS);
-    expect(modal.listeners()).toBe(0);
-  });
+  it.each(['escape', 'button'])(
+    'cancels replacement through %s without changing bindings or closing the modal',
+    (method) => {
+      const modal = mount();
+      modal.click('修改「切换大纲」的 F11');
+      if (method === 'escape') {
+        const event = modal.press('Escape');
+        expect(event.preventDefault).toHaveBeenCalledOnce();
+        expect(event.stopPropagation).toHaveBeenCalledOnce();
+      } else {
+        modal.click('取消录制「切换大纲」快捷键');
+      }
+      expect(modal.change).not.toHaveBeenCalled();
+      expect(modal.close).not.toHaveBeenCalled();
+      expect(modal.bindings()).toEqual(DEFAULT_SHORTCUTS);
+      expect(modal.listeners()).toBe(0);
+    },
+  );
 
   it('can add a first key to an unbound action', () => {
     const modal = mount();
@@ -153,7 +171,8 @@ describe('ShortcutModal capture interactions', () => {
   });
 
   it.each([{ isComposing: true }, { keyCode: 229 }, { getModifierState: () => true }])(
-    'does not consume input-method events during replacement: %j', (extra) => {
+    'does not consume input-method events during replacement: %j',
+    (extra) => {
       const modal = mount();
       modal.click('修改「保存」的 Ctrl+S');
       const event = modal.press('F4', extra);

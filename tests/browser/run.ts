@@ -48,7 +48,7 @@ try {
   result.dataset.status = 'passed';
 } catch (error) {
   result.dataset.status = 'failed';
-  result.textContent = error instanceof Error ? error.stack ?? error.message : String(error);
+  result.textContent = error instanceof Error ? (error.stack ?? error.message) : String(error);
 } finally {
   result.hidden = false;
 }

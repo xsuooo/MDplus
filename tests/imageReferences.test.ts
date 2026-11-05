@@ -7,11 +7,20 @@ vi.mock('@tauri-apps/api/path', () => ({
   join: async (...parts: string[]) => path.win32.join(...parts),
   dirname: async (file: string) => path.win32.dirname(file),
 }));
-vi.mock('../src/lib/fileOps', () => ({ basename: path.win32.basename, readImageFile: mocks.readImageFile }));
+vi.mock('../src/lib/fileOps', () => ({
+  basename: path.win32.basename,
+  readImageFile: mocks.readImageFile,
+}));
 
 import {
-  clearPendingImages, commitImageMigration, getPendingImages, loadImageReferences,
-  migratePendingImages, prepareImageReferences, resolveImageSource, restorePendingImages,
+  clearPendingImages,
+  commitImageMigration,
+  getPendingImages,
+  loadImageReferences,
+  migratePendingImages,
+  prepareImageReferences,
+  resolveImageSource,
+  restorePendingImages,
   subscribeImageSources,
 } from '../src/lib/imageOps';
 
@@ -19,28 +28,43 @@ const document = 'C:\\notes\\note.md';
 const markdown = '![photo](./img/pic.png "caption")';
 const oldBytes = [65, 66, 67];
 const newBytes = [88, 89, 90];
-const preview = (bytes: number[]) => `data:image/png;base64,${Buffer.from(bytes).toString('base64')}`;
+const preview = (bytes: number[]) =>
+  `data:image/png;base64,${Buffer.from(bytes).toString('base64')}`;
 const loaded = (bytes = oldBytes, relative = 'img/pic.png', doc = document) => ({
-  path: path.win32.join(path.win32.dirname(doc), relative), mime: 'image/png', data: bytes,
+  path: path.win32.join(path.win32.dirname(doc), relative),
+  mime: 'image/png',
+  data: bytes,
 });
 const tokenFrom = (text: string) => text.match(/mdplus-image:[\w-]+/)![0];
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => { resolve = done; });
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
   return { promise, resolve };
 }
 
 beforeEach(() => {
-  clearPendingImages('image-tx'); clearPendingImages('other-image-tx');
+  clearPendingImages('image-tx');
+  clearPendingImages('other-image-tx');
   vi.clearAllMocks();
-  mocks.readImageFile.mockReset(); mocks.invoke.mockReset();
-  mocks.readImageFile.mockImplementation(async (doc: string, relative: string) => loaded(oldBytes, relative, doc));
+  mocks.readImageFile.mockReset();
+  mocks.invoke.mockReset();
+  mocks.readImageFile.mockImplementation(async (doc: string, relative: string) =>
+    loaded(oldBytes, relative, doc),
+  );
   let count = 0;
-  mocks.invoke.mockImplementation(async (command: string, args: { docPath: string; filename: string }) => {
-    if (command !== 'save_image_asset') throw new Error(`Unexpected write: ${command}`);
-    const filename = `${++count}-${args.filename}`;
-    return { filename, relativePath: `./assets/${filename}`, path: path.win32.join(path.win32.dirname(args.docPath), 'assets', filename) };
-  });
+  mocks.invoke.mockImplementation(
+    async (command: string, args: { docPath: string; filename: string }) => {
+      if (command !== 'save_image_asset') throw new Error(`Unexpected write: ${command}`);
+      const filename = `${++count}-${args.filename}`;
+      return {
+        filename,
+        relativePath: `./assets/${filename}`,
+        path: path.win32.join(path.win32.dirname(args.docPath), 'assets', filename),
+      };
+    },
+  );
 });
 
 describe('transactional image references', () => {
@@ -55,7 +79,9 @@ describe('transactional image references', () => {
   it('keeps both global cache and source text unchanged until commit', async () => {
     await loadImageReferences('image-tx', markdown, document);
     mocks.readImageFile.mockResolvedValue(loaded(newBytes));
-    const prepared = await prepareImageReferences('image-tx', markdown, document, { refresh: true });
+    const prepared = await prepareImageReferences('image-tx', markdown, document, {
+      refresh: true,
+    });
     expect(prepared.markdown).toBe(markdown);
     expect(resolveImageSource('image-tx', './img/pic.png')).toBe(preview(oldBytes));
     expect(getPendingImages('image-tx')).toHaveLength(1);
@@ -99,7 +125,14 @@ describe('transactional image references', () => {
     const gate = deferred<ReturnType<typeof loaded>>();
     mocks.readImageFile.mockReturnValueOnce(gate.promise);
     const preparation = prepareImageReferences('image-tx', markdown, document);
-    restorePendingImages('image-tx', [{ placeholder: 'mdplus-image:restored', filename: 'restored.png', data: newBytes, mime: 'image/png' }]);
+    restorePendingImages('image-tx', [
+      {
+        placeholder: 'mdplus-image:restored',
+        filename: 'restored.png',
+        data: newBytes,
+        mime: 'image/png',
+      },
+    ]);
     gate.resolve(loaded());
     expect((await preparation).commit()).toBe(false);
     expect(resolveImageSource('image-tx', 'mdplus-image:restored')).toBe(preview(newBytes));
@@ -108,7 +141,9 @@ describe('transactional image references', () => {
   it('leaves the old cache intact on a failed preparation, then invalidates only the live alias on commit', async () => {
     const token = tokenFrom(await loadImageReferences('image-tx', markdown, document));
     mocks.readImageFile.mockRejectedValue(new Error('image was removed'));
-    const prepared = await prepareImageReferences('image-tx', markdown, document, { refresh: true });
+    const prepared = await prepareImageReferences('image-tx', markdown, document, {
+      refresh: true,
+    });
     expect(resolveImageSource('image-tx', './img/pic.png')).toBe(preview(oldBytes));
     expect(prepared.commit()).toBe(true);
     expect(resolveImageSource('image-tx', './img/pic.png')).toBe('./img/pic.png');
@@ -121,10 +156,15 @@ describe('transactional image references', () => {
   it('exports old undo tokens from retained bytes instead of reusing the changed source file', async () => {
     const oldToken = tokenFrom(await loadImageReferences('image-tx', markdown, document));
     mocks.readImageFile.mockResolvedValue(loaded(newBytes));
-    const prepared = await prepareImageReferences('image-tx', markdown, document, { refresh: true });
+    const prepared = await prepareImageReferences('image-tx', markdown, document, {
+      refresh: true,
+    });
     expect(prepared.commit()).toBe(true);
     const migration = await migratePendingImages('image-tx', document, `![undo](${oldToken})`);
-    expect(mocks.invoke).toHaveBeenCalledWith('save_image_asset', expect.objectContaining({ data: oldBytes }));
+    expect(mocks.invoke).toHaveBeenCalledWith(
+      'save_image_asset',
+      expect.objectContaining({ data: oldBytes }),
+    );
     expect(migration.markdown).not.toContain('./img/pic.png');
     expect(resolveImageSource('image-tx', oldToken)).toBe(preview(oldBytes));
   });
@@ -132,7 +172,9 @@ describe('transactional image references', () => {
   it('does not duplicate immutable image bytes when a refresh observes the same content', async () => {
     const oldToken = tokenFrom(await loadImageReferences('image-tx', markdown, document));
     for (let i = 0; i < 3; i += 1) {
-      const prepared = await prepareImageReferences('image-tx', markdown, document, { refresh: true });
+      const prepared = await prepareImageReferences('image-tx', markdown, document, {
+        refresh: true,
+      });
       expect(prepared.commit()).toBe(true);
     }
     expect(getPendingImages('image-tx')).toHaveLength(1);
@@ -144,7 +186,9 @@ describe('transactional image references', () => {
     const gate = deferred<ReturnType<typeof loaded>>();
     mocks.readImageFile.mockReturnValueOnce(gate.promise).mockResolvedValueOnce(loaded(oldBytes));
     const stale = prepareImageReferences('image-tx', markdown, document, { refresh: true });
-    expect((await prepareImageReferences('image-tx', markdown, document, { refresh: true })).commit()).toBe(true);
+    expect(
+      (await prepareImageReferences('image-tx', markdown, document, { refresh: true })).commit(),
+    ).toBe(true);
     gate.resolve(loaded(newBytes));
     expect((await stale).commit()).toBe(false);
     expect(resolveImageSource('image-tx', './img/pic.png')).toBe(preview(oldBytes));

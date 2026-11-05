@@ -21,13 +21,13 @@ export interface Tab {
   id: string;
   /** 显示名(通常是文件名,无扩展名显示标题) */
   title: string;
-  /** 磁盘路径;未保存的新文档为 null */
+  /** 原生校验后的绝对磁盘路径;未保存的新文档为 null */
   path: string | null;
   /** 是否为新建未保存文档 */
   isNew: boolean;
   /** 是否有未保存改动 */
   dirty: boolean;
-  /** 外部文件的修改时间(毫秒),用于检测外部变更 */
+  /** 最近获知的磁盘修改时间(毫秒);外部变更以字节版本检测 */
   externalMtime: number;
   /** 与最近读取或保存的原始磁盘字节绑定；null 仅用于尚未落盘的文档。 */
   diskRevision: string | null;

@@ -10,7 +10,12 @@ interface RecentMenuProps {
   onClose: () => void;
 }
 
-export const RecentMenu = memo(function RecentMenu({ items, onOpen, onRemove, onClose }: RecentMenuProps) {
+export const RecentMenu = memo(function RecentMenu({
+  items,
+  onOpen,
+  onRemove,
+  onClose,
+}: RecentMenuProps) {
   const menuRef = useDialogFocus<HTMLDivElement>(onClose);
 
   return (

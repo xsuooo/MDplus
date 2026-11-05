@@ -29,19 +29,29 @@ export const SearchBar = memo(function SearchBar({ editor, source, onClose }: Se
   const sourceMatches = source ? findTextMatches(source.text, keyword, caseSensitive) : [];
   const total = source ? sourceMatches.length : count;
 
-  useEffect(() => { setSourceIndex(-1); }, [source?.text, keyword, caseSensitive]);
+  useEffect(() => {
+    setSourceIndex(-1);
+  }, [source?.text, keyword, caseSensitive]);
 
   useEffect(() => {
-    if (!present) { setKeyword(''); setCaseSensitive(false); setCount(0); return; }
-    previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (!present) {
+      setKeyword('');
+      setCaseSensitive(false);
+      setCount(0);
+      return;
+    }
+    previousFocus.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const input = document.querySelector<HTMLInputElement>('.search-input');
     input?.focus({ preventScroll: true });
     const unsubscribe = editor ? subscribeSearchCount(editor, setCount) : undefined;
     return () => {
       unsubscribe?.();
       if (editor) clearSearch(editor);
-      if (previousFocus.current?.isConnected
-        && (document.activeElement?.closest('.searchbar') || document.activeElement === document.body)) {
+      if (
+        previousFocus.current?.isConnected &&
+        (document.activeElement?.closest('.searchbar') || document.activeElement === document.body)
+      ) {
         previousFocus.current.focus({ preventScroll: true });
       }
     };
@@ -59,8 +69,12 @@ export const SearchBar = memo(function SearchBar({ editor, source, onClose }: Se
     if (source) {
       const input = source.input;
       if (!input?.isConnected || !sourceMatches.length) return;
-      const next = sourceIndex < 0 ? (dir === 1 ? 0 : sourceMatches.length - 1)
-        : (sourceIndex + dir + sourceMatches.length) % sourceMatches.length;
+      const next =
+        sourceIndex < 0
+          ? dir === 1
+            ? 0
+            : sourceMatches.length - 1
+          : (sourceIndex + dir + sourceMatches.length) % sourceMatches.length;
       setSourceIndex(next);
       const match = sourceMatches[next];
       input.setSelectionRange(match.from, match.to);
@@ -114,10 +128,20 @@ export const SearchBar = memo(function SearchBar({ editor, source, onClose }: Se
       <span className="search-count" aria-live="polite">
         {keyword && total > 0 ? `${total} 处` : keyword ? '无匹配' : ''}
       </span>
-      <button className="search-btn" onClick={() => step(-1)} title="上一条 (Shift+Enter)" aria-label="上一条匹配">
+      <button
+        className="search-btn"
+        onClick={() => step(-1)}
+        title="上一条 (Shift+Enter)"
+        aria-label="上一条匹配"
+      >
         <IconChevronUp size={14} />
       </button>
-      <button className="search-btn" onClick={() => step(1)} title="下一条 (Enter)" aria-label="下一条匹配">
+      <button
+        className="search-btn"
+        onClick={() => step(1)}
+        title="下一条 (Enter)"
+        aria-label="下一条匹配"
+      >
         <IconChevronDown size={14} />
       </button>
       <button className="search-btn" onClick={onClose} title="关闭 (Esc)" aria-label="关闭搜索">

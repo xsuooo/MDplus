@@ -25,7 +25,10 @@ function buildDecos(doc: PMNode): DecorationSet {
             box.checked = checked;
             box.addEventListener('change', () => {
               view.dispatch(
-                view.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, checked: box.checked }),
+                view.state.tr.setNodeMarkup(pos, undefined, {
+                  ...node.attrs,
+                  checked: box.checked,
+                }),
               );
               view.focus();
             });

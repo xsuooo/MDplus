@@ -22,7 +22,10 @@ export function readOutlineWidth(storage?: Pick<Storage, 'getItem'>): number {
 
 export function writeOutlineWidth(width: number, storage?: Pick<Storage, 'setItem'>): void {
   try {
-    (storage ?? window.localStorage).setItem(OUTLINE_WIDTH_STORAGE_KEY, String(normalizeOutlineWidth(width)));
+    (storage ?? window.localStorage).setItem(
+      OUTLINE_WIDTH_STORAGE_KEY,
+      String(normalizeOutlineWidth(width)),
+    );
   } catch {
     // 宽度不依赖偏好存储可用。
   }

@@ -178,7 +178,9 @@ export function canonicalize(binding: string | null): string | null {
   return parsed ? formatAccelerator(parsed) : null;
 }
 
-export function isComposingEvent(event: Pick<ShortcutEventLike, 'key' | 'isComposing' | 'keyCode'>): boolean {
+export function isComposingEvent(
+  event: Pick<ShortcutEventLike, 'key' | 'isComposing' | 'keyCode'>,
+): boolean {
   return event.isComposing === true || event.key === 'Process' || event.keyCode === 229;
 }
 
@@ -212,7 +214,11 @@ export function createShortcutIndex(bindings: ShortcutBindings): Map<string, Sho
 
 /** 返回是否消费事件;长按已绑定键仍屏蔽宿主行为,但不重复执行应用动作。 */
 export function dispatchShortcut(
-  event: ShortcutEventLike & { defaultPrevented: boolean; repeat: boolean; preventDefault: () => void },
+  event: ShortcutEventLike & {
+    defaultPrevented: boolean;
+    repeat: boolean;
+    preventDefault: () => void;
+  },
   index: ReadonlyMap<string, ShortcutAction>,
   run: (action: ShortcutAction) => void,
 ): boolean {
@@ -232,8 +238,12 @@ export function shortcutWarning(binding: string): string | null {
   if (parsed.meta || (parsed.alt && ['tab', 'escape', 'f4', 'space'].includes(parsed.key))) {
     return '系统可能优先处理此组合键;应用无法保证收到事件。';
   }
-  if ((parsed.ctrl && !parsed.alt && ['a', 'c', 'x', 'v', 'z', 'y', 'b', 'i', '=', '-', '0'].includes(parsed.key))
-    || (!parsed.ctrl && !parsed.alt && parsed.shift && !FUNCTION_KEYS.has(parsed.key))) {
+  if (
+    (parsed.ctrl &&
+      !parsed.alt &&
+      ['a', 'c', 'x', 'v', 'z', 'y', 'b', 'i', '=', '-', '0'].includes(parsed.key)) ||
+    (!parsed.ctrl && !parsed.alt && parsed.shift && !FUNCTION_KEYS.has(parsed.key))
+  ) {
     return '此键位与文本编辑或缩放重叠;编辑器内可能被优先处理或影响输入。';
   }
   return null;
@@ -355,10 +365,16 @@ export function sanitizeShortcuts(value: unknown): ShortcutBindings {
   // 数组表示已经迁移过,用户移除的功能键不能在下次启动时重新出现。
   for (const def of SHORTCUT_DEFINITIONS) {
     const raw = source?.[def.id];
-    const explicit = typeof raw === 'string' ? [canonicalize(raw)] : normalizeBindingList(raw) ?? [];
-    result[def.id] = result[def.id].filter((binding) =>
-      !FUNCTION_KEYS.has(binding) || explicit.includes(binding)
-      || !SHORTCUT_DEFINITIONS.some((other) => other.id !== def.id && result[other.id].includes(binding)));
+    const explicit =
+      typeof raw === 'string' ? [canonicalize(raw)] : (normalizeBindingList(raw) ?? []);
+    result[def.id] = result[def.id].filter(
+      (binding) =>
+        !FUNCTION_KEYS.has(binding) ||
+        explicit.includes(binding) ||
+        !SHORTCUT_DEFINITIONS.some(
+          (other) => other.id !== def.id && result[other.id].includes(binding),
+        ),
+    );
     if (typeof raw !== 'string' || !canonicalize(raw)) continue;
     for (const accelerator of DEFAULT_SHORTCUTS[def.id].filter((key) => FUNCTION_KEYS.has(key))) {
       if (!Object.values(result).some((list) => list.includes(accelerator))) {

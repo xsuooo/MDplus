@@ -77,7 +77,11 @@ describe('wheelStep gesture handling', () => {
   });
 
   it('switches at most once per gesture even with a long inertia tail', () => {
-    const { directions } = gesture(Array.from({ length: 40 }, () => 40), 6, 16);
+    const { directions } = gesture(
+      Array.from({ length: 40 }, () => 40),
+      6,
+      16,
+    );
     expect(directions.filter((d) => d !== 0)).toEqual([1]);
   });
 
@@ -89,12 +93,7 @@ describe('wheelStep gesture handling', () => {
   it('reports the opposite direction on a gesture that starts after the idle gap', () => {
     const first = wheelStep(TAB_WHEEL_INITIAL, wheel(120), 4, T0);
     expect(first.direction).toBe(1);
-    const second = wheelStep(
-      first.state,
-      wheel(-120),
-      4,
-      T0 + TAB_WHEEL_GESTURE_IDLE_MS + 40,
-    );
+    const second = wheelStep(first.state, wheel(-120), 4, T0 + TAB_WHEEL_GESTURE_IDLE_MS + 40);
     expect(second.direction).toBe(-1);
   });
 
@@ -134,7 +133,12 @@ describe('wheelStep gesture handling', () => {
     expect(completing.direction).toBe(1);
     const sameGesture = wheelStep(completing.state, wheel(24), 4, T0 + 32);
     expect(sameGesture.direction).toBe(0);
-    const nextGesture = wheelStep(sameGesture.state, wheel(TAB_WHEEL_STEP), 4, T0 + 32 + TAB_WHEEL_GESTURE_IDLE_MS + 60);
+    const nextGesture = wheelStep(
+      sameGesture.state,
+      wheel(TAB_WHEEL_STEP),
+      4,
+      T0 + 32 + TAB_WHEEL_GESTURE_IDLE_MS + 60,
+    );
     expect(nextGesture.direction).toBe(1);
   });
 

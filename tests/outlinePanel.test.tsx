@@ -5,7 +5,14 @@ import { OUTLINE_WIDTH_MAX, OUTLINE_WIDTH_MIN } from '../src/lib/outlineWidth';
 
 function render(width: number, open = true): string {
   return renderToStaticMarkup(
-    <OutlinePanel open={open} onToggle={() => {}} items={[]} onJump={() => {}} width={width} onWidthChange={() => {}} />,
+    <OutlinePanel
+      open={open}
+      onToggle={() => {}}
+      items={[]}
+      onJump={() => {}}
+      width={width}
+      onWidthChange={() => {}}
+    />,
   );
 }
 

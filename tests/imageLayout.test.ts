@@ -15,10 +15,13 @@ const schema = new Schema({
 
 describe('standalone image layout', () => {
   const image = () => schema.node('image');
-  const paragraph = (...content: ReturnType<typeof image>[]) => schema.node('paragraph', null, content);
-  const state = (...content: ReturnType<typeof image>[]) => EditorState.create({
-    doc: schema.node('doc', null, content), plugins: [imageLayoutPlugin],
-  });
+  const paragraph = (...content: ReturnType<typeof image>[]) =>
+    schema.node('paragraph', null, content);
+  const state = (...content: ReturnType<typeof image>[]) =>
+    EditorState.create({
+      doc: schema.node('doc', null, content),
+      plugins: [imageLayoutPlugin],
+    });
   const centered = (current: EditorState) => imageLayoutPlugin.getState(current)!.find().length;
 
   it('centers standalone and consecutive images without changing document data', () => {

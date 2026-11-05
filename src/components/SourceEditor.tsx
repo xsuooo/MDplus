@@ -1,10 +1,22 @@
-import { memo, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
+import { LIMITS, SOURCE_HISTORY_COALESCE_MS } from '../config/constants';
+import {
+  memo,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type KeyboardEvent,
+} from 'react';
 import { pasteSourceImage } from '../lib/sourcePaste';
 import { isComposingEvent } from '../lib/shortcuts';
 import { IconCode } from './icons';
 import { mapTextOffset } from '../lib/textPosition';
 import { mapSourceScroll } from '../lib/sourcePosition';
-import { mapImageOffset, rewriteImageReferences, type PendingImageReference } from '../lib/imagePaths';
+import {
+  mapImageOffset,
+  rewriteImageReferences,
+  type PendingImageReference,
+} from '../lib/imagePaths';
 
 interface SourceEditorProps {
   tabId: string;
@@ -24,9 +36,9 @@ interface Snapshot {
 }
 
 /** 撤销栈上限:源码模式通常只改几段文字,200 条足够且不会无限吃内存 */
-const HISTORY_LIMIT = 200;
+const HISTORY_LIMIT = LIMITS.sourceHistory;
 /** 连续输入合并成一个撤销步骤的时间窗口(毫秒) */
-const COALESCE_MS = 400;
+const COALESCE_MS = SOURCE_HISTORY_COALESCE_MS;
 
 /**
  * 源码模式:一个全屏覆盖的 Markdown 源文本编辑区。
@@ -34,7 +46,14 @@ const COALESCE_MS = 400;
  * 本地草稿区分父组件回声和外部替换,文本输入与程序化图片粘贴共用撤销栈。
  */
 export const SourceEditor = memo(function SourceEditor({
-  tabId, value, onChange, onClose, onImagePaste, active = true, onRegister, imageRewrites,
+  tabId,
+  value,
+  onChange,
+  onClose,
+  onImagePaste,
+  active = true,
+  onRegister,
+  imageRewrites,
 }: SourceEditorProps) {
   const generation = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -60,7 +79,9 @@ export const SourceEditor = memo(function SourceEditor({
 
   useLayoutEffect(() => {
     generation.current += 1;
-    return () => { generation.current += 1; };
+    return () => {
+      generation.current += 1;
+    };
   }, [tabId, value, active]);
 
   // 外部修改(切换标签、Milkdown 同步、磁盘重载)才回灌到本地草稿
@@ -79,24 +100,32 @@ export const SourceEditor = memo(function SourceEditor({
     if (value === pushed.current) return;
     const before = pushed.current;
     const input = textareaRef.current;
-    const selection = input ? { start: input.selectionStart, end: input.selectionEnd } : selectionRef.current;
+    const selection = input
+      ? { start: input.selectionStart, end: input.selectionEnd }
+      : selectionRef.current;
     if (input) {
       scroll.current = { top: input.scrollTop, left: input.scrollLeft };
       direction.current = input.selectionDirection ?? 'none';
     }
-    const map = (offset: number) => references
-      ? mapImageOffset(before, references, offset) : mapTextOffset(before, value, offset);
+    const map = (offset: number) =>
+      references
+        ? mapImageOffset(before, references, offset)
+        : mapTextOffset(before, value, offset);
     if (input && active) scroll.current.top = mapSourceScroll(input, before, value, map);
     pendingSelection.current = {
-      start: map(selection.start), end: map(selection.end),
+      start: map(selection.start),
+      end: map(selection.end),
     };
     pushed.current = value;
     setDraft(value);
-    if (!references) { history.current = []; future.current = []; }
+    if (!references) {
+      history.current = [];
+      future.current = [];
+    }
     lastPushAt.current = 0;
     lastInputType.current = '';
     restoreScroll.current = true;
-  }, [value, imageRewrites]);
+  }, [value, imageRewrites, active]);
 
   useLayoutEffect(() => {
     if (!active) return;
@@ -167,7 +196,10 @@ export const SourceEditor = memo(function SourceEditor({
   const handleChange = (next: string, inputType = '') => {
     if (next === pushed.current) return;
     if (!composing.current) {
-      if (inputType !== lastInputType.current || !['insertText', 'deleteContentBackward', 'deleteContentForward'].includes(inputType)) {
+      if (
+        inputType !== lastInputType.current ||
+        !['insertText', 'deleteContentBackward', 'deleteContentForward'].includes(inputType)
+      ) {
         lastPushAt.current = 0;
       }
       pushHistory();
@@ -202,7 +234,10 @@ export const SourceEditor = memo(function SourceEditor({
     const el = textareaRef.current;
     if (!el) return;
     direction.current = el.selectionDirection ?? 'none';
-    if (selectionRef.current.start !== el.selectionStart || selectionRef.current.end !== el.selectionEnd) {
+    if (
+      selectionRef.current.start !== el.selectionStart ||
+      selectionRef.current.end !== el.selectionEnd
+    ) {
       lastPushAt.current = 0;
       selectionRef.current = { start: el.selectionStart, end: el.selectionEnd };
     }
@@ -212,18 +247,30 @@ export const SourceEditor = memo(function SourceEditor({
     if (!onImagePaste) return;
     const current = generation.current;
     rememberSelection();
-    void pasteSourceImage(event, event.currentTarget, (file) => onImagePaste(tabId, file), (text, caret) => {
-      handleChange(text, 'insertFromPaste');
-      pendingSelection.current = { start: caret, end: caret };
-    },
-      () => generation.current === current);
+    void pasteSourceImage(
+      event,
+      event.currentTarget,
+      (file) => onImagePaste(tabId, file),
+      (text, caret) => {
+        handleChange(text, 'insertFromPaste');
+        pendingSelection.current = { start: caret, end: caret };
+      },
+      () => generation.current === current,
+    );
   };
 
   return (
     <div className="source-editor" hidden={!active} aria-label="Markdown 源码编辑">
       <div className="source-editor-head">
-        <div className="source-editor-title"><IconCode size={15} /> <span>源码模式</span></div>
-        <button className="source-editor-close" onClick={onClose} title="返回编辑模式" aria-label="返回编辑模式">
+        <div className="source-editor-title">
+          <IconCode size={15} /> <span>源码模式</span>
+        </div>
+        <button
+          className="source-editor-close"
+          onClick={onClose}
+          title="返回编辑模式"
+          aria-label="返回编辑模式"
+        >
           完成
         </button>
       </div>
@@ -250,7 +297,11 @@ export const SourceEditor = memo(function SourceEditor({
         onSelect={rememberSelection}
         onBlur={rememberSelection}
         onScroll={(event) => {
-          if (active) scroll.current = { top: event.currentTarget.scrollTop, left: event.currentTarget.scrollLeft };
+          if (active)
+            scroll.current = {
+              top: event.currentTarget.scrollTop,
+              left: event.currentTarget.scrollLeft,
+            };
         }}
         onKeyUp={rememberSelection}
         onMouseUp={rememberSelection}
