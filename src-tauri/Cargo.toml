@@ -1,9 +1,16 @@
 [package]
 name = "mdplus"
-version = "0.2.5"
+version = "0.2.6"
 description = "简洁好用的 Markdown 编辑器"
 authors = ["MDPlus"]
 edition = "2021"
+
+[profile.release]
+# Measured with the packaged NSIS payload; keep unwinding for existing error paths.
+opt-level = "s"
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
