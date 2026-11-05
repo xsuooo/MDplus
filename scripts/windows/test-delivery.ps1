@@ -170,3 +170,5 @@ Test-Case 'installer requires explicit switch before reading paths' {
 Write-AtomicJson (Join-Path $evidence 'results.json') @{ tests = $results.ToArray(); nativeInstallerExecuted = $false; completedAt = (Get-Date -Format o) }
 if (@($results | Where-Object { $_.status -ne 'passed' }).Count) { throw "Delivery regression failed; see $evidence" }
 Write-Host "$($results.Count) delivery checks passed. Synthetic files only; no host installation."
+# Expected native failures are asserted above; do not leak their exit code to CI's shell wrapper.
+exit 0
