@@ -36,7 +36,8 @@ export const StatusBar = memo(function StatusBar({
   recoveryStatus,
   onRecovery,
 }: StatusBarProps) {
-  const next: ThemeMode = themeMode === 'system' ? 'light' : themeMode === 'light' ? 'dark' : 'system';
+  const next: ThemeMode =
+    themeMode === 'system' ? 'light' : themeMode === 'light' ? 'dark' : 'system';
   const saveLabel =
     saveState === 'saving'
       ? '保存中…'
@@ -52,8 +53,15 @@ export const StatusBar = memo(function StatusBar({
     <footer className="statusbar">
       {tab ? (
         <div className="statusbar-left">
-          <span className={`status-item status-save status-save-${saveState}${saveState === 'dirty' ? ' dirty' : ''}`}
-            role="status" title={saveState === 'paused' ? '按 Ctrl+S 确认磁盘版本，或另存为保留两份；恢复副本不等于正式保存。' : undefined}>
+          <span
+            className={`status-item status-save status-save-${saveState}${saveState === 'dirty' ? ' dirty' : ''}`}
+            role="status"
+            title={
+              saveState === 'paused'
+                ? '按 Ctrl+S 确认磁盘版本，或另存为保留两份；恢复副本不等于正式保存。'
+                : undefined
+            }
+          >
             {saveLabel}
           </span>
           <span className="status-metrics">
@@ -66,11 +74,20 @@ export const StatusBar = memo(function StatusBar({
           </span>
           <span className="status-sep">·</span>
           <span className="status-item status-mode">{sourceMode ? '源码模式' : '编辑模式'}</span>
-          <span className="status-item status-file-identity" title={tab.path ?? '尚未保存到磁盘'}>{tab.path ?? '尚未保存到磁盘'}</span>
+          <span className="status-item status-file-identity" title={tab.path ?? '尚未保存到磁盘'}>
+            {tab.path ?? '尚未保存到磁盘'}
+          </span>
           {recoveryStatus && recoveryStatus !== 'idle' && (
-            <span className={`status-item recovery-status-${recoveryStatus}`} role="status"
-              title="本机恢复副本不是正式保存。包含原文和图片，未加密。">
-              {recoveryStatus === 'error' ? '恢复保护失败，请手动保存' : recoveryStatus === 'pending' ? '恢复保护中…' : '本机副本已保护'}
+            <span
+              className={`status-item recovery-status-${recoveryStatus}`}
+              role="status"
+              title="本机恢复副本不是正式保存。包含原文和图片，未加密。"
+            >
+              {recoveryStatus === 'error'
+                ? '恢复保护失败，请手动保存'
+                : recoveryStatus === 'pending'
+                  ? '恢复保护中…'
+                  : '本机副本已保护'}
             </span>
           )}
         </div>
@@ -79,8 +96,17 @@ export const StatusBar = memo(function StatusBar({
       )}
 
       <div className="statusbar-right">
-        {onRecovery && <button className="statusbar-theme" onClick={onRecovery} title="恢复草稿与清理缓存">恢复草稿</button>}
-        <TypographyPanel bodyFont={bodyFont} codeFont={codeFont} onBodyFont={onBodyFont} onCodeFont={onCodeFont} />
+        {onRecovery && (
+          <button className="statusbar-theme" onClick={onRecovery} title="恢复草稿与清理缓存">
+            恢复草稿
+          </button>
+        )}
+        <TypographyPanel
+          bodyFont={bodyFont}
+          codeFont={codeFont}
+          onBodyFont={onBodyFont}
+          onCodeFont={onCodeFont}
+        />
         {tab && (
           <button
             className="statusbar-theme statusbar-zoom"
@@ -97,8 +123,16 @@ export const StatusBar = memo(function StatusBar({
           title={`切换主题,当前为${themeMode === 'system' ? '跟随系统' : themeMode === 'light' ? '浅色' : '深色'}`}
           aria-label={`切换主题,当前为${themeMode === 'system' ? '跟随系统' : themeMode === 'light' ? '浅色' : '深色'}`}
         >
-          {themeMode === 'dark' ? <IconMoon size={13} /> : themeMode === 'system' ? <IconMonitor size={13} /> : <IconSun size={13} />}
-          <span>{themeMode === 'system' ? '跟随系统' : themeMode === 'light' ? '浅色' : '深色'}</span>
+          {themeMode === 'dark' ? (
+            <IconMoon size={13} />
+          ) : themeMode === 'system' ? (
+            <IconMonitor size={13} />
+          ) : (
+            <IconSun size={13} />
+          )}
+          <span>
+            {themeMode === 'system' ? '跟随系统' : themeMode === 'light' ? '浅色' : '深色'}
+          </span>
         </button>
       </div>
     </footer>

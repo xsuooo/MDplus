@@ -29,7 +29,15 @@ export const EditorTab = memo(function EditorTab(props: EditorTabProps) {
   );
 });
 
-function EditorTabInner({ tab, active, sourceMode, onUpdate, onRegister, onImagePaste, onMediaPreview }: EditorTabProps) {
+function EditorTabInner({
+  tab,
+  active,
+  sourceMode,
+  onUpdate,
+  onRegister,
+  onImagePaste,
+  onMediaPreview,
+}: EditorTabProps) {
   const previewRef = useRef(onMediaPreview);
   previewRef.current = onMediaPreview;
   const onUpdateRef = useRef(onUpdate);
@@ -45,7 +53,9 @@ function EditorTabInner({ tab, active, sourceMode, onUpdate, onRegister, onImage
   const activity = useRef(0);
   useLayoutEffect(() => {
     activity.current += 1;
-    return () => { activity.current += 1; };
+    return () => {
+      activity.current += 1;
+    };
   }, [active, sourceMode, tab.id]);
 
   const { get, loading } = useEditor(
@@ -59,13 +69,15 @@ function EditorTabInner({ tab, active, sourceMode, onUpdate, onRegister, onImage
           const current = activity.current;
           return () => activity.current === current;
         },
-        onImagePaste: (file) => onImagePasteRef.current?.(tabIdRef.current, file) ?? Promise.reject(new Error('图片处理不可用')),
+        onImagePaste: (file) =>
+          onImagePasteRef.current?.(tabIdRef.current, file) ??
+          Promise.reject(new Error('图片处理不可用')),
       }),
     [],
   );
 
   useEffect(() => {
-    onRegisterRef.current(tab.id, loading ? null : get() ?? null);
+    onRegisterRef.current(tab.id, loading ? null : (get() ?? null));
     return () => onRegisterRef.current(tab.id, null);
   }, [get, loading, tab.id]);
 
@@ -79,8 +91,12 @@ function EditorTabInner({ tab, active, sourceMode, onUpdate, onRegister, onImage
   }, [loading, get, tab.id]);
 
   return (
-    <div className={`editor-tab${active ? ' active' : ''}`} data-active={active ? '1' : '0'}
-      {...{ inert: sourceMode ? '' : undefined }} aria-hidden={sourceMode ? true : undefined}>
+    <div
+      className={`editor-tab${active ? ' active' : ''}`}
+      data-active={active ? '1' : '0'}
+      {...{ inert: sourceMode ? '' : undefined }}
+      aria-hidden={sourceMode ? true : undefined}
+    >
       <div className="milkdown-container">
         <Milkdown />
       </div>

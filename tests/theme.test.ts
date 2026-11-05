@@ -5,7 +5,9 @@ vi.mock('../src/lib/mermaid', () => ({ refreshMermaidTheme: refresh }));
 
 function deferred() {
   let resolve!: () => void;
-  const promise = new Promise<void>((done) => { resolve = done; });
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
   return { promise, resolve };
 }
 
@@ -60,17 +62,23 @@ describe('nonblocking theme updates', () => {
       await Promise.resolve();
       expect(root.dataset.theme).toBe('dark');
       expect(warning).toHaveBeenCalledWith('图表主题刷新失败', error);
-    } finally { warning.mockRestore(); }
+    } finally {
+      warning.mockRestore();
+    }
   });
 
   it('does not let older diagram completions restore an obsolete theme', async () => {
     const root = fixture('light');
     const { applyTheme } = await import('../src/lib/theme');
-    const older = deferred(); const newer = deferred();
+    const older = deferred();
+    const newer = deferred();
     refresh.mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
-    applyTheme('dark'); applyTheme('light');
-    newer.resolve(); await newer.promise;
-    older.resolve(); await older.promise;
+    applyTheme('dark');
+    applyTheme('light');
+    newer.resolve();
+    await newer.promise;
+    older.resolve();
+    await older.promise;
     expect(root.dataset.theme).toBe('light');
     expect(refresh).toHaveBeenCalledTimes(2);
   });

@@ -48,14 +48,30 @@ describe('outline width storage', () => {
   });
 
   it('survives a storage that throws on read', () => {
-    expect(readOutlineWidth({ getItem: () => { throw new Error('denied'); } })).toBe(OUTLINE_WIDTH_DEFAULT);
+    expect(
+      readOutlineWidth({
+        getItem: () => {
+          throw new Error('denied');
+        },
+      }),
+    ).toBe(OUTLINE_WIDTH_DEFAULT);
   });
 
   it('writes the clamped width under the expected key and swallows failures', () => {
     const calls: Array<[string, string]> = [];
-    writeOutlineWidth(5000, { setItem: (key, value) => { calls.push([key, value]); } });
+    writeOutlineWidth(5000, {
+      setItem: (key, value) => {
+        calls.push([key, value]);
+      },
+    });
     expect(calls).toEqual([[OUTLINE_WIDTH_STORAGE_KEY, String(OUTLINE_WIDTH_MAX)]]);
-    expect(() => writeOutlineWidth(260, { setItem: () => { throw new Error('quota'); } })).not.toThrow();
+    expect(() =>
+      writeOutlineWidth(260, {
+        setItem: () => {
+          throw new Error('quota');
+        },
+      }),
+    ).not.toThrow();
   });
 });
 

@@ -4,10 +4,15 @@ import { refreshMermaidTheme } from '../../src/lib/mermaid';
 import '../../src/styles/global.css';
 
 export const mermaidCases = [
-  'mermaid-clear-preview', 'mermaid-clear-blur', 'mermaid-clear-escape', 'mermaid-edit-preview',
-  'mermaid-theme-stable', 'mermaid-theme-editing', 'mermaid-live-draft',
+  'mermaid-clear-preview',
+  'mermaid-clear-blur',
+  'mermaid-clear-escape',
+  'mermaid-edit-preview',
+  'mermaid-theme-stable',
+  'mermaid-theme-editing',
+  'mermaid-live-draft',
 ] as const;
-export type MermaidCase = typeof mermaidCases[number];
+export type MermaidCase = (typeof mermaidCases)[number];
 
 function check(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
@@ -32,27 +37,42 @@ export async function runMermaidCommitRegression(testCase: MermaidCase): Promise
   const onError = (event: ErrorEvent) => errors.push(event.message);
   await editor.create();
   try {
-    await until(() => root.querySelector('.md-mermaid-preview img') && !root.querySelector('.md-mermaid-node.loading'));
+    await until(
+      () =>
+        root.querySelector('.md-mermaid-preview img') &&
+        !root.querySelector('.md-mermaid-node.loading'),
+    );
     if (testCase === 'mermaid-theme-stable') {
       const holder = root.querySelector<HTMLElement>('.md-mermaid-holder')!;
       const originalFrame = holder.querySelector('.md-mermaid-preview img');
       check(originalFrame, 'Sandbox frame is missing');
       const height = holder.getBoundingClientRect().height;
       const heights: number[] = [];
-      const observer = new ResizeObserver(() => heights.push(holder.getBoundingClientRect().height));
+      const observer = new ResizeObserver(() =>
+        heights.push(holder.getBoundingClientRect().height),
+      );
       observer.observe(holder);
       try {
         for (const theme of ['dark', 'light', 'dark', 'light']) {
           const previousFrame = holder.querySelector('.md-mermaid-preview img');
           document.documentElement.dataset.theme = theme;
           refreshMermaidTheme();
-          check(previousFrame?.isConnected, 'Theme refresh removed the visible diagram before its replacement was ready');
+          check(
+            previousFrame?.isConnected,
+            'Theme refresh removed the visible diagram before its replacement was ready',
+          );
           await until(() => !holder.parentElement!.classList.contains('loading'));
           const frame = holder.querySelector<HTMLImageElement>('.md-mermaid-preview img');
           check(frame && frame !== previousFrame, 'Theme refresh did not replace the diagram');
-          check(frame.src.startsWith('data:image/svg+xml') && frame.naturalWidth > 0, 'Diagram stopped using decoded inert SVG images');
+          check(
+            frame.src.startsWith('data:image/svg+xml') && frame.naturalWidth > 0,
+            'Diagram stopped using decoded inert SVG images',
+          );
         }
-        check(heights.every((value) => Math.abs(value - height) <= 1), `Diagram height jumped: ${height} => ${heights}`);
+        check(
+          heights.every((value) => Math.abs(value - height) <= 1),
+          `Diagram height jumped: ${height} => ${heights}`,
+        );
         return `${testCase}: stable inert image height through four theme changes`;
       } finally {
         observer.disconnect();
@@ -65,10 +85,16 @@ export async function runMermaidCommitRegression(testCase: MermaidCase): Promise
     if (testCase === 'mermaid-live-draft') {
       textarea.value = 'graph TD\nA-->UnsavedDraft';
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
-      check(editor.action((ctx) => ctx.get(editorViewCtx).state.doc.firstChild!.textContent) === textarea.value,
-        'Save/recovery would read old Mermaid source before blur');
+      check(
+        editor.action((ctx) => ctx.get(editorViewCtx).state.doc.firstChild!.textContent) ===
+          textarea.value,
+        'Save/recovery would read old Mermaid source before blur',
+      );
       await refreshMermaidTheme();
-      check(textarea.isConnected && document.activeElement === textarea, 'Live draft update replaced the focused editor');
+      check(
+        textarea.isConnected && document.activeElement === textarea,
+        'Live draft update replaced the focused editor',
+      );
       return `${testCase}: save and recovery see live source without leaving edit mode`;
     }
     if (testCase === 'mermaid-theme-editing') {
@@ -76,7 +102,10 @@ export async function runMermaidCommitRegression(testCase: MermaidCase): Promise
       document.documentElement.dataset.theme = 'dark';
       refreshMermaidTheme();
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      check(textarea.isConnected && textarea.value.includes('Draft'), 'Theme refresh discarded an uncommitted diagram draft');
+      check(
+        textarea.isConnected && textarea.value.includes('Draft'),
+        'Theme refresh discarded an uncommitted diagram draft',
+      );
       return `${testCase}: uncommitted source and focus retained`;
     }
     const expected = testCase === 'mermaid-edit-preview' ? 'graph TD\nA-->C' : '';
@@ -91,11 +120,15 @@ export async function runMermaidCommitRegression(testCase: MermaidCase): Promise
     }
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     check(errors.length === 0, `Mermaid commit threw: ${errors.join('; ')}`);
-    const code = () => editor.action((ctx) => {
-      const node = ctx.get(editorViewCtx).state.doc.firstChild;
-      check(node?.type.name === 'code_block' && node.attrs.language === 'mermaid', 'Diagram block was removed');
-      return node.textContent;
-    });
+    const code = () =>
+      editor.action((ctx) => {
+        const node = ctx.get(editorViewCtx).state.doc.firstChild;
+        check(
+          node?.type.name === 'code_block' && node.attrs.language === 'mermaid',
+          'Diagram block was removed',
+        );
+        return node.textContent;
+      });
     check(code() === expected, 'Mermaid commit retained the old diagram content');
     undo(editor);
     check(code() === original, 'Undo did not restore the diagram content');

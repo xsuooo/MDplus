@@ -1,6 +1,12 @@
 import { invoke } from '@tauri-apps/api/core';
+import { pathKey } from './pathIdentity';
 import { join, dirname } from '@tauri-apps/api/path';
-import { getImageUrls, isRelativeImageUrl, rewriteImageReferences, type PendingImageReference } from './imagePaths';
+import {
+  getImageUrls,
+  isRelativeImageUrl,
+  rewriteImageReferences,
+  type PendingImageReference,
+} from './imagePaths';
 import { basename, readImageFile, type ImageReceipt } from './fileOps';
 
 interface PendingImage extends PendingImageReference {
@@ -35,7 +41,11 @@ function cacheFor(tabId: string): ImageCache {
 
 function notifyImages(tabId: string): void {
   for (const listener of [...(imageListeners.get(tabId) ?? [])]) {
-    try { listener(); } catch (error) { console.error('图片预览刷新失败', error); }
+    try {
+      listener();
+    } catch (error) {
+      console.error('图片预览刷新失败', error);
+    }
   }
 }
 
@@ -47,7 +57,10 @@ function changed(tabId: string, cache: ImageCache, notify = true): void {
 /** Preview-only subscription: never dispatches an editor transaction. */
 export function subscribeImageSources(tabId: string, listener: () => void): () => void {
   let listeners = imageListeners.get(tabId);
-  if (!listeners) { listeners = new Set(); imageListeners.set(tabId, listeners); }
+  if (!listeners) {
+    listeners = new Set();
+    imageListeners.set(tabId, listeners);
+  }
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
@@ -117,14 +130,22 @@ export function getPendingImages(tabId: string): PendingImage[] {
   });
 }
 
-export function restorePendingImages(tabId: string, images: {
-  placeholder: string; filename: string; data: number[]; mime: string;
-}[]): void {
+export function restorePendingImages(
+  tabId: string,
+  images: {
+    placeholder: string;
+    filename: string;
+    data: number[];
+    mime: string;
+  }[],
+): void {
   const cache: ImageCache = { images: new Map(), aliases: new Map(), generation: 0, docPath: null };
-  for (const image of images) cache.images.set(image.placeholder, {
-    ...image, relativePath: `./assets/${image.filename}`,
-    preview: bytesToDataUrl(new Uint8Array(image.data), image.mime),
-  });
+  for (const image of images)
+    cache.images.set(image.placeholder, {
+      ...image,
+      relativePath: `./assets/${image.filename}`,
+      preview: bytesToDataUrl(new Uint8Array(image.data), image.mime),
+    });
   imageCaches.set(tabId, cache);
   notifyImages(tabId);
 }
@@ -146,7 +167,11 @@ interface ImageMigration {
   targetFilePath: string;
   markdown: string;
   references: PendingImageReference[];
-  updates: { image: PendingImage; filename: string; source: { url: string; absolutePath: string } }[];
+  updates: {
+    image: PendingImage;
+    filename: string;
+    source: { url: string; absolutePath: string };
+  }[];
 }
 
 /** 仅在文档写入成功后提交来源,失败的另存为不能改变后续迁移的基准目录。 */
@@ -194,8 +219,9 @@ export async function migratePendingImages(
   const references: PendingImageReference[] = [];
 
   for (const image of pending) {
-    const imageReferences = [image.placeholder, image.source?.url]
-      .filter((url): url is string => !!url && urls.has(url));
+    const imageReferences = [image.placeholder, image.source?.url].filter(
+      (url): url is string => !!url && urls.has(url),
+    );
     if (imageReferences.length === 0) continue;
 
     // 磁盘上原有的图片:只要它相对新的保存位置仍然指向同一个文件,就把
@@ -214,28 +240,35 @@ export async function migratePendingImages(
 
     // Allocate and write in one native operation; per-tab queues cannot protect a shared assets directory.
     const asset = await invoke<ImageReceipt>('save_image_asset', {
-      docPath: targetFilePath, filename: image.filename, data: image.data,
+      docPath: targetFilePath,
+      filename: image.filename,
+      data: image.data,
     });
     for (const reference of imageReferences) {
       references.push({ placeholder: reference, relativePath: asset.relativePath });
     }
-    updates.push({ image, filename: asset.filename, source: { url: asset.relativePath, absolutePath: asset.path } });
+    updates.push({
+      image,
+      filename: asset.filename,
+      source: { url: asset.relativePath, absolutePath: asset.path },
+    });
   }
 
-  return { ...context, markdown: rewriteImageReferences(markdown, references), updates, references };
+  return {
+    ...context,
+    markdown: rewriteImageReferences(markdown, references),
+    updates,
+    references,
+  };
 }
 
 /**
  * 两个路径是否指向同一个文件。Windows 下大小写不敏感、两种分隔符等价,
- * 与 App.tsx 判断「同一文件是否已在别的标签打开」用的是同一套口径。
+ * 与文档打开／另存为共用 pathKey：统一点路径、大小写、分隔符和扩展前缀。
+ * 此处比较的是已解析的绝对目标；相对文稿路径先交由原生命令解析。
  */
 function isSamePath(a: string, b: string): boolean {
-  const normalize = (path: string) => path
-    .replace(/\//g, '\\')
-    .replace(/^\\\\\?\\UNC\\/i, '\\\\')
-    .replace(/^\\\\\?\\/, '')
-    .toLocaleLowerCase();
-  return normalize(a) === normalize(b);
+  return pathKey(a) === pathKey(b);
 }
 
 export interface PreparedImageReferences {
@@ -251,7 +284,10 @@ export interface PreparedImageReferences {
  * invalidate an outstanding read. Source Markdown is always returned verbatim.
  */
 export async function prepareImageReferences(
-  tabId: string, markdown: string, docPath: string, options: { refresh?: boolean } = {},
+  tabId: string,
+  markdown: string,
+  docPath: string,
+  options: { refresh?: boolean } = {},
 ): Promise<PreparedImageReferences> {
   const cache = cacheFor(tabId);
   const generation = cache.generation;
@@ -267,12 +303,22 @@ export async function prepareImageReferences(
     try {
       const image = await readImageFile(docPath, relativePath);
       const preview = bytesToDataUrl(new Uint8Array(image.data), image.mime);
-      if (existing?.source && isSamePath(existing.source.absolutePath, image.path) && existing.preview === preview) {
+      if (
+        existing?.source &&
+        isSamePath(existing.source.absolutePath, image.path) &&
+        existing.preview === preview
+      ) {
         staged.set(url, existing);
       } else {
         const placeholder = `mdplus-image:${imageId()}`;
-        staged.set(url, { placeholder, preview, relativePath: url, filename: basename(relativePath),
-          data: image.data, source: { url, absolutePath: image.path } });
+        staged.set(url, {
+          placeholder,
+          preview,
+          relativePath: url,
+          filename: basename(relativePath),
+          data: image.data,
+          source: { url, absolutePath: image.path },
+        });
       }
     } catch {
       // Failure is also a staged observation. Do not keep serving an obsolete
@@ -284,7 +330,8 @@ export async function prepareImageReferences(
   return {
     markdown,
     commit: () => {
-      if (consumed || imageCaches.get(tabId) !== cache || cache.generation !== generation) return false;
+      if (consumed || imageCaches.get(tabId) !== cache || cache.generation !== generation)
+        return false;
       consumed = true;
       let visibleChange = false;
       if (!sameDocument && cache.docPath !== null) {
@@ -309,7 +356,11 @@ export async function prepareImageReferences(
 }
 
 /** First-open convenience: publish a checked cache, then tokenize only image URLs. */
-export async function loadImageReferences(tabId: string, markdown: string, docPath: string): Promise<string> {
+export async function loadImageReferences(
+  tabId: string,
+  markdown: string,
+  docPath: string,
+): Promise<string> {
   const prepared = await prepareImageReferences(tabId, markdown, docPath, { refresh: true });
   if (!prepared.commit()) throw new Error('图片缓存已在加载期间改变，请重新打开文档');
   const cache = imageCaches.get(tabId)!;

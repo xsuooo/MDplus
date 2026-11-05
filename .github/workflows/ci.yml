@@ -20,10 +20,25 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Check and test
-        run: npm run check
+      - name: Lint (including React Hooks)
+        run: npm run lint
+      - name: Check formatting
+        run: npm run format:check
+      - name: Check configuration and types
+        run: npm run config:check && npm run typecheck && npm run typecheck:browser
+      - name: Test with coverage thresholds
+        run: npm run test:coverage
+      - name: Require zero npm vulnerabilities
+        run: npm run audit:deps
       - name: Build frontend
         run: npm run build
+      - name: Preserve frontend coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: coverage/
+          if-no-files-found: error
 
   browser:
     name: Browser regression (native IPC mocked)
@@ -86,7 +101,11 @@ jobs:
       - name: Use Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt, clippy, llvm-tools-preview
+      - name: Use Node.js for coverage validation
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
       - name: Check Windows delivery scripts (PowerShell 7)
         shell: pwsh
         run: ./scripts/windows/test-delivery.ps1
@@ -95,7 +114,21 @@ jobs:
         run: ./scripts/windows/test-delivery.ps1
       - name: Check formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-      - name: Run tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Install pinned coverage tooling
+        run: cargo install cargo-llvm-cov --version 0.9.1 --locked
+      - name: Run native tests with production coverage
+        run: >-
+          cargo llvm-cov --manifest-path src-tauri/Cargo.toml --locked --json
+          --output-path .audit/rust-coverage.json --ignore-filename-regex '(_tests\.rs|build\.rs)'
+      - name: Enforce native coverage thresholds
+        run: node scripts/check-rust-coverage.mjs .audit/rust-coverage.json
+      - name: Preserve native coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-coverage
+          path: .audit/rust-coverage.json
+          include-hidden-files: true
+          if-no-files-found: error
       - name: Run Clippy
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings

@@ -14,15 +14,23 @@ const schema = new Schema({
 });
 function search(doc: ReturnType<typeof schema.node>, keyword: string, caseSensitive = false) {
   let state = EditorState.create({ doc, plugins: [searchPlugin] });
-  state = state.apply(state.tr.setMeta(searchPluginKey, { type: 'search', keyword, caseSensitive }));
+  state = state.apply(
+    state.tr.setMeta(searchPluginKey, { type: 'search', keyword, caseSensitive }),
+  );
   return state;
 }
-function paragraph(text: string) { return schema.node('paragraph', null, schema.text(text)); }
+function paragraph(text: string) {
+  return schema.node('paragraph', null, schema.text(text));
+}
 
 describe('visible text search', () => {
   it.each(['strong', 'em', 'link'])('matches a phrase across a %s mark', (name) => {
     const mark = schema.mark(name, name === 'link' ? { href: 'https://example.com' } : undefined);
-    const doc = schema.node('doc', null, schema.node('paragraph', null, [schema.text('hello '), schema.text('world', [mark])]));
+    const doc = schema.node(
+      'doc',
+      null,
+      schema.node('paragraph', null, [schema.text('hello '), schema.text('world', [mark])]),
+    );
     const result = searchPluginKey.getState(search(doc, 'hello world'))!;
     expect(result.count).toBe(1);
     expect(result.matches).toEqual([{ from: 1, to: 12 }]);
@@ -35,12 +43,22 @@ describe('visible text search', () => {
 
   it('treats punctuation as literal text rather than a regular expression', () => {
     const doc = schema.node('doc', null, paragraph('a+b a.b a+b'));
-    expect(searchPluginKey.getState(search(doc, 'a+b', true))!.matches).toEqual([{ from: 1, to: 4 }, { from: 9, to: 12 }]);
+    expect(searchPluginKey.getState(search(doc, 'a+b', true))!.matches).toEqual([
+      { from: 1, to: 4 },
+      { from: 9, to: 12 },
+    ]);
   });
 
   it('does not invent a phrase across separate paragraphs or a hard break', () => {
-    const doc = schema.node('doc', null, [paragraph('hello '), paragraph('world'),
-      schema.node('paragraph', null, [schema.text('hello '), schema.node('hard_break'), schema.text('world')])]);
+    const doc = schema.node('doc', null, [
+      paragraph('hello '),
+      paragraph('world'),
+      schema.node('paragraph', null, [
+        schema.text('hello '),
+        schema.node('hard_break'),
+        schema.text('world'),
+      ]),
+    ]);
     expect(searchPluginKey.getState(search(doc, 'hello world'))!.count).toBe(0);
   });
 

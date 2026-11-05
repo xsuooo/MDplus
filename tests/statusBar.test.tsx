@@ -6,13 +6,37 @@ import type { Tab } from '../src/lib/types';
 // The browser-only typography popover is covered by the browser suite, not these status-copy checks.
 vi.mock('../src/components/TypographyPanel', () => ({ TypographyPanel: () => null }));
 
-const tab: Tab = { id: 'test', title: 'same.md', path: 'C:/notes/project-b/same.md', isNew: false,
-  dirty: false, externalMtime: 100, diskRevision: 'revision', externalChanged: false,
-  initialContent: '', savedContent: '', markdown: '', stats: { words: 0, chars: 0, lines: 1 } };
+const tab: Tab = {
+  id: 'test',
+  title: 'same.md',
+  path: 'C:/notes/project-b/same.md',
+  isNew: false,
+  dirty: false,
+  externalMtime: 100,
+  diskRevision: 'revision',
+  externalChanged: false,
+  initialContent: '',
+  savedContent: '',
+  markdown: '',
+  stats: { words: 0, chars: 0, lines: 1 },
+};
 function render(saveState: 'saved' | 'dirty' | 'paused', current = tab) {
-  return renderToStaticMarkup(<StatusBar tab={current} saveState={saveState} themeMode="light"
-    onThemeMode={() => {}} sourceMode={false} zoom={100} onResetZoom={() => {}}
-    bodyFont="misans" codeFont="jetbrains-sarasa" onBodyFont={() => {}} onCodeFont={() => {}} recoveryStatus="protected" />);
+  return renderToStaticMarkup(
+    <StatusBar
+      tab={current}
+      saveState={saveState}
+      themeMode="light"
+      onThemeMode={() => {}}
+      sourceMode={false}
+      zoom={100}
+      onResetZoom={() => {}}
+      bodyFont="misans"
+      codeFont="jetbrains-sarasa"
+      onBodyFont={() => {}}
+      onCodeFont={() => {}}
+      recoveryStatus="protected"
+    />,
+  );
 }
 
 describe('status feedback', () => {

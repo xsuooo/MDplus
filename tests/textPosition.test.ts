@@ -13,8 +13,10 @@ describe('source selection rebasing', () => {
   });
   it('rebases a selection between two separate image rewrites', () => {
     const markdown = '![](mdplus-image:one)\n\n选择这里\n\n![](mdplus-image:two)';
-    const refs = [{ placeholder: 'mdplus-image:one', relativePath: './assets/图片 一.png' },
-      { placeholder: 'mdplus-image:two', relativePath: './assets/b.png' }];
+    const refs = [
+      { placeholder: 'mdplus-image:one', relativePath: './assets/图片 一.png' },
+      { placeholder: 'mdplus-image:two', relativePath: './assets/b.png' },
+    ];
     const result = rewriteImageReferences(markdown, refs);
     expect(mapImageOffset(markdown, refs, markdown.indexOf('选择'))).toBe(result.indexOf('选择'));
     expect(mapImageOffset(markdown, refs, markdown.length)).toBe(result.length);
@@ -23,7 +25,11 @@ describe('source selection rebasing', () => {
     const markdown = '![a][img] select ![b][img] [download][img]\n\n[img]: old.png "title"';
     const refs = [{ placeholder: 'old.png', relativePath: './new/long image.png' }];
     const result = rewriteImageReferences(markdown, refs);
-    expect(mapImageOffset(markdown, refs, markdown.indexOf('select'))).toBe(result.indexOf('select'));
-    expect(mapImageOffset(markdown, refs, markdown.indexOf('[download]'))).toBe(result.indexOf('[download]'));
+    expect(mapImageOffset(markdown, refs, markdown.indexOf('select'))).toBe(
+      result.indexOf('select'),
+    );
+    expect(mapImageOffset(markdown, refs, markdown.indexOf('[download]'))).toBe(
+      result.indexOf('[download]'),
+    );
   });
 });

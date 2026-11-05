@@ -31,18 +31,33 @@ interface ShortcutModalProps {
   onClose: () => void;
 }
 
-export const ShortcutModal = memo(function ShortcutModal({ bindings, onChange, onClose }: ShortcutModalProps) {
+export const ShortcutModal = memo(function ShortcutModal({
+  bindings,
+  onChange,
+  onClose,
+}: ShortcutModalProps) {
   const dialogRef = useDialogFocus<HTMLDivElement>(onClose);
   const present = useIsPresent();
-  const [capturing, setCapturing] = useState<{ action: ShortcutAction; binding: string | null } | null>(null);
-  const [conflict, setConflict] = useState<{ action: ShortcutAction; actions: ShortcutAction[] } | null>(null);
+  const [capturing, setCapturing] = useState<{
+    action: ShortcutAction;
+    binding: string | null;
+  } | null>(null);
+  const [conflict, setConflict] = useState<{
+    action: ShortcutAction;
+    actions: ShortcutAction[];
+  } | null>(null);
   const [hint, setHint] = useState<string | null>(null);
   // 捕获期间需要读最新绑定,避免 effect 持有过期闭包
   const bindingsRef = useRef(bindings);
   bindingsRef.current = bindings;
 
   useEffect(() => {
-    if (!present) { setCapturing(null); setConflict(null); setHint(null); return; }
+    if (!present) {
+      setCapturing(null);
+      setConflict(null);
+      setHint(null);
+      return;
+    }
     if (!capturing) return;
     const onKeyDown = (event: KeyboardEvent) => {
       // 输入法组字中:交给输入法,既不录制也不吞键
@@ -68,7 +83,12 @@ export const ShortcutModal = memo(function ShortcutModal({ bindings, onChange, o
         return;
       }
 
-      const result = applyShortcut(bindingsRef.current, capturing.action, accelerator, capturing.binding);
+      const result = applyShortcut(
+        bindingsRef.current,
+        capturing.action,
+        accelerator,
+        capturing.binding,
+      );
       if (result.conflict.length > 0) {
         setConflict({ action: capturing.action, actions: result.conflict });
         setHint(null);
@@ -86,9 +106,9 @@ export const ShortcutModal = memo(function ShortcutModal({ bindings, onChange, o
   const startCapture = (action: ShortcutAction, binding: string | null = null) => {
     setConflict(null);
     setHint(null);
-    setCapturing((current) => (
-      current?.action === action && current.binding === binding ? null : { action, binding }
-    ));
+    setCapturing((current) =>
+      current?.action === action && current.binding === binding ? null : { action, binding },
+    );
   };
 
   /** 移除单个键位;移除最后一个即解绑 */
@@ -146,8 +166,9 @@ export const ShortcutModal = memo(function ShortcutModal({ bindings, onChange, o
             <ul>
               {duplicateGroups.map((group) => (
                 <li key={group.accelerator}>
-                  {formatShortcut(group.accelerator)} 已由「{ACTION_LABELS[group.active]}」使用,
-                  「{group.ignored.map((action) => ACTION_LABELS[action]).join('、')}」不会由此键位触发
+                  {formatShortcut(group.accelerator)} 已由「{ACTION_LABELS[group.active]}」使用, 「
+                  {group.ignored.map((action) => ACTION_LABELS[action]).join('、')}
+                  」不会由此键位触发
                 </li>
               ))}
             </ul>
@@ -158,9 +179,15 @@ export const ShortcutModal = memo(function ShortcutModal({ bindings, onChange, o
           <table className="shortcut-table">
             <thead>
               <tr>
-                <th scope="col" aria-label="操作项">操作项</th>
-                <th scope="col" aria-label="当前快捷键">当前快捷键</th>
-                <th scope="col" aria-label="快捷键操作">操作</th>
+                <th scope="col" aria-label="操作项">
+                  操作项
+                </th>
+                <th scope="col" aria-label="当前快捷键">
+                  当前快捷键
+                </th>
+                <th scope="col" aria-label="快捷键操作">
+                  操作
+                </th>
               </tr>
             </thead>
             {GROUP_ORDER.map((group) => (
@@ -170,105 +197,123 @@ export const ShortcutModal = memo(function ShortcutModal({ bindings, onChange, o
                     {group}
                   </th>
                 </tr>
-                {SHORTCUT_DEFINITIONS.filter((definition) => definition.group === group).map((definition) => {
-                  const label = ACTION_LABELS[definition.id];
-                  const isCapturing = capturing?.action === definition.id;
-                  const message = conflictText(definition.id);
-                  const list = bindings[definition.id] ?? [];
-                  return (
-                    <tr key={definition.id} className="shortcut-row">
-                      <th scope="row">{label}</th>
-                      <td>
-                        {list.length === 0 && !isCapturing ? (
-                          <kbd className="shortcut-kbd shortcut-kbd-unbound">{formatShortcut(null)}</kbd>
-                        ) : (
-                          <span className="shortcut-kbd-list">
-                            {list.map((accelerator) => (
-                              <span className="shortcut-kbd-chip" key={accelerator}>
-                                <button
-                                  type="button"
-                                  className={`shortcut-kbd shortcut-kbd-edit${isCapturing && capturing.binding === accelerator ? ' shortcut-kbd-capturing' : ''}`}
-                                  onClick={() => startCapture(definition.id, accelerator)}
-                                  aria-label={`修改「${label}」的 ${formatShortcut(accelerator)}`}
-                                  aria-pressed={isCapturing && capturing.binding === accelerator}
-                                  title="点击修改"
-                                >
-                                  <kbd>
-                                    {isCapturing && capturing.binding === accelerator ? '按下快捷键…' : formatShortcut(accelerator)}
-                                  </kbd>
-                                </button>
-                                <button
-                                  type="button"
-                                  className="shortcut-kbd-remove"
-                                  onClick={() => removeBinding(definition.id, accelerator)}
-                                  aria-label={`移除「${label}」的 ${formatShortcut(accelerator)}`}
-                                  title="移除这个键位"
-                                >
-                                  ×
-                                </button>
+                {SHORTCUT_DEFINITIONS.filter((definition) => definition.group === group).map(
+                  (definition) => {
+                    const label = ACTION_LABELS[definition.id];
+                    const isCapturing = capturing?.action === definition.id;
+                    const message = conflictText(definition.id);
+                    const list = bindings[definition.id] ?? [];
+                    return (
+                      <tr key={definition.id} className="shortcut-row">
+                        <th scope="row">{label}</th>
+                        <td>
+                          {list.length === 0 && !isCapturing ? (
+                            <kbd className="shortcut-kbd shortcut-kbd-unbound">
+                              {formatShortcut(null)}
+                            </kbd>
+                          ) : (
+                            <span className="shortcut-kbd-list">
+                              {list.map((accelerator) => (
+                                <span className="shortcut-kbd-chip" key={accelerator}>
+                                  <button
+                                    type="button"
+                                    className={`shortcut-kbd shortcut-kbd-edit${isCapturing && capturing.binding === accelerator ? ' shortcut-kbd-capturing' : ''}`}
+                                    onClick={() => startCapture(definition.id, accelerator)}
+                                    aria-label={`修改「${label}」的 ${formatShortcut(accelerator)}`}
+                                    aria-pressed={isCapturing && capturing.binding === accelerator}
+                                    title="点击修改"
+                                  >
+                                    <kbd>
+                                      {isCapturing && capturing.binding === accelerator
+                                        ? '按下快捷键…'
+                                        : formatShortcut(accelerator)}
+                                    </kbd>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="shortcut-kbd-remove"
+                                    onClick={() => removeBinding(definition.id, accelerator)}
+                                    aria-label={`移除「${label}」的 ${formatShortcut(accelerator)}`}
+                                    title="移除这个键位"
+                                  >
+                                    ×
+                                  </button>
+                                </span>
+                              ))}
+                              {isCapturing && capturing.binding === null && (
+                                <kbd className="shortcut-kbd shortcut-kbd-capturing">
+                                  按下快捷键…
+                                </kbd>
+                              )}
+                            </span>
+                          )}
+                          {isCapturing && (
+                            <span className="shortcut-recording-hint" role="status">
+                              {capturing.binding === null
+                                ? '添加快捷键'
+                                : `替换 ${formatShortcut(capturing.binding)}`}
+                              ，Esc 取消
+                            </span>
+                          )}
+                          {ignoredActions.has(definition.id) && (
+                            <span className="shortcut-ignored">存在不生效的键位</span>
+                          )}
+                          {list
+                            .filter((accelerator) => shortcutWarning(accelerator))
+                            .map((accelerator) => (
+                              <span className="shortcut-hint" key={`warning-${accelerator}`}>
+                                {formatShortcut(accelerator)}: {shortcutWarning(accelerator)}
                               </span>
                             ))}
-                            {isCapturing && capturing.binding === null && (
-                              <kbd className="shortcut-kbd shortcut-kbd-capturing">按下快捷键…</kbd>
-                            )}
-                          </span>
-                        )}
-                        {isCapturing && (
-                          <span className="shortcut-recording-hint" role="status">
-                            {capturing.binding === null ? '添加快捷键' : `替换 ${formatShortcut(capturing.binding)}`}，Esc 取消
-                          </span>
-                        )}
-                        {ignoredActions.has(definition.id) && (
-                          <span className="shortcut-ignored">存在不生效的键位</span>
-                        )}
-                        {list.filter((accelerator) => shortcutWarning(accelerator)).map((accelerator) => (
-                          <span className="shortcut-hint" key={`warning-${accelerator}`}>
-                            {formatShortcut(accelerator)}: {shortcutWarning(accelerator)}
-                          </span>
-                        ))}
-                        {message && (
-                          <span className="shortcut-conflict" role="alert">
-                            {message}
-                          </span>
-                        )}
-                      </td>
-                      <td className="shortcut-actions">
-                        <button
-                          type="button"
-                          className="btn btn-small"
-                          onClick={() => {
-                            if (isCapturing) {
-                              setCapturing(null);
-                              setConflict(null);
-                              setHint(null);
-                            } else {
-                              startCapture(definition.id);
-                            }
-                          }}
-                          aria-label={`${isCapturing ? '取消录制' : '添加'}「${label}」快捷键`}
-                          aria-pressed={isCapturing}
-                        >
-                          {isCapturing ? '取消' : '添加'}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-small"
-                          onClick={() => clearBinding(definition.id)}
-                          aria-label={`清除「${label}」快捷键`}
-                          disabled={list.length === 0}
-                        >
-                          清除
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                          {message && (
+                            <span className="shortcut-conflict" role="alert">
+                              {message}
+                            </span>
+                          )}
+                        </td>
+                        <td className="shortcut-actions">
+                          <button
+                            type="button"
+                            className="btn btn-small"
+                            onClick={() => {
+                              if (isCapturing) {
+                                setCapturing(null);
+                                setConflict(null);
+                                setHint(null);
+                              } else {
+                                startCapture(definition.id);
+                              }
+                            }}
+                            aria-label={`${isCapturing ? '取消录制' : '添加'}「${label}」快捷键`}
+                            aria-pressed={isCapturing}
+                          >
+                            {isCapturing ? '取消' : '添加'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-small"
+                            onClick={() => clearBinding(definition.id)}
+                            aria-label={`清除「${label}」快捷键`}
+                            disabled={list.length === 0}
+                          >
+                            清除
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  },
+                )}
               </tbody>
             ))}
           </table>
         </div>
         <div className="modal-actions">
-          <button type="button" className="btn" onClick={restoreDefaults} aria-label="恢复默认快捷键">
+          <button
+            type="button"
+            className="btn"
+            onClick={restoreDefaults}
+            aria-label="恢复默认快捷键"
+          >
             恢复默认值
           </button>
           <button type="button" className="btn" onClick={onClose} aria-label="关闭快捷键设置">

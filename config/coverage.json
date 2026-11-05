@@ -1,0 +1,4 @@
+{
+  "frontend": { "statements": 44, "branches": 44, "functions": 37, "lines": 47 },
+  "rust": { "lines": 69, "functions": 51 }
+}

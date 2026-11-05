@@ -1,4 +1,10 @@
-import { memo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import {
+  memo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import type { OutlineItem } from '../lib/types';
 import {
   OUTLINE_WIDTH_MAX,

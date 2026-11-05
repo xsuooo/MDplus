@@ -44,7 +44,8 @@ export function normalizeWheelDelta(delta: number, deltaMode = 0): number {
   return delta;
 }
 
-const isIdle = (state: TabWheelState, now: number) => now - state.lastEventAt > TAB_WHEEL_GESTURE_IDLE_MS;
+const isIdle = (state: TabWheelState, now: number) =>
+  now - state.lastEventAt > TAB_WHEEL_GESTURE_IDLE_MS;
 
 /**
  * 纯计算:每次 wheel 事件传入当前状态与时间戳,返回是否切换、切哪边,以及下一份状态。
@@ -68,7 +69,8 @@ export function wheelStep(
   const deltaX = normalizeWheelDelta(event.deltaX, event.deltaMode ?? 0);
   if (deltaY === 0) return { state: { ...state, lastEventAt: now }, direction: 0 };
   // 横向滑动优先交给标签条自己滚动
-  if (Math.abs(deltaX) > Math.abs(deltaY) * 1.5) return { state: { ...state, lastEventAt: now }, direction: 0 };
+  if (Math.abs(deltaX) > Math.abs(deltaY) * 1.5)
+    return { state: { ...state, lastEventAt: now }, direction: 0 };
 
   const sign: -1 | 1 = deltaY > 0 ? 1 : -1;
 

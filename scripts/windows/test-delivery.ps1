@@ -36,6 +36,16 @@ Test-Case 'PowerShell scripts parse' {
     }
 }
 Test-Case 'source versions agree' { $id = Get-ReleaseIdentity $repository; Assert-True (!!$id.build) 'Missing build' }
+Test-Case 'delivery shares the injected frontend build identifier' {
+    $previousBuildId = $env:MDPLUS_BUILD_ID
+    try {
+        $env:MDPLUS_BUILD_ID = 'delivery-regression.1'
+        $id = Get-ReleaseIdentity $repository
+        Assert-True ($id.build -ceq 'delivery-regression.1') 'Delivery ignored the injected build identifier'
+        $env:MDPLUS_BUILD_ID = "invalid`nidentifier"
+        Assert-Throws { Get-ReleaseIdentity $repository } 'Invalid build identifier was accepted'
+    } finally { $env:MDPLUS_BUILD_ID = $previousBuildId }
+}
 Test-Case 'version drift is refused' {
     $fixture = New-EmptyDirectory (Join-Path $root 'repo')
     $null = [IO.Directory]::CreateDirectory((Join-Path $fixture 'src-tauri'))
@@ -160,3 +170,5 @@ Test-Case 'installer requires explicit switch before reading paths' {
 Write-AtomicJson (Join-Path $evidence 'results.json') @{ tests = $results.ToArray(); nativeInstallerExecuted = $false; completedAt = (Get-Date -Format o) }
 if (@($results | Where-Object { $_.status -ne 'passed' }).Count) { throw "Delivery regression failed; see $evidence" }
 Write-Host "$($results.Count) delivery checks passed. Synthetic files only; no host installation."
+# Expected native failures are asserted above; do not leak their exit code to CI's shell wrapper.
+exit 0

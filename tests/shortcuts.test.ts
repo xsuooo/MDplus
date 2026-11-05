@@ -76,8 +76,9 @@ describe('shortcutFromEvent', () => {
   it('builds accelerators with a fixed modifier order', () => {
     expect(shortcutFromEvent(ev('s', { ctrlKey: true }))).toBe('ctrl+s');
     expect(shortcutFromEvent(ev('S', { ctrlKey: true, shiftKey: true }))).toBe('ctrl+shift+s');
-    expect(shortcutFromEvent(ev('5', { ctrlKey: true, altKey: true, shiftKey: true, metaKey: true })))
-      .toBe('ctrl+alt+shift+meta+5');
+    expect(
+      shortcutFromEvent(ev('5', { ctrlKey: true, altKey: true, shiftKey: true, metaKey: true })),
+    ).toBe('ctrl+alt+shift+meta+5');
     expect(shortcutFromEvent(ev('X', { metaKey: true }))).toBe('meta+x');
   });
 
@@ -122,9 +123,15 @@ describe('shortcutFromEvent', () => {
   });
 
   it('protects AltGraph without rejecting ordinary Ctrl+Alt combinations', () => {
-    expect(shortcutFromEvent(ev('q', {
-      ctrlKey: true, altKey: true, getModifierState: (key) => key === 'AltGraph',
-    }))).toBeNull();
+    expect(
+      shortcutFromEvent(
+        ev('q', {
+          ctrlKey: true,
+          altKey: true,
+          getModifierState: (key) => key === 'AltGraph',
+        }),
+      ),
+    ).toBeNull();
     expect(shortcutFromEvent(ev('q', { ctrlKey: true, altKey: true }))).toBe('ctrl+alt+q');
   });
 
@@ -170,7 +177,9 @@ describe('matchesShortcut', () => {
 
   it('handles tab cycling and unbound or malformed bindings', () => {
     expect(matchesShortcut('ctrl+tab', ev('Tab', { ctrlKey: true }))).toBe(true);
-    expect(matchesShortcut('ctrl+shift+tab', ev('Tab', { ctrlKey: true, shiftKey: true }))).toBe(true);
+    expect(matchesShortcut('ctrl+shift+tab', ev('Tab', { ctrlKey: true, shiftKey: true }))).toBe(
+      true,
+    );
     expect(matchesShortcut('ctrl+shift+tab', ev('Tab', { ctrlKey: true }))).toBe(false);
     expect(matchesShortcut(null, ev('s', { ctrlKey: true }))).toBe(false);
     expect(matchesShortcut('nonsense', ev('s', { ctrlKey: true }))).toBe(false);
@@ -203,7 +212,9 @@ describe('findConflicts', () => {
       save: ['ctrl+q'],
       closeTab: ['ctrl+q'],
     };
-    expect(findConflicts(bindings)).toEqual([{ accelerator: 'ctrl+q', actions: ['save', 'closeTab'] }]);
+    expect(findConflicts(bindings)).toEqual([
+      { accelerator: 'ctrl+q', actions: ['save', 'closeTab'] },
+    ]);
   });
 
   it('ignores unbound entries and reports nothing for a clean table', () => {
@@ -229,7 +240,9 @@ describe('findConflicts', () => {
       ...DEFAULT_SHORTCUTS,
       save: ['ctrl+s', 'f11'],
     };
-    expect(findConflicts(bindings)).toEqual([{ accelerator: 'f11', actions: ['save', 'toggleOutline'] }]);
+    expect(findConflicts(bindings)).toEqual([
+      { accelerator: 'f11', actions: ['save', 'toggleOutline'] },
+    ]);
   });
 
   it('does not treat two bindings of one action as a conflict', () => {
@@ -374,17 +387,25 @@ describe('applyShortcut', () => {
     expect(result.bindings).toBe(DEFAULT_SHORTCUTS);
   });
 
-  it.each(['F11', 'ctrl+shift+e'])('does not remove an alias or duplicate %s already on this action', (key) => {
-    const result = applyShortcut(DEFAULT_SHORTCUTS, 'toggleOutline', key, 'ctrl+shift+e');
-    expect(result.bindings).toBe(DEFAULT_SHORTCUTS);
-  });
+  it.each(['F11', 'ctrl+shift+e'])(
+    'does not remove an alias or duplicate %s already on this action',
+    (key) => {
+      const result = applyShortcut(DEFAULT_SHORTCUTS, 'toggleOutline', key, 'ctrl+shift+e');
+      expect(result.bindings).toBe(DEFAULT_SHORTCUTS);
+    },
+  );
 
-  it.each(['ctrl+q', 'Fn'])('never appends when the replacement target is missing or invalid: %s', (old) => {
-    expect(applyShortcut(DEFAULT_SHORTCUTS, 'save', 'f4', old).bindings).toBe(DEFAULT_SHORTCUTS);
-  });
+  it.each(['ctrl+q', 'Fn'])(
+    'never appends when the replacement target is missing or invalid: %s',
+    (old) => {
+      expect(applyShortcut(DEFAULT_SHORTCUTS, 'save', 'f4', old).bindings).toBe(DEFAULT_SHORTCUTS);
+    },
+  );
 
   it('leaves the original binding intact for an invalid replacement', () => {
-    expect(applyShortcut(DEFAULT_SHORTCUTS, 'save', 'Fn', 'ctrl+s').bindings).toBe(DEFAULT_SHORTCUTS);
+    expect(applyShortcut(DEFAULT_SHORTCUTS, 'save', 'Fn', 'ctrl+s').bindings).toBe(
+      DEFAULT_SHORTCUTS,
+    );
   });
 
   it('canonicalizes the stored accelerator', () => {
@@ -419,7 +440,13 @@ describe('applyShortcut', () => {
 
 describe('dispatchShortcut', () => {
   function event(key: string, extra = {}) {
-    return { ...ev(key), defaultPrevented: false, repeat: false, preventDefault: vi.fn(), ...extra };
+    return {
+      ...ev(key),
+      defaultPrevented: false,
+      repeat: false,
+      preventDefault: vi.fn(),
+      ...extra,
+    };
   }
 
   it('dispatches every original chord and new alias to its configured action', () => {
@@ -429,10 +456,16 @@ describe('dispatchShortcut', () => {
         const parts = binding.split('+');
         const key = parts.pop()!;
         const run = vi.fn();
-        dispatchShortcut(event(key, {
-          ctrlKey: parts.includes('ctrl'), altKey: parts.includes('alt'),
-          shiftKey: parts.includes('shift'), metaKey: parts.includes('meta'),
-        }), index, run);
+        dispatchShortcut(
+          event(key, {
+            ctrlKey: parts.includes('ctrl'),
+            altKey: parts.includes('alt'),
+            shiftKey: parts.includes('shift'),
+            metaKey: parts.includes('meta'),
+          }),
+          index,
+          run,
+        );
         expect(run).toHaveBeenCalledExactlyOnceWith(action);
       }
     }
@@ -460,7 +493,11 @@ describe('dispatchShortcut', () => {
       ['meta+e', 'e', { metaKey: true }],
     ] as const) {
       const run = vi.fn();
-      dispatchShortcut(event(key, mods), createShortcutIndex({ ...DEFAULT_SHORTCUTS, save: [binding] }), run);
+      dispatchShortcut(
+        event(key, mods),
+        createShortcutIndex({ ...DEFAULT_SHORTCUTS, save: [binding] }),
+        run,
+      );
       expect(run).toHaveBeenCalledExactlyOnceWith('save');
     }
   });
@@ -474,8 +511,11 @@ describe('dispatchShortcut', () => {
   });
 
   it.each([
-    { defaultPrevented: true }, { isComposing: true }, { keyCode: 229 },
-    { getModifierState: () => true }, { shiftKey: true },
+    { defaultPrevented: true },
+    { isComposing: true },
+    { keyCode: 229 },
+    { getModifierState: () => true },
+    { shiftKey: true },
   ])('does not consume a protected or nonmatching event: %j', (extra) => {
     const e = event('F11', extra);
     const run = vi.fn();

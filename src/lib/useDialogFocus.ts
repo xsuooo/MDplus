@@ -15,7 +15,8 @@ export function useDialogFocus<T extends HTMLElement>(onClose: () => void) {
 
   useEffect(() => {
     if (!present) return;
-    previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    previousFocus.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const dialog = dialogRef.current;
     if (!dialog) return;
 
@@ -53,8 +54,10 @@ export function useDialogFocus<T extends HTMLElement>(onClose: () => void) {
     dialog.addEventListener('keydown', onKeyDown);
     return () => {
       dialog.removeEventListener('keydown', onKeyDown);
-      if (previousFocus.current?.isConnected
-        && (dialog.contains(document.activeElement) || document.activeElement === document.body)) {
+      if (
+        previousFocus.current?.isConnected &&
+        (dialog.contains(document.activeElement) || document.activeElement === document.body)
+      ) {
         previousFocus.current.focus({ preventScroll: true });
       }
     };

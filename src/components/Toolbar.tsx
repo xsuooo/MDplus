@@ -127,7 +127,11 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
       </div>
 
       <div className="toolbar-group toolbar-file-actions" aria-label="文件操作">
-        <button className="toolbar-btn toolbar-btn-labeled" onClick={onNew} title="新建文档 (Ctrl+N)">
+        <button
+          className="toolbar-btn toolbar-btn-labeled"
+          onClick={onNew}
+          title="新建文档 (Ctrl+N)"
+        >
           <IconNew size={16} />
           <span className="toolbar-btn-label">新建</span>
         </button>
@@ -169,8 +173,25 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
           </button>
           <Presence present={exportMenuOpen && hasActiveTab}>
             <div className="toolbar-dropdown-menu" role="menu" style={{ pointerEvents: 'auto' }}>
-              <button role="menuitem" onClick={() => { onExportHTML(); setExportMenuOpen(false); }}>导出为 HTML</button>
-              <button role="menuitem" title="在系统打印窗口选择 PDF 并确认保存；应用无法确认输出文件是否已保存" onClick={() => { onExportPDF(); setExportMenuOpen(false); }}>打印 / 另存为 PDF</button>
+              <button
+                role="menuitem"
+                onClick={() => {
+                  onExportHTML();
+                  setExportMenuOpen(false);
+                }}
+              >
+                导出为 HTML
+              </button>
+              <button
+                role="menuitem"
+                title="在系统打印窗口选择 PDF 并确认保存；应用无法确认输出文件是否已保存"
+                onClick={() => {
+                  onExportPDF();
+                  setExportMenuOpen(false);
+                }}
+              >
+                打印 / 另存为 PDF
+              </button>
             </div>
           </Presence>
         </div>
@@ -240,10 +261,20 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
       <div className="toolbar-sep" />
 
       <div className="window-controls">
-        <button className="window-btn" title="最小化" aria-label="最小化" onClick={() => void appWindow()?.minimize()}>
+        <button
+          className="window-btn"
+          title="最小化"
+          aria-label="最小化"
+          onClick={() => void appWindow()?.minimize()}
+        >
           <IconMinimize size={14} />
         </button>
-        <button className="window-btn" title="最大化 / 还原" aria-label="最大化 / 还原" onClick={() => void appWindow()?.toggleMaximize()}>
+        <button
+          className="window-btn"
+          title="最大化 / 还原"
+          aria-label="最大化 / 还原"
+          onClick={() => void appWindow()?.toggleMaximize()}
+        >
           <IconMaximize size={13} />
         </button>
         <button

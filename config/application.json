@@ -1,0 +1,26 @@
+{
+  "development": { "host": "127.0.0.1", "port": 1420, "hmrPort": 1421 },
+  "timing": {
+    "autoSaveMs": 1500,
+    "externalPollMs": 2000,
+    "imagePreparationMs": 150,
+    "recoveryMs": 1000,
+    "tabRenderMs": 120,
+    "windowPersistMs": 500,
+    "sourceHistoryCoalesceMs": 400,
+    "printLoadTimeoutMs": 30000
+  },
+  "limits": {
+    "textFileBytes": 33554432,
+    "imageFileBytes": 67108864,
+    "settingsFileBytes": 1048576,
+    "snapshotImageBytes": 268435456,
+    "recoveryImages": 128,
+    "recoveryRetentionMs": 604800000,
+    "imageCacheCharacters": 4194304,
+    "imageCacheEntries": 4,
+    "sourceHistory": 200,
+    "recentFiles": 10,
+    "chunkWarningKb": 1600
+  }
+}

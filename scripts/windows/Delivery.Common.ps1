@@ -100,8 +100,9 @@ function Get-ReleaseIdentity([string]$Repository) {
     if ($pkg.version -notmatch '^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$' -or @($versions | Where-Object { $_ -cne $pkg.version }).Count) {
         throw 'Version mismatch across npm, Cargo and Tauri manifests/locks.'
     }
-    $buildSource = Get-Content -LiteralPath (Join-Path $Repository 'src/lib/buildInfo.ts') -Raw
-    $build = [regex]::Match($buildSource, ' / ([A-Za-z0-9.-]+)`').Groups[1].Value
+    # Resolve the same injected identifier as Vite; source no longer contains a literal release marker.
+    $build = & node --experimental-strip-types (Join-Path $PSScriptRoot '../build-id.mjs') $Repository
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to resolve the build identifier.' }
     if (!$build) { throw 'Missing build identifier.' }
     return [pscustomobject]@{ version = $pkg.version; build = $build; packageName = "MDPlus_$($pkg.version)_x64-setup.exe" }
 }

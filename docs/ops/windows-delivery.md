@@ -39,7 +39,7 @@ in the build process environment and restored in `finally`. Existing artifacts
 are not used to hide a build failure. Rust and native acceptance remain separate
 gates; successful delivery is not a claim that all acceptance passed.
 
-The [source-manifest tool](<../../scripts/source-manifest.mjs>) captures byte-based
+The [source-manifest tool](../../scripts/source-manifest.mjs) captures byte-based
 input manifests before checks, after checks, and after compilation. Build publication
 requires all three digests to agree. The manifest includes selected untracked source,
 public assets, native configuration, tests and scripts; generated output, private
@@ -110,7 +110,7 @@ silently installed by these scripts. Results contain the requested cases and
 actual outcomes; zero/incomplete cases fail. CLI calls have a 45-second timeout;
 cleanup closes only that session and stops only the runner's server process.
 
-The [candidate smoke script](<../../tests/windows/candidate-smoke.ps1>) is a
+The [candidate smoke script](../../tests/windows/candidate-smoke.ps1) is a
 **separate, opt-in VM-only** check. Its Node/AST self-tests do not execute the
 candidate and do not prove native UIA or WinRT compatibility. Do not run it on the
 host or weaken execution policy. Provision the disposable Windows Sandbox and
@@ -120,7 +120,7 @@ It never installs, starts Sandbox, uses coordinate/keyboard fallback, or force-k
 processes. UIA text replacement is not IME coverage; DPI and actual PDF fidelity
 remain manual. A successful automatic smoke still sets `candidateAccepted=false`;
 cleanup only covers its root and recorded descendants, not an unobserved process
-tree. The current completion record is [here](<../completion-2026-11-02.md>).
+tree. The current completion record is [here](../completion-2026-11-02.md).
 
 After reviewing the report, create a **local** JSON approval receipt containing:
 

@@ -1,80 +1,530 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:mdplus:file-commands:v1",
-  "title": "MDPlus content-safe file IPC v1",
-  "description": "Additive commands. All property names are camelCase. Revisions are opaque byte-content identifiers, never mtimes. A null expectedRevision requires a missing target, not an unconditional overwrite. All errors reject the IPC Promise with FileError; consumers retain dirty content on every error. Legacy read_file/write_file remain available, but document saves must use write_document.",
+  "title": "MDPlus application IPC contract",
+  "description": "Application commands are allowed only in the local main window. Properties use camelCase. Document revisions identify bytes, never timestamps; null expectedRevision requires a missing target. File errors preserve unsaved content and retained copies. HTML export and recovery/settings have separate validation boundaries. See docs/ipc.md.",
   "x-commands": {
-    "read_document": { "request": "#/$defs/PathRequest", "response": "#/$defs/DocumentSnapshot", "error": "#/$defs/FileError" },
-    "document_revision": { "request": "#/$defs/PathRequest", "response": "#/$defs/RevisionState", "error": "#/$defs/FileError" },
-    "write_document": { "request": "#/$defs/WriteRequest", "response": "#/$defs/WriteReceipt", "error": "#/$defs/FileError" },
-    "save_image_asset": { "request": "#/$defs/ImageRequest", "response": "#/$defs/ImageReceipt", "error": "#/$defs/FileError" }
+    "read_document": {
+      "request": "#/$defs/PathRequest",
+      "response": "#/$defs/DocumentSnapshot",
+      "error": "#/$defs/FileError"
+    },
+    "document_revision": {
+      "request": "#/$defs/PathRequest",
+      "response": "#/$defs/RevisionState",
+      "error": "#/$defs/FileError"
+    },
+    "write_document": {
+      "request": "#/$defs/WriteRequest",
+      "response": "#/$defs/WriteReceipt",
+      "error": "#/$defs/FileError"
+    },
+    "save_image_asset": {
+      "request": "#/$defs/ImageRequest",
+      "response": "#/$defs/ImageReceipt",
+      "error": "#/$defs/FileError"
+    },
+    "export_html": {
+      "request": "#/$defs/ExportHtmlRequest",
+      "response": "#/$defs/Void",
+      "error": "#/$defs/StringError"
+    },
+    "read_image_file": {
+      "request": "#/$defs/ImageReadRequest",
+      "response": "#/$defs/ImageFile",
+      "error": "#/$defs/StringError"
+    },
+    "load_settings": {
+      "request": "#/$defs/EmptyRequest",
+      "response": "#/$defs/StoreResource",
+      "error": "#/$defs/StringError"
+    },
+    "take_startup_files": {
+      "request": "#/$defs/EmptyRequest",
+      "response": "#/$defs/Paths",
+      "error": "#/$defs/StringError"
+    },
+    "take_pending_open_files": {
+      "request": "#/$defs/EmptyRequest",
+      "response": "#/$defs/Paths",
+      "error": "#/$defs/StringError"
+    },
+    "cache_recovery_image": {
+      "request": "#/$defs/RecoveryImageRequest",
+      "response": "#/$defs/Void",
+      "error": "#/$defs/StringError"
+    },
+    "write_recovery_snapshot": {
+      "request": "#/$defs/RecoveryWriteRequest",
+      "response": "#/$defs/Void",
+      "error": "#/$defs/StringError"
+    },
+    "list_recovery_snapshots": {
+      "request": "#/$defs/RecoveryListRequest",
+      "response": "#/$defs/RecoveryEntries",
+      "error": "#/$defs/StringError"
+    },
+    "read_recovery_snapshot": {
+      "request": "#/$defs/RecoveryIdRequest",
+      "response": "#/$defs/RestoredSnapshot",
+      "error": "#/$defs/StringError"
+    },
+    "delete_recovery_snapshot": {
+      "request": "#/$defs/RecoveryIdRequest",
+      "response": "#/$defs/Void",
+      "error": "#/$defs/StringError"
+    }
   },
   "$defs": {
     "PathRequest": {
-      "type": "object", "additionalProperties": false, "required": ["path"],
-      "properties": { "path": { "type": "string", "minLength": 1 } }
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     },
     "DocumentSnapshot": {
-      "type": "object", "additionalProperties": false, "required": ["content", "revision", "mtime"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "content", "revision", "mtime"],
       "properties": {
-        "content": { "type": "string" },
-        "revision": { "type": "string", "minLength": 1 },
-        "mtime": { "type": "integer", "minimum": 0 }
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Validated absolute document target. The native canonical parent resolves relative paths and dot segments; Windows consumers compare case, separators and extended prefixes equivalently."
+        },
+        "content": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mtime": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "RevisionState": {
-      "type": "object", "additionalProperties": false, "required": ["revision", "mtime"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "revision", "mtime"],
       "description": "Both values are null only for NotFound. Permission, sharing, size, and invalid-path errors reject rather than pretending the file is missing. Does not decode the text, so it can inspect an explicitly selected replacement target.",
       "properties": {
-        "revision": { "type": ["string", "null"] },
-        "mtime": { "type": ["integer", "null"], "minimum": 0 }
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Validated absolute target, even when revision and mtime are null. Use this identity for Save As collision checks before writing."
+        },
+        "revision": {
+          "type": ["string", "null"]
+        },
+        "mtime": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        }
       }
     },
     "WriteRequest": {
-      "type": "object", "additionalProperties": false, "required": ["path", "content", "expectedRevision"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "content", "expectedRevision"],
       "properties": {
-        "path": { "type": "string", "minLength": 1 },
-        "content": { "type": "string" },
-        "expectedRevision": { "type": ["string", "null"], "description": "null means create only if absent. An existing target requires the exact revision last read or explicitly confirmed. There is no force flag." }
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "content": {
+          "type": "string"
+        },
+        "expectedRevision": {
+          "type": ["string", "null"],
+          "description": "null means create only if absent. An existing target requires the exact revision last read or explicitly confirmed. There is no force flag."
+        }
       }
     },
     "WriteReceipt": {
-      "type": "object", "additionalProperties": false, "required": ["revision", "mtime", "backupPath"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "revision", "mtime", "backupPath"],
       "description": "Only returned after verified commit. revision/mtime describe the committed local bytes, not a later unrelated file read. Verified commits clean temporary copies where possible; backupPath is non-null if a previous-version backup could not be removed. Uncertain/conflicted replacements reject with retained paths.",
       "properties": {
-        "revision": { "type": "string", "minLength": 1 },
-        "mtime": { "type": "integer", "minimum": 0 },
-        "backupPath": { "type": ["string", "null"] }
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Validated absolute target of the verified write."
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mtime": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "backupPath": {
+          "type": ["string", "null"]
+        }
       }
     },
     "ImageRequest": {
-      "type": "object", "additionalProperties": false, "required": ["docPath", "filename", "data"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["docPath", "filename", "data"],
       "description": "docPath may be a not-yet-created document in an existing directory. Backend validates basename and supported image bytes, creates only under sibling assets, and allocates the name exclusively. Only AlreadyExists retries.",
       "properties": {
-        "docPath": { "type": "string", "minLength": 1 },
-        "filename": { "type": "string", "minLength": 1 },
-        "data": { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 255 }, "maxItems": 67108864 }
+        "docPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "filename": {
+          "type": "string",
+          "minLength": 1
+        },
+        "data": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "maxItems": 67108864
+        }
       }
     },
     "ImageReceipt": {
-      "type": "object", "additionalProperties": false, "required": ["filename", "relativePath", "path"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["filename", "relativePath", "path"],
       "properties": {
-        "filename": { "type": "string", "minLength": 1 },
-        "relativePath": { "type": "string", "pattern": "^\\./assets/" },
-        "path": { "type": "string", "minLength": 1 }
+        "filename": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string",
+          "pattern": "^\\./assets/"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "FileError": {
-      "type": "object", "additionalProperties": false,
-      "required": ["code", "message", "path", "recoveryPath", "backupPath", "actualRevision", "writeState"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message",
+        "path",
+        "recoveryPath",
+        "backupPath",
+        "actualRevision",
+        "writeState"
+      ],
       "properties": {
-        "code": { "enum": ["CONFLICT", "INVALID_ENCODING", "INVALID_PATH", "TOO_LARGE", "BUSY", "IO_ERROR", "RECOVERY_REQUIRED"] },
-        "message": { "type": "string" },
-        "path": { "type": "string" },
-        "recoveryPath": { "type": ["string", "null"], "description": "Durable local draft when available; never a consumed staging filename." },
-        "backupPath": { "type": ["string", "null"], "description": "Retained previous on-disk bytes when available. Do not overwrite the target automatically to roll back a conflict." },
-        "actualRevision": { "type": ["string", "null"] },
-        "writeState": { "enum": ["unchanged", "committed", "unknown"], "description": "unchanged: this operation did not replace the target. committed: replacement occurred but must not be accepted as a clean save. unknown: OS replacement may have partially changed paths. Always keep dirty content and show retained paths." }
+        "code": {
+          "enum": [
+            "CONFLICT",
+            "INVALID_ENCODING",
+            "INVALID_PATH",
+            "TOO_LARGE",
+            "BUSY",
+            "IO_ERROR",
+            "RECOVERY_REQUIRED"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "recoveryPath": {
+          "type": ["string", "null"],
+          "description": "Durable local draft when available; never a consumed staging filename."
+        },
+        "backupPath": {
+          "type": ["string", "null"],
+          "description": "Retained previous on-disk bytes when available. Do not overwrite the target automatically to roll back a conflict."
+        },
+        "actualRevision": {
+          "type": ["string", "null"]
+        },
+        "writeState": {
+          "enum": ["unchanged", "committed", "unknown"],
+          "description": "unchanged: this operation did not replace the target. committed: replacement occurred but must not be accepted as a clean save. unknown: OS replacement may have partially changed paths. Always keep dirty content and show retained paths."
+        }
+      }
+    },
+    "EmptyRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {}
+    },
+    "Void": {
+      "type": "null"
+    },
+    "StringError": {
+      "type": "string"
+    },
+    "StoreResource": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "Paths": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "ExportHtmlRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "content"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Validated regular .html target. Other extensions and device paths are rejected."
+        },
+        "content": {
+          "type": "string",
+          "description": "UTF-8 bytes must fit config/application.json textFileBytes."
+        }
+      }
+    },
+    "ImageReadRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["docPath", "relativePath"],
+      "properties": {
+        "docPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Relative image beneath the validated regular document directory; absolute paths and escapes are rejected."
+        }
+      }
+    },
+    "ImageFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "mime", "data"],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "mime": {
+          "type": "string"
+        },
+        "data": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "maxItems": 67108864
+        }
+      }
+    },
+    "RecoveryIdRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "^[A-Za-z0-9-]+$"
+        }
+      }
+    },
+    "RecoveryImageRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "key", "data"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "^[A-Za-z0-9-]+$"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "data": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "maxItems": 67108864
+        }
+      }
+    },
+    "RecoveryImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["placeholder", "filename", "key"],
+      "properties": {
+        "placeholder": {
+          "type": "string"
+        },
+        "filename": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        }
+      }
+    },
+    "RecoverySnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "originalPath", "markdown", "images"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "^[A-Za-z0-9-]+$"
+        },
+        "title": {
+          "type": "string"
+        },
+        "originalPath": {
+          "type": ["string", "null"]
+        },
+        "markdown": {
+          "type": "string"
+        },
+        "images": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecoveryImage"
+          },
+          "maxItems": 128
+        },
+        "updatedAt": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "RecoveryWriteRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshot"],
+      "properties": {
+        "snapshot": {
+          "$ref": "#/$defs/RecoverySnapshot"
+        }
+      }
+    },
+    "RecoveryListRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["activeIds"],
+      "properties": {
+        "activeIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[A-Za-z0-9-]+$"
+          }
+        }
+      }
+    },
+    "RecoveryEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "originalPath", "updatedAt", "damaged"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "originalPath": {
+          "type": ["string", "null"]
+        },
+        "updatedAt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "damaged": {
+          "type": "boolean"
+        }
+      }
+    },
+    "RecoveryEntries": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/RecoveryEntry"
+      }
+    },
+    "RestoredImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["placeholder", "filename", "key", "data", "mime"],
+      "properties": {
+        "placeholder": {
+          "type": "string"
+        },
+        "filename": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "data": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "maxItems": 67108864
+        },
+        "mime": {
+          "type": "string"
+        }
+      }
+    },
+    "RestoredSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshot", "images"],
+      "properties": {
+        "snapshot": {
+          "$ref": "#/$defs/RecoverySnapshot"
+        },
+        "images": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RestoredImage"
+          }
+        }
       }
     }
   }

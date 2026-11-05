@@ -18,8 +18,25 @@
     "core:window:allow-set-focus",
     "core:window:allow-available-monitors",
     "core:window:allow-unminimize",
-    "dialog:default",
-    "opener:default",
-    "store:default"
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "dialog:allow-message",
+    "store:allow-get",
+    "store:allow-set",
+    "store:allow-save",
+    "allow-read-document",
+    "allow-document-revision",
+    "allow-write-document",
+    "allow-save-image-asset",
+    "allow-export-html",
+    "allow-read-image-file",
+    "allow-take-startup-files",
+    "allow-take-pending-open-files",
+    "allow-cache-recovery-image",
+    "allow-write-recovery-snapshot",
+    "allow-list-recovery-snapshots",
+    "allow-read-recovery-snapshot",
+    "allow-delete-recovery-snapshot",
+    "allow-load-settings"
   ]
 }

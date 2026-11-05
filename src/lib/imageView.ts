@@ -33,18 +33,38 @@ export function imageView(
       view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos)));
       view.focus();
     };
-    image.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); select(); });
+    image.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      select();
+    });
     button.addEventListener('mousedown', (event) => event.preventDefault());
     button.addEventListener('click', () => {
       select();
-      if (image.naturalWidth > 0) onPreview?.({ kind: 'image', src: image.src, title: image.alt || '图片',
-        width: image.naturalWidth, height: image.naturalHeight });
+      if (image.naturalWidth > 0)
+        onPreview?.({
+          kind: 'image',
+          src: image.src,
+          title: image.alt || '图片',
+          width: image.naturalWidth,
+          height: image.naturalHeight,
+        });
     });
-    image.addEventListener('load', () => { error.hidden = true; button.disabled = !onPreview; });
-    image.addEventListener('error', () => { error.hidden = false; button.disabled = true; });
+    image.addEventListener('load', () => {
+      error.hidden = true;
+      button.disabled = !onPreview;
+    });
+    image.addEventListener('error', () => {
+      error.hidden = false;
+      button.disabled = true;
+    });
     const render = (next: typeof node) => {
       const src = resolve(next.attrs.src);
-      if (image.getAttribute('src') !== src) { button.disabled = true; error.hidden = true; image.src = src; }
+      if (image.getAttribute('src') !== src) {
+        button.disabled = true;
+        error.hidden = true;
+        image.src = src;
+      }
       image.alt = next.attrs.alt ?? '';
       image.title = next.attrs.title ?? '';
     };
@@ -60,8 +80,12 @@ export function imageView(
         render(next);
         return true;
       },
-      destroy() { destroyed = true; unsubscribe?.(); },
-      stopEvent: (event) => event.target instanceof Element && !!event.target.closest('.md-media-controls'),
+      destroy() {
+        destroyed = true;
+        unsubscribe?.();
+      },
+      stopEvent: (event) =>
+        event.target instanceof Element && !!event.target.closest('.md-media-controls'),
       ignoreMutation: () => true,
     };
   };

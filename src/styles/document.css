@@ -29,9 +29,15 @@
   text-wrap: balance;
   scroll-margin-block: 24px;
 }
-.milkdown .ProseMirror > :first-child { margin-top: 0; }
-.milkdown .ProseMirror :is(h1, h2, h3, h4, h5) + :is(h2, h3, h4, h5, h6) { margin-top: 0.9em; }
-.milkdown .ProseMirror hr + :is(h1, h2, h3, h4, h5, h6) { margin-top: 1.1em; }
+.milkdown .ProseMirror > :first-child {
+  margin-top: 0;
+}
+.milkdown .ProseMirror :is(h1, h2, h3, h4, h5) + :is(h2, h3, h4, h5, h6) {
+  margin-top: 0.9em;
+}
+.milkdown .ProseMirror hr + :is(h1, h2, h3, h4, h5, h6) {
+  margin-top: 1.1em;
+}
 
 .milkdown .ProseMirror h1 {
   font-size: 1.75em;
@@ -50,7 +56,10 @@
 .milkdown .ProseMirror h5 {
   font-size: 1em;
 }
-.milkdown .ProseMirror h6 { font-size: 0.9375em; color: var(--text); }
+.milkdown .ProseMirror h6 {
+  font-size: 0.9375em;
+  color: var(--text);
+}
 
 .milkdown .ProseMirror a {
   color: var(--accent-text);
@@ -126,8 +135,13 @@
 .milkdown .ProseMirror li {
   margin: 0.3em 0;
 }
-.milkdown .ProseMirror li > p { margin-block: 0.25em; }
-.milkdown .ProseMirror li > ul, .milkdown .ProseMirror li > ol { margin-block: 0.25em; }
+.milkdown .ProseMirror li > p {
+  margin-block: 0.25em;
+}
+.milkdown .ProseMirror li > ul,
+.milkdown .ProseMirror li > ol {
+  margin-block: 0.25em;
+}
 .milkdown .ProseMirror li::marker {
   color: var(--text-muted);
 }
@@ -153,7 +167,11 @@
 }
 
 /* 表格 */
-.milkdown .ProseMirror .tableWrapper { max-width: 100%; overflow-x: auto; margin: 1.25em 0; }
+.milkdown .ProseMirror .tableWrapper {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 1.25em 0;
+}
 .milkdown .ProseMirror table {
   border-collapse: collapse;
   margin: 0;

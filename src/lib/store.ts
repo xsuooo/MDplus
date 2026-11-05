@@ -1,7 +1,9 @@
-import { Store } from '@tauri-apps/plugin-store';
+import { LIMITS } from '../config/constants';
+import { loadSettingsStore, type SettingsStore as Store } from '../services/settingsStore';
 import type { RecentFile, ThemeMode } from './types';
 import type { ShortcutBindings } from './shortcuts';
 import { sanitizeWindowState, type WindowState } from './windowState';
+import { pathKey } from './pathIdentity';
 import {
   sanitizeRecentFiles,
   sanitizeShortcutBindings,
@@ -9,14 +11,13 @@ import {
   sanitizeThemeMode,
 } from './validation';
 
-const STORE_FILE = 'mdplus-settings.json';
 const KEY_RECENT = 'recent-files';
 const KEY_THEME = 'theme-mode';
 const KEY_SOURCE_MODE = 'source-mode';
 const KEY_WINDOW_STATE = 'window-state';
 const KEY_OUTLINE_OPEN = 'outline-open';
 const KEY_SHORTCUTS = 'shortcuts';
-const MAX_RECENT = 10;
+const MAX_RECENT = LIMITS.recentFiles;
 
 export type { WindowState };
 
@@ -25,7 +26,12 @@ let writeQueue: Promise<void> = Promise.resolve();
 
 function getStore(): Promise<Store> {
   if (!storePromise) {
-    storePromise = Store.load(STORE_FILE);
+    const loading = loadSettingsStore().catch((error) => {
+      // Concurrent callers share this attempt; a transient failure permits retry.
+      if (storePromise === loading) storePromise = null;
+      throw error;
+    });
+    storePromise = loading;
   }
   return storePromise;
 }
@@ -38,6 +44,31 @@ function enqueueStoreWrite(task: (store: Store) => Promise<void>): Promise<void>
   });
   writeQueue = operation.catch(() => {});
   return operation;
+}
+
+export interface UserPreferences {
+  themeMode: ThemeMode;
+  sourceMode: boolean;
+  outlineOpen: boolean;
+  shortcuts: ShortcutBindings;
+}
+
+/** Startup recovery needs to distinguish a failed read from actual default values. */
+export async function loadPreferences(): Promise<UserPreferences> {
+  await writeQueue;
+  const store = await getStore();
+  const [theme, source, outline, shortcuts] = await Promise.all([
+    store.get(KEY_THEME),
+    store.get(KEY_SOURCE_MODE),
+    store.get(KEY_OUTLINE_OPEN),
+    store.get(KEY_SHORTCUTS),
+  ]);
+  return {
+    themeMode: sanitizeThemeMode(theme),
+    sourceMode: sanitizeSourceMode(source),
+    outlineOpen: typeof outline === 'boolean' ? outline : false,
+    shortcuts: sanitizeShortcutBindings(shortcuts),
+  };
 }
 
 /** 最近打开的文件列表 */
@@ -53,13 +84,19 @@ export async function getRecentFiles(): Promise<RecentFile[]> {
 }
 
 /** 把一次打开记录写入最近列表 */
-export async function pushRecentFile(path: string, name: string): Promise<void> {
+export async function pushRecentFile(
+  path: string,
+  name: string,
+  requestedPath = path,
+): Promise<void> {
   try {
     await enqueueStoreWrite(async (store) => {
       const list = await store.get<RecentFile[]>(KEY_RECENT);
       const next = [
         { path, name, time: Date.now() },
-        ...sanitizeRecentFiles(list, MAX_RECENT).filter((f) => f.path !== path),
+        ...sanitizeRecentFiles(list, MAX_RECENT).filter(
+          (f) => pathKey(f.path) !== pathKey(path) && pathKey(f.path) !== pathKey(requestedPath),
+        ),
       ].slice(0, MAX_RECENT);
       await store.set(KEY_RECENT, next);
     });
@@ -73,7 +110,10 @@ export async function removeRecentFile(path: string): Promise<void> {
   try {
     await enqueueStoreWrite(async (store) => {
       const list = await store.get<RecentFile[]>(KEY_RECENT);
-      await store.set(KEY_RECENT, sanitizeRecentFiles(list, MAX_RECENT).filter((f) => f.path !== path));
+      await store.set(
+        KEY_RECENT,
+        sanitizeRecentFiles(list, MAX_RECENT).filter((f) => pathKey(f.path) !== pathKey(path)),
+      );
     });
   } catch {
     // 忽略
@@ -93,11 +133,7 @@ export async function getThemeMode(): Promise<ThemeMode> {
 
 /** 写入主题偏好 */
 export async function setThemeMode(mode: ThemeMode): Promise<void> {
-  try {
-    await enqueueStoreWrite((store) => store.set(KEY_THEME, mode));
-  } catch {
-    // 忽略
-  }
+  await enqueueStoreWrite((store) => store.set(KEY_THEME, mode));
 }
 
 /** 读取源码模式偏好 */
@@ -113,11 +149,7 @@ export async function getSourceModePref(): Promise<boolean> {
 
 /** 写入源码模式偏好 */
 export async function setSourceModePref(enabled: boolean): Promise<void> {
-  try {
-    await enqueueStoreWrite((store) => store.set(KEY_SOURCE_MODE, enabled));
-  } catch {
-    // 忽略
-  }
+  await enqueueStoreWrite((store) => store.set(KEY_SOURCE_MODE, enabled));
 }
 
 /** 读取窗口状态 */
@@ -153,11 +185,7 @@ export async function getOutlineOpen(): Promise<boolean> {
 
 /** 保存大纲面板状态 */
 export async function setOutlineOpen(open: boolean): Promise<void> {
-  try {
-    await enqueueStoreWrite((store) => store.set(KEY_OUTLINE_OPEN, open));
-  } catch {
-    // 忽略
-  }
+  await enqueueStoreWrite((store) => store.set(KEY_OUTLINE_OPEN, open));
 }
 
 /** 读取快捷键绑定(损坏时回落到默认表) */
@@ -174,9 +202,5 @@ export async function getShortcutBindings(): Promise<ShortcutBindings> {
 
 /** 写入快捷键绑定 */
 export async function saveShortcutBindings(bindings: ShortcutBindings): Promise<void> {
-  try {
-    await enqueueStoreWrite((store) => store.set(KEY_SHORTCUTS, bindings));
-  } catch {
-    // 忽略
-  }
+  await enqueueStoreWrite((store) => store.set(KEY_SHORTCUTS, bindings));
 }

@@ -39,7 +39,10 @@ export function findTextMatches(text: string, keyword: string, caseSensitive: bo
   if (!keyword) return [];
   const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const pattern = new RegExp(escaped, caseSensitive ? 'gu' : 'giu');
-  return [...text.matchAll(pattern)].map((match) => ({ from: match.index, to: match.index + match[0].length }));
+  return [...text.matchAll(pattern)].map((match) => ({
+    from: match.index,
+    to: match.index + match[0].length,
+  }));
 }
 
 /** Adjacent text with different marks is one visible run; blocks and inline atoms remain boundaries. */
@@ -116,8 +119,16 @@ export const searchPlugin = new Plugin<SearchPluginState>({
       // 文档变化(输入等)时,若有关键词则实时重算
       if (prev.keyword && newState.doc !== _oldState.doc) {
         const matches = collectMatches(newState.doc, prev.keyword, prev.caseSensitive);
-        const current = matches.length ? Math.max(0, Math.min(prev.current, matches.length - 1)) : -1;
-        return { ...prev, decor: buildDecor(newState.doc, matches, current), matches, current, count: matches.length };
+        const current = matches.length
+          ? Math.max(0, Math.min(prev.current, matches.length - 1))
+          : -1;
+        return {
+          ...prev,
+          decor: buildDecor(newState.doc, matches, current),
+          matches,
+          current,
+          count: matches.length,
+        };
       }
       return prev;
     },
@@ -145,7 +156,11 @@ function getView(editor: { action<T>(fn: (ctx: Ctx) => T): T }) {
 }
 
 /** 触发一次查找 */
-export function runSearch(editor: { action<T>(fn: (ctx: Ctx) => T): T }, keyword: string, caseSensitive: boolean): void {
+export function runSearch(
+  editor: { action<T>(fn: (ctx: Ctx) => T): T },
+  keyword: string,
+  caseSensitive: boolean,
+): void {
   const view = getView(editor);
   if (!view) return;
   view.dispatch(view.state.tr.setMeta(searchPluginKey, { type: 'search', keyword, caseSensitive }));

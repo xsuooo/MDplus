@@ -9,7 +9,9 @@ describe('KaTeX security and rendering compatibility', () => {
   });
 
   it('keeps explicit untrusted rendering enforced', () => {
-    const html = katex.renderToString(String.raw`\href{javascript:alert(1)}{unsafe}`, { trust: false });
+    const html = katex.renderToString(String.raw`\href{javascript:alert(1)}{unsafe}`, {
+      trust: false,
+    });
     expect(html).not.toContain('href="javascript:');
   });
 

@@ -8,19 +8,25 @@ export function configureMarkdownSchemas(ctx: Ctx): void {
     const schema = original(ctx);
     return {
       ...schema,
-      parseDOM: [{
-        tag: 'img[src]',
-        getAttrs: (dom) => ({
-          src: dom.getAttribute('src') ?? '',
-          alt: dom.getAttribute('alt') ?? '',
-          title: dom.getAttribute('title') ?? '',
-        }),
-      }],
+      parseDOM: [
+        {
+          tag: 'img[src]',
+          getAttrs: (dom) => ({
+            src: dom.getAttribute('src') ?? '',
+            alt: dom.getAttribute('alt') ?? '',
+            title: dom.getAttribute('title') ?? '',
+          }),
+        },
+      ],
       parseMarkdown: {
         ...schema.parseMarkdown,
         runner: (state, node, type) => {
           // Remark uses null for an absent title; Milkdown 7.21.3 requires a string.
-          schema.parseMarkdown.runner(state, { ...node, alt: node.alt ?? '', title: node.title ?? '' }, type);
+          schema.parseMarkdown.runner(
+            state,
+            { ...node, alt: node.alt ?? '', title: node.title ?? '' },
+            type,
+          );
         },
       },
     };
@@ -42,10 +48,12 @@ export function configureMarkdownSchemas(ctx: Ctx): void {
               if (!attrs) return attrs;
               return {
                 ...attrs,
-                ...(listSchema === listItemSchema ? {
-                  label: attrs.label ?? '\u2022',
-                  listType: attrs.listType ?? 'bullet',
-                } : {}),
+                ...(listSchema === listItemSchema
+                  ? {
+                      label: attrs.label ?? '\u2022',
+                      listType: attrs.listType ?? 'bullet',
+                    }
+                  : {}),
                 spread: attrs.spread === true || attrs.spread === 'true',
               };
             },

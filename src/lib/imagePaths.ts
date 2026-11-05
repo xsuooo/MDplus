@@ -1,3 +1,4 @@
+import { LIMITS } from '../config/constants';
 import { parse, postprocess, preprocess } from 'micromark';
 import { gfm } from 'micromark-extension-gfm';
 import { math } from 'micromark-extension-math';
@@ -32,6 +33,12 @@ interface ImageReference {
   resource?: boolean;
 }
 
+// Share parsing between image preparation, recovery and save/rewrite. Bound both
+// entry count and retained source text so closing large tabs cannot grow a cache.
+const destinationCache = new Map<string, ImageDestination[]>();
+const MAX_CACHED_SOURCE_CHARS = LIMITS.imageCacheCharacters;
+let cachedSourceChars = 0;
+
 function destinationSpan(markdown: string, token: Token): ImageDestination {
   return {
     url: decodeString(markdown.slice(token.start.offset, token.end.offset)),
@@ -43,8 +50,16 @@ function destinationSpan(markdown: string, token: Token): ImageDestination {
 
 /** 与编辑器使用相同的 GFM / math 语法，避免跨表格单元格误判或重写公式。 */
 function imageDestinations(markdown: string): ImageDestination[] {
-  const events = postprocess(parse({ extensions: [gfm(), math()] })
-    .document().write(preprocess()(markdown, undefined, true)));
+  // Every CommonMark image form starts with ![. This conservative check skips
+  // full GFM/math parsing for image-free drafts, including reference definitions.
+  if (!markdown.includes('![')) return [];
+  const cached = destinationCache.get(markdown);
+  if (cached) return cached;
+  const events = postprocess(
+    parse({ extensions: [gfm(), math()] })
+      .document()
+      .write(preprocess()(markdown, undefined, true)),
+  );
   const media: ImageReference[] = [];
   const destinations: ImageDestination[] = [];
   const references = new Map<string, ImageReference[]>();
@@ -72,9 +87,17 @@ function imageDestinations(markdown: string): ImageDestination[] {
     if (token.type === 'label' && kind === 'exit' && media.length > 0) {
       media[media.length - 1].labelEnd = token.end.offset;
     }
-    if (token.type === 'definition' && kind === 'exit' && definitionDestination && !definitions.has(definitionLabel)) {
+    if (
+      token.type === 'definition' &&
+      kind === 'exit' &&
+      definitionDestination &&
+      !definitions.has(definitionLabel)
+    ) {
       // CommonMark 的重复定义采用第一个,不用后面的同名定义覆盖。
-      definitions.set(definitionLabel, { destination: definitionDestination, title: definitionTitle });
+      definitions.set(definitionLabel, {
+        destination: definitionDestination,
+        title: definitionTitle,
+      });
     }
     if (kind !== 'enter') continue;
     const current = media[media.length - 1];
@@ -102,7 +125,10 @@ function imageDestinations(markdown: string): ImageDestination[] {
         if (current) current.resource = true;
         break;
       case 'resourceDestinationString':
-        if (current?.type === 'image' && !media.slice(0, -1).some((item) => item.type === 'image')) {
+        if (
+          current?.type === 'image' &&
+          !media.slice(0, -1).some((item) => item.type === 'image')
+        ) {
           destinations.push(destinationSpan(markdown, token));
         }
         break;
@@ -124,7 +150,20 @@ function imageDestinations(markdown: string): ImageDestination[] {
       }
     } else destinations.push(definition.destination);
   }
-  return destinations.sort((a, b) => a.start - b.start);
+  destinations.sort((a, b) => a.start - b.start);
+  if (markdown.length <= MAX_CACHED_SOURCE_CHARS) {
+    while (
+      destinationCache.size >= LIMITS.imageCacheEntries ||
+      cachedSourceChars + markdown.length > MAX_CACHED_SOURCE_CHARS
+    ) {
+      const oldest = destinationCache.keys().next().value!;
+      cachedSourceChars -= oldest.length;
+      destinationCache.delete(oldest);
+    }
+    destinationCache.set(markdown, destinations);
+    cachedSourceChars += markdown.length;
+  }
+  return destinations;
 }
 
 /** 返回真实图片的解码 URL;加载、迁移和重写共用同一解析规则。 */
@@ -141,14 +180,18 @@ function encodeDestination(url: string, literal: boolean): string {
 /** 按源区间改写 destination;仅在共用定义时展开图片引用,保留普通链接。 */
 function imageReferenceEdits(markdown: string, references: PendingImageReference[]) {
   if (references.length === 0) return [];
-  const replacements = new Map(references.map((reference) => [reference.placeholder, reference.relativePath]));
+  const replacements = new Map(
+    references.map((reference) => [reference.placeholder, reference.relativePath]),
+  );
   return imageDestinations(markdown).flatMap((destination) => {
     const replacement = replacements.get(destination.url);
     if (replacement === undefined || replacement === destination.url) return [];
     let encoded = encodeDestination(replacement, destination.literal);
     if (destination.referenceTitle !== undefined) {
       // 解码后的换行和表格分隔符必须仍是字符引用，不能变成新的 Markdown 结构。
-      const title = destination.referenceTitle.replace(/&/g, '&amp;')
+      const title = destination.referenceTitle
+        .replace(/&/g, '&amp;')
+        // eslint-disable-next-line no-control-regex -- Encode control bytes instead of turning titles into Markdown structure.
         .replace(/[\u0000-\u001f\u007f|]/g, (character) => `&#${character.charCodeAt(0)};`)
         .replace(/[\\"]/g, '\\$&');
       encoded = `(${encoded}${title ? ` "${title}"` : ''})`;
@@ -157,17 +200,27 @@ function imageReferenceEdits(markdown: string, references: PendingImageReference
   });
 }
 
-export function rewriteImageReferences(markdown: string, references: PendingImageReference[]): string {
-  return imageReferenceEdits(markdown, references).reduceRight((text, edit) =>
-    text.slice(0, edit.start) + edit.text + text.slice(edit.end), markdown);
+export function rewriteImageReferences(
+  markdown: string,
+  references: PendingImageReference[],
+): string {
+  return imageReferenceEdits(markdown, references).reduceRight(
+    (text, edit) => text.slice(0, edit.start) + edit.text + text.slice(edit.end),
+    markdown,
+  );
 }
 
 /** Rebase a selection through individual image URL replacements, not one large diff. */
-export function mapImageOffset(markdown: string, references: PendingImageReference[], offset: number): number {
+export function mapImageOffset(
+  markdown: string,
+  references: PendingImageReference[],
+  offset: number,
+): number {
   let delta = 0;
   for (const edit of imageReferenceEdits(markdown, references)) {
     if (offset <= edit.start) break;
-    if (offset < edit.end) return edit.start + delta + Math.min(offset - edit.start, edit.text.length);
+    if (offset < edit.end)
+      return edit.start + delta + Math.min(offset - edit.start, edit.text.length);
     delta += edit.text.length - (edit.end - edit.start);
   }
   return Math.max(0, offset + delta);

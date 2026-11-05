@@ -3,13 +3,20 @@ export function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === 'string') return error;
   if (typeof error === 'object' && error !== null && 'message' in error) {
-    const details = error as { message: unknown; recoveryPath?: unknown; backupPath?: unknown; writeState?: unknown };
+    const details = error as {
+      message: unknown;
+      recoveryPath?: unknown;
+      backupPath?: unknown;
+      writeState?: unknown;
+    };
     const lines = [String(details.message)];
     if (details.writeState === 'committed' || details.writeState === 'unknown') {
       lines.push('磁盘保存结果需要核对；已保留编辑内容，请勿直接再次覆盖原文件。');
     }
-    if (typeof details.recoveryPath === 'string' && details.recoveryPath) lines.push(`本地编辑副本：${details.recoveryPath}`);
-    if (typeof details.backupPath === 'string' && details.backupPath) lines.push(`原磁盘版本：${details.backupPath}`);
+    if (typeof details.recoveryPath === 'string' && details.recoveryPath)
+      lines.push(`本地编辑副本：${details.recoveryPath}`);
+    if (typeof details.backupPath === 'string' && details.backupPath)
+      lines.push(`原磁盘版本：${details.backupPath}`);
     return lines.join('\n');
   }
   return String(error);

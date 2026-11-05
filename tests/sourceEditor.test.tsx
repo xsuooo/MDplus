@@ -15,15 +15,18 @@ vi.mock('react', async (original) => {
     memo: (component: unknown) => component,
     useRef: (initial: unknown) => {
       const slot = hooks.cursor++;
-      return hooks.slots[slot] ??= { current: initial };
+      return (hooks.slots[slot] ??= { current: initial });
     },
     useState: (initial: unknown) => {
       const slot = hooks.cursor++;
-      const state = hooks.slots[slot] ??= { value: initial };
-      return [state.value, (next: unknown) => {
-        if (state.value !== next) hooks.dirty = true;
-        state.value = next;
-      }];
+      const state = (hooks.slots[slot] ??= { value: initial });
+      return [
+        state.value,
+        (next: unknown) => {
+          if (state.value !== next) hooks.dirty = true;
+          state.value = next;
+        },
+      ];
     },
     useLayoutEffect: (effect: () => (() => void) | void, deps: unknown[]) => {
       const slot = hooks.cursor++;
@@ -48,8 +51,14 @@ function mount(initial = 'abc', saveImage = vi.fn(async () => 'image.png')) {
   let field: ReactElement<any> & { ref: { current: unknown } };
   const changes = vi.fn();
   const input = {
-    value, selectionStart: 0, selectionEnd: 0, isConnected: true,
-    focus: vi.fn(), scrollTop: 0, scrollLeft: 0, selectionDirection: 'none',
+    value,
+    selectionStart: 0,
+    selectionEnd: 0,
+    isConnected: true,
+    focus: vi.fn(),
+    scrollTop: 0,
+    scrollLeft: 0,
+    selectionDirection: 'none',
     setSelectionRange(start: number, end: number) {
       this.selectionStart = start;
       this.selectionEnd = end;
@@ -60,8 +69,15 @@ function mount(initial = 'abc', saveImage = vi.fn(async () => 'image.png')) {
       hooks.dirty = false;
       hooks.cursor = 0;
       const tree = SourceEditor({
-        tabId: 'tab', value, onChange: (next) => { value = next; changes(next); },
-        onClose: vi.fn(), onImagePaste: saveImage, imageRewrites,
+        tabId: 'tab',
+        value,
+        onChange: (next) => {
+          value = next;
+          changes(next);
+        },
+        onClose: vi.fn(),
+        onImagePaste: saveImage,
+        imageRewrites,
       }) as ReactElement<{ children: ReactElement[] }>;
       field = tree.props.children.find((child) => child.type === 'textarea')! as typeof field;
       input.value = field.props.value;
@@ -71,7 +87,8 @@ function mount(initial = 'abc', saveImage = vi.fn(async () => 'image.png')) {
   };
   render();
   return {
-    input, changes,
+    input,
+    changes,
     select(start: number, end = start) {
       input.setSelectionRange(start, end);
       field.props.onSelect();
@@ -83,7 +100,14 @@ function mount(initial = 'abc', saveImage = vi.fn(async () => 'image.png')) {
       render();
     },
     key(key: string, extra: Record<string, unknown> = {}) {
-      const nativeEvent = { key, ctrlKey: true, altKey: false, shiftKey: false, metaKey: false, ...extra };
+      const nativeEvent = {
+        key,
+        ctrlKey: true,
+        altKey: false,
+        shiftKey: false,
+        metaKey: false,
+        ...extra,
+      };
       const event = { ...nativeEvent, nativeEvent, preventDefault: vi.fn() };
       field.props.onKeyDown(event);
       render();
@@ -93,12 +117,22 @@ function mount(initial = 'abc', saveImage = vi.fn(async () => 'image.png')) {
       field.props[start ? 'onCompositionStart' : 'onCompositionEnd']({ currentTarget: input });
       render();
     },
-    external(text: string) { value = text; render(); },
-    migrate(text: string, references: PendingImageReference[]) { imageRewrites = references; value = text; render(); },
+    external(text: string) {
+      value = text;
+      render();
+    },
+    migrate(text: string, references: PendingImageReference[]) {
+      imageRewrites = references;
+      value = text;
+      render();
+    },
     async paste() {
       field.props.onPaste({
-        currentTarget: input, preventDefault: vi.fn(),
-        clipboardData: { items: [{ type: 'image/png', getAsFile: () => new File(['image'], 'test.png') }] },
+        currentTarget: input,
+        preventDefault: vi.fn(),
+        clipboardData: {
+          items: [{ type: 'image/png', getAsFile: () => new File(['image'], 'test.png') }],
+        },
       });
       for (let i = 0; i < 5; i++) await Promise.resolve();
       render();
@@ -149,7 +183,8 @@ describe('SourceEditor history', () => {
   });
 
   it.each([{ isComposing: true }, { keyCode: 229 }, { altKey: true }, { defaultPrevented: true }])(
-    'does not intercept protected undo: %j', (extra) => {
+    'does not intercept protected undo: %j',
+    (extra) => {
       const editor = mount();
       editor.change('abcd');
       expect(editor.key('z', extra).preventDefault).not.toHaveBeenCalled();
@@ -213,7 +248,15 @@ describe('SourceEditor history', () => {
 
   it('rejects an asynchronous image after editing and undoing back to the same text', async () => {
     let resolve!: (url: string) => void;
-    const editor = mount('abc', vi.fn(() => new Promise<string>((done) => { resolve = done; })));
+    const editor = mount(
+      'abc',
+      vi.fn(
+        () =>
+          new Promise<string>((done) => {
+            resolve = done;
+          }),
+      ),
+    );
     editor.select(3);
     await editor.paste();
     editor.change('abcd');
@@ -238,11 +281,17 @@ describe('SourceEditor history', () => {
     editor.change(original + ' edit');
     const at = editor.input.value.indexOf('中文');
     editor.select(at, at + 2);
-    const references = [{ placeholder: 'mdplus-image:one', relativePath: './assets/one.png' },
-      { placeholder: 'mdplus-image:two', relativePath: './assets/two.png' }];
-    const migrated = (original + ' edit').replace('mdplus-image:one', './assets/one.png').replace('mdplus-image:two', './assets/two.png');
+    const references = [
+      { placeholder: 'mdplus-image:one', relativePath: './assets/one.png' },
+      { placeholder: 'mdplus-image:two', relativePath: './assets/two.png' },
+    ];
+    const migrated = (original + ' edit')
+      .replace('mdplus-image:one', './assets/one.png')
+      .replace('mdplus-image:two', './assets/two.png');
     editor.migrate(migrated, references);
-    expect(editor.input.value.slice(editor.input.selectionStart, editor.input.selectionEnd)).toBe('中文');
+    expect(editor.input.value.slice(editor.input.selectionStart, editor.input.selectionEnd)).toBe(
+      '中文',
+    );
     editor.key('z');
     expect(editor.input.value).not.toContain('mdplus-image:');
     expect(editor.input.value).not.toContain(' edit');
@@ -252,6 +301,8 @@ describe('SourceEditor history', () => {
     const editor = mount('prefix current suffix');
     editor.input.setSelectionRange(15, 21);
     editor.external('prefix longer current suffix');
-    expect(editor.input.value.slice(editor.input.selectionStart, editor.input.selectionEnd)).toBe('suffix');
+    expect(editor.input.value.slice(editor.input.selectionStart, editor.input.selectionEnd)).toBe(
+      'suffix',
+    );
   });
 });

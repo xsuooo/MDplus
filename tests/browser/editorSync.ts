@@ -18,7 +18,8 @@ export async function runEditorSyncRegression(): Promise<string[]> {
     if (updates[updates.length - 1]?.markdown !== latest.markdown) {
       throw new Error('F01: document change was not published before dispatch returned');
     }
-    if (!latest.markdown.includes('last character')) throw new Error('Fixture did not edit the document');
+    if (!latest.markdown.includes('last character'))
+      throw new Error('Fixture did not edit the document');
     return ['document changes publish synchronously'];
   } finally {
     await editor.destroy();

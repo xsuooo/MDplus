@@ -2,15 +2,18 @@ import type { ReactElement } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('react', async (original) => ({
-  ...await original<typeof import('react')>(),
+  ...(await original<typeof import('react')>()),
   memo: (component: unknown) => component,
   useState: (value: unknown) => [value, vi.fn()],
   useRef: (current: unknown) => ({ current }),
   useEffect: () => {},
 }));
 vi.mock('../src/lib/search', () => ({
-  runSearch: vi.fn(), stepSearch: vi.fn(), clearSearch: vi.fn(),
-  getSearchCount: () => 0, subscribeSearchCount: vi.fn(),
+  runSearch: vi.fn(),
+  stepSearch: vi.fn(),
+  clearSearch: vi.fn(),
+  getSearchCount: () => 0,
+  subscribeSearchCount: vi.fn(),
 }));
 vi.mock('../src/lib/presence', () => ({ useIsPresent: () => true }));
 
@@ -19,11 +22,16 @@ import { SearchBar } from '../src/components/SearchBar';
 describe('search keyboard scope', () => {
   function press(key: string, extra = {}) {
     const close = vi.fn();
-    const tree = SearchBar({ editor: null, onClose: close }) as ReactElement<{ children: ReactElement[] }>;
+    const tree = SearchBar({ editor: null, onClose: close }) as ReactElement<{
+      children: ReactElement[];
+    }>;
     const field = tree.props.children.find((child) => child.type === 'input')! as ReactElement<any>;
     const event = {
-      key, defaultPrevented: false, nativeEvent: { key, ...extra },
-      preventDefault: vi.fn(), ...extra,
+      key,
+      defaultPrevented: false,
+      nativeEvent: { key, ...extra },
+      preventDefault: vi.fn(),
+      ...extra,
     };
     field.props.onKeyDown(event);
     return { close, event };
@@ -36,7 +44,8 @@ describe('search keyboard scope', () => {
   });
 
   it.each([{ isComposing: true }, { keyCode: 229 }, { defaultPrevented: true }])(
-    'preserves composition and already handled keys: %j', (extra) => {
+    'preserves composition and already handled keys: %j',
+    (extra) => {
       for (const key of ['Escape', 'Enter']) {
         const { close, event } = press(key, extra);
         expect(close).not.toHaveBeenCalled();

@@ -1,3 +1,4 @@
+/** Persisted bounds and display work areas use physical screen pixels. */
 export interface WindowState {
   width: number;
   height: number;
@@ -83,8 +84,11 @@ export function clampToVisibleDisplays(
   displays: readonly DisplayWorkArea[],
 ): WindowState {
   const usable = displays.filter(
-    (display) => isFiniteNumber(display.x) && isFiniteNumber(display.y)
-      && display.width > 0 && display.height > 0,
+    (display) =>
+      isFiniteNumber(display.x) &&
+      isFiniteNumber(display.y) &&
+      display.width > 0 &&
+      display.height > 0,
   );
   if (usable.length === 0) return state;
   if (usable.some((display) => isVisibleOn(state, display))) return state;

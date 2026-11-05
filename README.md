@@ -24,22 +24,22 @@ Windows 上的 Markdown 桌面编辑器，所见即所得。
 
 ## 快捷键
 
-| 快捷键 | 作用 |
-| --- | --- |
-| `Ctrl+N` | 新建文档 |
-| `Ctrl+O` | 打开文件 |
-| `Ctrl+S` | 保存 |
-| `Ctrl+F` | 查找 |
-| `Ctrl+Z` / `Ctrl+Y` | 撤销 / 重做 |
-| `Ctrl+W` | 关闭当前标签 |
-| `Ctrl+Tab` / `Ctrl+Shift+Tab` | 切换标签 |
+| 快捷键                        | 作用         |
+| ----------------------------- | ------------ |
+| `Ctrl+N`                      | 新建文档     |
+| `Ctrl+O`                      | 打开文件     |
+| `Ctrl+S`                      | 保存         |
+| `Ctrl+F`                      | 查找         |
+| `Ctrl+Z` / `Ctrl+Y`           | 撤销 / 重做  |
+| `Ctrl+W`                      | 关闭当前标签 |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | 切换标签     |
 
 ## 开发
 
-需要 Node.js 20.19+ 或 22.12+（推荐当前 LTS）、Rust stable、Visual Studio C++ 构建工具和 WebView2。目前仅支持 Windows。
+需要 Node.js 22.13+（推荐当前 LTS）、Rust stable、Visual Studio C++ 构建工具和 WebView2。目前仅支持 Windows。
 
 ```bash
-npm install
+npm ci
 npm run tauri dev
 ```
 
@@ -48,6 +48,8 @@ npm run tauri dev
 ```bash
 npm run check
 ```
+
+该入口包括 ESLint / React Hooks、格式、配置同步、TypeScript 和带覆盖率门槛的单测。原生、浏览器与交付检查见 [开发与质量检查](docs/development-quality.md)。
 
 构建 Windows 安装包：
 
@@ -65,6 +67,9 @@ Tauri · React · TypeScript · Vite · Milkdown · Mermaid · KaTeX
 
 - [更新日志](CHANGELOG.md) —— 每个版本的改进与修正
 - [维护说明](docs/update-notes.md) —— 图标生成、构建检查与常见问题排查
+- [开发与质量检查](docs/development-quality.md) —— 模块职责、回归检查、覆盖率门槛与共享配置
+- [IPC 契约与安全边界](docs/ipc.md) —— 原生命令、参数校验与失败语义
+- [Rust 依赖跟踪](docs/dependency-risk-2026-11-05.md) —— Windows 影响核查与升级窗口
 - [文件关联](docs/file-association.md) —— 设置默认打开方式与单实例打开机制
 
 ## 许可证

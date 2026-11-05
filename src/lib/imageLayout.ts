@@ -10,7 +10,8 @@ function imageParagraphs(doc: Node): DecorationSet {
     let imageOnly = true;
     node.forEach((child) => {
       if (child.type.name === 'image') hasImage = true;
-      else if (child.type.name !== 'hardbreak' && !(child.isText && !child.text?.trim())) imageOnly = false;
+      else if (child.type.name !== 'hardbreak' && !(child.isText && !child.text?.trim()))
+        imageOnly = false;
     });
     if (hasImage && imageOnly) {
       decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: 'md-image-only' }));
@@ -24,9 +25,12 @@ function imageParagraphs(doc: Node): DecorationSet {
 export const imageLayoutPlugin = new Plugin<DecorationSet>({
   state: {
     init: (_, state) => imageParagraphs(state.doc),
-    apply: (transaction, previous) => transaction.docChanged ? imageParagraphs(transaction.doc) : previous,
+    apply: (transaction, previous) =>
+      transaction.docChanged ? imageParagraphs(transaction.doc) : previous,
   },
   props: {
-    decorations(state) { return this.getState(state); },
+    decorations(state) {
+      return this.getState(state);
+    },
   },
 });
