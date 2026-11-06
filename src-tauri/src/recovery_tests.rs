@@ -49,7 +49,10 @@ fn unicode_paths_round_trip_and_cleanup() {
     save(&root.0, snapshot()).unwrap();
     let result = restore(&root.0, "test-id").unwrap();
     assert_eq!(result.snapshot.markdown, snapshot().markdown);
-    assert_eq!(result.images[0].data, SVG);
+    assert_eq!(
+        crate::image_data::decode_image(&result.images[0].data_base64).unwrap(),
+        SVG
+    );
     assert_eq!(list(&root.0, &[], now_ms()).unwrap().len(), 1);
     assert!(list(&root.0, &["test-id".into()], now_ms())
         .unwrap()
@@ -96,7 +99,13 @@ fn cached_image_identity_cannot_be_overwritten() {
     cache_image(&root.0, "test-id", "picture.svg", SVG).unwrap();
     save(&root.0, snapshot()).unwrap();
     assert!(cache_image(&root.0, "test-id", "picture.svg", b"<svg/>").is_err());
-    assert_eq!(restore(&root.0, "test-id").unwrap().images[0].data, SVG);
+    assert_eq!(
+        crate::image_data::decode_image(
+            &restore(&root.0, "test-id").unwrap().images[0].data_base64
+        )
+        .unwrap(),
+        SVG
+    );
 }
 #[test]
 fn traversal_and_unexpected_directories_are_never_deleted() {

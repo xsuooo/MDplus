@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client';
+import { createNativeMocks } from './nativeMocks';
 import App from '../../src/App';
 import { longDocument } from './continuity';
 import { typographyDocument } from './typography';
@@ -84,6 +85,7 @@ async function openDocument(text: string) {
 }
 
 export async function runInterfaceRegression(testCase: InterfaceCase): Promise<string> {
+  createNativeMocks().install();
   localStorage.removeItem('mdplus-body-font');
   localStorage.removeItem('mdplus-editor-font');
   const host = document.createElement('div');

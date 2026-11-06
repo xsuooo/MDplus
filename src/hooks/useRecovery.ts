@@ -7,7 +7,7 @@ import { scheduleImagePreparation } from '../lib/imagePreparation';
 import {
   clearRecovery,
   listRecovery,
-  restoreRecovery,
+  prepareRecovery,
   scheduleRecovery,
   type RecoveryEntry,
   type RecoveryStatus,
@@ -17,7 +17,23 @@ import type { Tab } from '../lib/types';
 import type { DocumentSession } from './useDocumentSession';
 
 export function useRecovery(session: DocumentSession) {
-  const { tabsRef, contentGenerations, imagePreparations, resolveContent, addTab } = session;
+  const {
+    tabs,
+    tabsRef,
+    contentGenerations,
+    saveGenerations,
+    imagePreparations,
+    resolveContent,
+    addTab,
+  } = session;
+  const alive = useRef(true);
+  const restoring = useRef(new Map<string, Promise<void>>());
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
   const [recoveryEntries, setRecoveryEntries] = useState<RecoveryEntry[]>([]);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [recoveryStates, setRecoveryStates] = useState<Record<string, RecoveryStatus>>({});
@@ -43,15 +59,19 @@ export function useRecovery(session: DocumentSession) {
       pending?.cancel();
       const work = scheduleImagePreparation(async () => {
         const prepared = path ? await prepareImageReferences(id, content, path) : null;
-        const current = tabsRef.current.find((candidate) => candidate.id === id);
-        return (
-          !!current &&
-          current.path === path &&
-          current.diskRevision === revision &&
-          (contentGenerations.current[id] ?? 0) === version &&
-          resolveContent(current) === content &&
-          (prepared?.commit() ?? true)
-        );
+        try {
+          const current = tabsRef.current.find((candidate) => candidate.id === id);
+          return (
+            !!current &&
+            current.path === path &&
+            current.diskRevision === revision &&
+            (contentGenerations.current[id] ?? 0) === version &&
+            resolveContent(current) === content &&
+            (prepared?.commit() ?? true)
+          );
+        } finally {
+          await prepared?.dispose();
+        }
       });
       const promise = work.promise.finally(() => {
         if (imagePreparations.current[id]?.promise === promise)
@@ -98,6 +118,19 @@ export function useRecovery(session: DocumentSession) {
     [contentGenerations],
   );
 
+  // Preserve disk-diverged buffers even when no new keystroke made them dirty.
+  // Schedule once per transition; unrelated tab renders must not starve debounce.
+  const retainedLocalIds = useRef(new Set<string>());
+  useEffect(() => {
+    const retained = new Set<string>();
+    for (const tab of tabs) {
+      if (!tab.preserveLocal) continue;
+      retained.add(tab.id);
+      if (!retainedLocalIds.current.has(tab.id)) protectDraft(tab);
+    }
+    retainedLocalIds.current = retained;
+  }, [tabs, protectDraft]);
+
   const refreshRecovery = useCallback(async () => {
     try {
       setRecoveryEntries(await listRecovery(tabsRef.current.map((tab) => tab.id)));
@@ -123,24 +156,49 @@ export function useRecovery(session: DocumentSession) {
   }, []);
 
   const handleRestore = useCallback(
-    async (id: string) => {
-      if (tabsRef.current.some((tab) => tab.id === id)) return;
-      const snapshot = await restoreRecovery(id);
-      addTab(
-        {
-          title: `${basename(snapshot.title).replace(/\.md$/i, '')} (恢复).md`,
-          path: null,
-          isNew: true,
-          content: snapshot.markdown,
-          recovered: true,
-        },
-        id,
-      );
-      setRecoveryEntries((entries) => entries.filter((entry) => entry.id !== id));
-      setRecoveryOpen(false);
-      setRecoveryStates((previous) => ({ ...previous, [id]: 'protected' }));
+    (id: string): Promise<void> => {
+      const pending = restoring.current.get(id);
+      if (pending) return pending;
+      if (tabsRef.current.some((tab) => tab.id === id)) return Promise.resolve();
+      const lifetime = saveGenerations.current[id] ?? 0;
+      const operation = (async () => {
+        const prepared = await prepareRecovery(id);
+        try {
+          if (
+            !alive.current ||
+            (saveGenerations.current[id] ?? 0) !== lifetime ||
+            tabsRef.current.some((tab) => tab.id === id)
+          )
+            return;
+          // Cache installation and tab publication share this synchronous commit.
+          // No await may separate them: a stale read must not reset a live cache.
+          if (!prepared.commit()) return;
+          const snapshot = prepared.snapshot;
+          addTab(
+            {
+              title: `${basename(snapshot.title).replace(/\.md$/i, '')} (恢复).md`,
+              path: null,
+              isNew: true,
+              content: snapshot.markdown,
+              recovered: true,
+            },
+            id,
+          );
+          setRecoveryEntries((entries) => entries.filter((entry) => entry.id !== id));
+          setRecoveryOpen(false);
+          setRecoveryStates((previous) => ({ ...previous, [id]: 'protected' }));
+        } finally {
+          await prepared.dispose();
+        }
+      })();
+      restoring.current.set(id, operation);
+      const finish = () => {
+        if (restoring.current.get(id) === operation) restoring.current.delete(id);
+      };
+      void operation.then(finish, finish);
+      return operation;
     },
-    [addTab, tabsRef],
+    [addTab, saveGenerations, tabsRef],
   );
 
   const handleRecoveryRemoved = useCallback((id: string) => {

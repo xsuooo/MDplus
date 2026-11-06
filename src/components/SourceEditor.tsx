@@ -13,10 +13,19 @@ import { IconCode } from './icons';
 import { mapTextOffset } from '../lib/textPosition';
 import { mapSourceScroll } from '../lib/sourcePosition';
 import {
+  getImageUrls,
   mapImageOffset,
   rewriteImageReferences,
   type PendingImageReference,
 } from '../lib/imagePaths';
+import {
+  imageIdentityReferences,
+  imageSourceReferences,
+  getPendingImages,
+  imageReferencesChanged,
+  registerImageReachability,
+  settleImageInsertion,
+} from '../lib/imageOps';
 
 interface SourceEditorProps {
   tabId: string;
@@ -33,6 +42,13 @@ interface Snapshot {
   text: string;
   start: number;
   end: number;
+}
+function rewriteSnapshot(snapshot: Snapshot, references: PendingImageReference[]): Snapshot {
+  return {
+    text: rewriteImageReferences(snapshot.text, references),
+    start: mapImageOffset(snapshot.text, references, snapshot.start),
+    end: mapImageOffset(snapshot.text, references, snapshot.end),
+  };
 }
 
 /** 撤销栈上限:源码模式通常只改几段文字,200 条足够且不会无限吃内存 */
@@ -77,6 +93,18 @@ export const SourceEditor = memo(function SourceEditor({
     return () => onRegister?.(tabId, null);
   }, [tabId, onRegister]);
 
+  useLayoutEffect(
+    () =>
+      registerImageReachability(tabId, () => {
+        const urls = new Set(getImageUrls(pushed.current));
+        for (const snapshot of [...history.current, ...future.current])
+          for (const url of getImageUrls(snapshot.text)) urls.add(url);
+        return urls;
+      }),
+    [tabId],
+  );
+  useLayoutEffect(() => imageReferencesChanged(tabId), [tabId, draft, value, imageRewrites]);
+
   useLayoutEffect(() => {
     generation.current += 1;
     return () => {
@@ -89,11 +117,13 @@ export const SourceEditor = memo(function SourceEditor({
     const references = imageRewrites !== lastRewrites.current ? imageRewrites : undefined;
     lastRewrites.current = imageRewrites;
     if (references) {
-      const rebase = (snapshot: Snapshot): Snapshot => ({
-        text: rewriteImageReferences(snapshot.text, references),
-        start: mapImageOffset(snapshot.text, references, snapshot.start),
-        end: mapImageOffset(snapshot.text, references, snapshot.end),
-      });
+      const identities = imageIdentityReferences(tabId);
+      const stableTokens = new Set(getPendingImages(tabId).map((image) => image.placeholder));
+      const historyReferences = references.filter(
+        (reference) => !stableTokens.has(reference.placeholder),
+      );
+      const rebase = (snapshot: Snapshot): Snapshot =>
+        rewriteSnapshot(rewriteSnapshot(snapshot, historyReferences), identities);
       history.current = history.current.map(rebase);
       future.current = future.current.map(rebase);
     }
@@ -125,7 +155,7 @@ export const SourceEditor = memo(function SourceEditor({
     lastPushAt.current = 0;
     lastInputType.current = '';
     restoreScroll.current = true;
-  }, [value, imageRewrites, active]);
+  }, [tabId, value, imageRewrites, active]);
 
   useLayoutEffect(() => {
     if (!active) return;
@@ -152,11 +182,13 @@ export const SourceEditor = memo(function SourceEditor({
     }
   }, [draft]);
 
-  const currentSnapshot = (): Snapshot => ({
-    text: draft,
-    start: selectionRef.current.start,
-    end: selectionRef.current.end,
-  });
+  const currentSnapshot = (): Snapshot =>
+    rewriteSnapshot(
+      { text: draft, start: selectionRef.current.start, end: selectionRef.current.end },
+      imageIdentityReferences(tabId),
+    );
+  const visibleSnapshot = (snapshot: Snapshot): Snapshot =>
+    rewriteSnapshot(snapshot, imageSourceReferences(tabId));
 
   const pushHistory = () => {
     const now = Date.now();
@@ -168,17 +200,20 @@ export const SourceEditor = memo(function SourceEditor({
   };
 
   const applySnapshot = (snapshot: Snapshot) => {
+    const visible = visibleSnapshot(snapshot);
     generation.current += 1;
-    pushed.current = snapshot.text;
-    pendingSelection.current = { start: snapshot.start, end: snapshot.end };
-    setDraft(snapshot.text);
-    onChange(snapshot.text);
+    pushed.current = visible.text;
+    pendingSelection.current = { start: visible.start, end: visible.end };
+    setDraft(visible.text);
+    onChange(visible.text);
+    imageReferencesChanged(tabId);
   };
 
   const handleUndo = () => {
     let snapshot = history.current.pop();
     // 取消组字可能留下同文本快照,不能让下一次撤销变成无动作。
-    while (snapshot?.text === pushed.current) snapshot = history.current.pop();
+    while (snapshot && visibleSnapshot(snapshot).text === pushed.current)
+      snapshot = history.current.pop();
     if (!snapshot) return;
     future.current.push(currentSnapshot());
     lastPushAt.current = 0;
@@ -247,16 +282,19 @@ export const SourceEditor = memo(function SourceEditor({
     if (!onImagePaste) return;
     const current = generation.current;
     rememberSelection();
+    let pasted = '';
     void pasteSourceImage(
       event,
       event.currentTarget,
-      (file) => onImagePaste(tabId, file),
+      async (file) => (pasted = await onImagePaste(tabId, file)),
       (text, caret) => {
         handleChange(text, 'insertFromPaste');
         pendingSelection.current = { start: caret, end: caret };
       },
       () => generation.current === current,
-    );
+    ).finally(() => {
+      if (pasted) settleImageInsertion(tabId, pasted);
+    });
   };
 
   return (

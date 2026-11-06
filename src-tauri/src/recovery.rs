@@ -44,10 +44,11 @@ pub struct Entry {
 }
 
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RestoredImage {
     #[serde(flatten)]
     image: RecoveryImage,
-    data: Vec<u8>,
+    data_base64: String,
     mime: String,
 }
 
@@ -262,7 +263,7 @@ fn restore(root: &Path, id: &str) -> Result<Restored, String> {
         let mime = image_mime(&path, &data)?.to_owned();
         images.push(RestoredImage {
             image: image.clone(),
-            data,
+            data_base64: crate::image_data::encode_image(&data),
             mime,
         });
     }
@@ -357,8 +358,9 @@ pub async fn cache_recovery_image(
     app: tauri::AppHandle,
     id: String,
     key: String,
-    data: Vec<u8>,
+    data_base64: String,
 ) -> Result<(), String> {
+    let data = crate::image_data::decode_image(&data_base64).map_err(|error| error.to_string())?;
     let _lock = IO_LOCK.lock().map_err(|_| "recovery storage lock failed")?;
     cache_image(&root(&app)?, &id, &key, &data)
 }

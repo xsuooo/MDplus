@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
-import { pathKey } from './pathIdentity';
 import { join, dirname } from '@tauri-apps/api/path';
+import { LIMITS } from '../config/constants';
+import { pathKey } from './pathIdentity';
 import {
   getImageUrls,
   isRelativeImageUrl,
@@ -9,27 +10,44 @@ import {
 } from './imagePaths';
 import { basename, readImageFile, type ImageReceipt } from './fileOps';
 
-interface PendingImage extends PendingImageReference {
+/** Public snapshots contain identities, never a second copy of the image bytes. */
+export interface PendingImage extends PendingImageReference {
   filename: string;
-  data: number[];
-  preview: string;
-  /**
-   * 已在磁盘上的图片,记录它的引用与绝对路径;粘贴图片首次保存后也登记来源。
-   * 保存回同一个目录时按原引用还原(既不复制也不改写路径);只有另存为到
-   * 别的目录、原引用会失效时才复制进 assets。粘贴进来的新图没有这个字段。
-   */
+  mime: string;
+  byteLength: number;
   source?: { url: string; absolutePath: string };
 }
-
+interface ImageBacking {
+  key: string;
+  mime: string;
+  byteLength: number;
+  digest: string;
+  owners: number;
+  /** A process-owned, read-only native URL, not a retained JS binary/data URL. */
+  previewUrl: string;
+}
+interface CachedImage extends PendingImage {
+  backing: ImageBacking;
+  inserting?: boolean;
+}
 interface ImageCache {
-  images: Map<string, PendingImage>;
+  images: Map<string, CachedImage>;
   aliases: Map<string, string>;
   generation: number;
   docPath: string | null;
 }
 const imageCaches = new Map<string, ImageCache>();
 const imageListeners = new Map<string, Set<() => void>>();
-
+const imageRoots = new Map<string, Set<() => Iterable<string>>>();
+const collectionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+// Serialize complete read/encode/write operations, not just individual invokes:
+// otherwise many tabs can keep a 64 MiB base64 result alive while queued to write.
+let imageIOTail: Promise<unknown> = Promise.resolve();
+function imageIO<T>(operation: () => Promise<T>): Promise<T> {
+  const next = imageIOTail.catch(() => {}).then(operation);
+  imageIOTail = next.catch(() => {});
+  return next;
+}
 function cacheFor(tabId: string): ImageCache {
   let cache = imageCaches.get(tabId);
   if (!cache) {
@@ -38,7 +56,6 @@ function cacheFor(tabId: string): ImageCache {
   }
   return cache;
 }
-
 function notifyImages(tabId: string): void {
   for (const listener of [...(imageListeners.get(tabId) ?? [])]) {
     try {
@@ -48,24 +65,84 @@ function notifyImages(tabId: string): void {
     }
   }
 }
-
 function changed(tabId: string, cache: ImageCache, notify = true): void {
   cache.generation += 1;
   if (notify) notifyImages(tabId);
 }
-
-/** Preview-only subscription: never dispatches an editor transaction. */
+/** Preview-only subscription: never publishes an editor content update. */
 export function subscribeImageSources(tabId: string, listener: () => void): () => void {
   let listeners = imageListeners.get(tabId);
-  if (!listeners) {
-    listeners = new Set();
-    imageListeners.set(tabId, listeners);
-  }
+  if (!listeners) imageListeners.set(tabId, (listeners = new Set()));
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
     if (!listeners.size && imageListeners.get(tabId) === listeners) imageListeners.delete(tabId);
   };
+}
+
+/** Include current text AND both undo/redo branches. Missing roots retain conservatively. */
+export function registerImageReachability(
+  tabId: string,
+  collect: () => Iterable<string>,
+): () => void {
+  let roots = imageRoots.get(tabId);
+  if (!roots) imageRoots.set(tabId, (roots = new Set()));
+  roots.add(collect);
+  return () => {
+    roots.delete(collect);
+    if (!roots.size && imageRoots.get(tabId) === roots) imageRoots.delete(tabId);
+  };
+}
+export function imageReferencesChanged(tabId: string): void {
+  clearTimeout(collectionTimers.get(tabId));
+  collectionTimers.set(
+    tabId,
+    setTimeout(() => {
+      collectionTimers.delete(tabId);
+      void collectUnusedImages(tabId).catch((error) => console.error('图片暂存回收失败', error));
+    }, 1000),
+  );
+}
+async function releaseBacking(backing: ImageBacking): Promise<void> {
+  if (--backing.owners > 0) return;
+  await invoke('discard_stashed_images', { keys: [backing.key] });
+}
+function quietlyRelease(backing: ImageBacking): void {
+  void releaseBacking(backing).catch((error) => console.error('释放图片暂存失败', error));
+}
+/** Reclaim only images proven unreachable by every live editor and capture lease. */
+export async function collectUnusedImages(tabId?: string): Promise<void> {
+  const discarded: Promise<void>[] = [];
+  for (const [id, cache] of imageCaches) {
+    if (tabId !== undefined && tabId !== id) continue;
+    const roots = imageRoots.get(id);
+    if (!roots?.size) continue;
+    const reachable = new Set<string>();
+    try {
+      for (const collect of roots) {
+        for (const url of collect()) reachable.add(cache.aliases.get(url) ?? url);
+      }
+    } catch {
+      // An editor transitioning between modes is not proof that its history is gone.
+      continue;
+    }
+    let removed = false;
+    for (const [token, image] of cache.images) {
+      if (image.inserting || image.backing.owners > 1 || reachable.has(token)) continue;
+      removed = true;
+      cache.images.delete(token);
+      for (const [url, owner] of cache.aliases) if (owner === token) cache.aliases.delete(url);
+      discarded.push(releaseBacking(image.backing));
+    }
+    if (removed) changed(id, cache, false);
+  }
+  await Promise.all(discarded);
+}
+/** Call after insertion, or after a paste is rejected by its generation check. */
+export function settleImageInsertion(tabId: string, placeholder: string): void {
+  const image = imageCaches.get(tabId)?.images.get(placeholder);
+  if (image) image.inserting = false;
+  imageReferencesChanged(tabId);
 }
 
 const IMAGE_EXTENSIONS: Record<string, string> = {
@@ -75,106 +152,273 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
   'image/svg+xml': 'svg',
   'image/webp': 'webp',
 };
-
-function imageExtension(blob: Blob): string {
-  const mime = blob.type.split(';', 1)[0].toLowerCase();
-  return IMAGE_EXTENSIONS[mime] ?? 'bin';
-}
-
 function imageId(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
-
-function imageFilename(extension: string): string {
-  return `image-${imageId()}.${extension}`;
+function imageByteLength(dataBase64: string): number {
+  if (typeof dataBase64 !== 'string' || dataBase64.length % 4 !== 0)
+    throw new Error('图片编码无效');
+  const length =
+    (dataBase64.length / 4) * 3 -
+    (dataBase64.endsWith('==') ? 2 : dataBase64.endsWith('=') ? 1 : 0);
+  if (length <= 0 || length > LIMITS.imageFileBytes) throw new Error('图片为空或超过 64 MiB 限制');
+  return length;
 }
-
-async function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ''));
-    reader.onerror = () => reject(reader.error ?? new Error('读取图片失败'));
-    reader.readAsDataURL(blob);
-  });
-}
-
-/** 将字节数组编码为 data URL(分块编码,避免大数组展开导致栈溢出)。 */
-function bytesToDataUrl(bytes: Uint8Array, mime: string): string {
-  const CHUNK = 0x8000;
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+function decodeImage(dataBase64: string): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(imageByteLength(dataBase64));
+  // Avoid a second, image-sized binary JS string from atob.
+  let offset = 0;
+  for (let from = 0; from < dataBase64.length; from += 0x8000) {
+    const binary = atob(dataBase64.slice(from, from + 0x8000));
+    for (let i = 0; i < binary.length; i++) bytes[offset++] = binary.charCodeAt(i);
   }
-  return `data:${mime};base64,${btoa(binary)}`;
+  if (offset !== bytes.byteLength) throw new Error('图片编码无效');
+  return bytes;
 }
-
-function rememberPendingImage(tabId: string, image: PendingImage): void {
-  const cache = cacheFor(tabId);
-  cache.images.set(image.placeholder, image);
-  if (image.source) cache.aliases.set(image.source.url, image.placeholder);
-  changed(tabId, cache);
+function encodeImage(bytes: Uint8Array): string {
+  const chunks: string[] = [];
+  // Multiple of three: only the last independently encoded block has padding.
+  for (let offset = 0; offset < bytes.length; offset += 0x6000)
+    chunks.push(btoa(String.fromCharCode(...bytes.subarray(offset, offset + 0x6000))));
+  return chunks.join('');
 }
-
+async function digestImage(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  return [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+async function stashImage(
+  filename: string,
+  dataBase64: string,
+  existing?: ImageBacking,
+): Promise<ImageBacking> {
+  const byteLength = imageByteLength(dataBase64);
+  // At most one transfer/hash operation runs globally. No persistent image bytes
+  // remain in JS: two raw-size working buffers fit the configured 128 MiB budget,
+  // while the compact base64 IPC string is itself bounded by the 64 MiB limit.
+  if (byteLength * 2 > LIMITS.imageMemoryBytes) throw new Error('图片传输内存预算不足');
+  const digest = await digestImage(decodeImage(dataBase64));
+  if (existing?.digest === digest && existing.owners > 0) {
+    existing.owners += 1;
+    return existing;
+  }
+  const stashed = await invoke<{ key: string; mime: string; previewUrl: string }>('stash_image', {
+    filename,
+    dataBase64,
+  });
+  return {
+    key: stashed.key,
+    mime: stashed.mime,
+    previewUrl: stashed.previewUrl,
+    byteLength,
+    digest,
+    owners: 1,
+  };
+}
+function snapshotImage(cache: ImageCache, image: CachedImage): PendingImage {
+  const { placeholder, relativePath, filename, mime, byteLength } = image;
+  // A retired token owns its immutable stash, never somebody else's current disk URL.
+  const source =
+    image.source && cache.aliases.get(image.source.url) === placeholder
+      ? { ...image.source }
+      : undefined;
+  return { placeholder, relativePath, filename, mime, byteLength, source };
+}
 export function getPendingImages(tabId: string): PendingImage[] {
   const cache = imageCaches.get(tabId);
-  if (!cache) return [];
-  return [...cache.images.values()].map((image) => {
-    // A retired token still owns its immutable bytes, but its old disk URL may
-    // now refer to another image. Undo must copy those bytes rather than reuse it.
-    if (image.source && cache.aliases.get(image.source.url) !== image.placeholder) {
-      return { ...image, source: undefined };
-    }
-    return image;
-  });
+  return cache ? [...cache.images.values()].map((image) => snapshotImage(cache, image)) : [];
 }
-
-export function restorePendingImages(
-  tabId: string,
-  images: {
-    placeholder: string;
-    filename: string;
-    data: number[];
-    mime: string;
-  }[],
-): void {
-  const cache: ImageCache = { images: new Map(), aliases: new Map(), generation: 0, docPath: null };
-  for (const image of images)
-    cache.images.set(image.placeholder, {
-      ...image,
-      relativePath: `./assets/${image.filename}`,
-      preview: bytesToDataUrl(new Uint8Array(image.data), image.mime),
+export interface PendingImageLease {
+  images: PendingImage[];
+  readDataBase64: (placeholder: string) => Promise<string>;
+  withDataBase64: <T>(
+    placeholder: string,
+    consume: (dataBase64: string) => Promise<T>,
+  ) => Promise<T>;
+  release: () => void;
+}
+/** Freeze aliases synchronously and pin disk bytes across debounce, close and GC. */
+export function capturePendingImages(tabId: string, urls?: Iterable<string>): PendingImageLease {
+  const cache = imageCaches.get(tabId);
+  const wanted = urls === undefined ? undefined : new Set(urls);
+  const selected = (cache ? [...cache.images.values()] : []).filter(
+    (image) =>
+      !wanted ||
+      wanted.has(image.placeholder) ||
+      (image.source &&
+        cache!.aliases.get(image.source.url) === image.placeholder &&
+        wanted.has(image.source.url)),
+  );
+  const backings = new Map(selected.map((image) => [image.placeholder, image.backing]));
+  for (const backing of backings.values()) backing.owners += 1;
+  let released = false;
+  const withDataBase64 = <T>(placeholder: string, consume: (dataBase64: string) => Promise<T>) => {
+    const backing = backings.get(placeholder);
+    if (released || !backing) return Promise.reject(new Error('图片读取租约已释放或身份不匹配'));
+    // An operation keeps its own pin even if its caller cancels/releases while queued.
+    backing.owners += 1;
+    return imageIO(async () => {
+      try {
+        const data = await invoke<{ dataBase64: string; mime: string }>('read_stashed_image', {
+          key: backing.key,
+        });
+        if (imageByteLength(data.dataBase64) !== backing.byteLength)
+          throw new Error('图片暂存数据已损坏');
+        return await consume(data.dataBase64);
+      } finally {
+        await releaseBacking(backing);
+      }
     });
+  };
+  return {
+    images: selected.map((image) => snapshotImage(cache!, image)),
+    withDataBase64,
+    readDataBase64: (placeholder) => withDataBase64(placeholder, async (data) => data),
+    release: () => {
+      if (released) return;
+      released = true;
+      for (const backing of backings.values()) quietlyRelease(backing);
+      imageReferencesChanged(tabId);
+    },
+  };
+}
+
+export interface StagedPendingImages {
+  dispose: () => Promise<void>;
+}
+const restoredStages = new WeakMap<
+  StagedPendingImages,
+  { images: CachedImage[]; consumed: boolean }
+>();
+/** Stage outside the recovery commit; no partially decoded cache can become visible. */
+export async function stagePendingImages(
+  images: { placeholder: string; filename: string; dataBase64: string; mime: string }[],
+): Promise<StagedPendingImages> {
+  const state = { images: [] as CachedImage[], consumed: false };
+  const stage: StagedPendingImages = {
+    dispose: async () => {
+      if (state.consumed) return;
+      state.consumed = true;
+      await Promise.all(state.images.map((image) => releaseBacking(image.backing)));
+    },
+  };
+  restoredStages.set(stage, state);
+  try {
+    const tokens = new Set<string>();
+    for (const image of images) {
+      if (!/^mdplus-image:[\w-]+$/i.test(image.placeholder) || tokens.has(image.placeholder))
+        throw new Error('恢复图片身份无效或重复');
+      tokens.add(image.placeholder);
+      const backing = await imageIO(() => stashImage(image.filename, image.dataBase64));
+      state.images.push({
+        placeholder: image.placeholder,
+        filename: image.filename,
+        relativePath: `./assets/${image.filename}`,
+        mime: backing.mime,
+        byteLength: backing.byteLength,
+        backing,
+      });
+    }
+    return stage;
+  } catch (error) {
+    await stage.dispose();
+    throw error;
+  }
+}
+/** Synchronous and atomic: the caller publishes its tab in the same turn. */
+export function restorePendingImages(tabId: string, stage: StagedPendingImages): void {
+  const state = restoredStages.get(stage);
+  if (!state || state.consumed) throw new Error('恢复图片准备已失效');
+  const cache: ImageCache = {
+    images: new Map(state.images.map((image) => [image.placeholder, image])),
+    aliases: new Map(),
+    generation: 0,
+    docPath: null,
+  };
+  const previous = imageCaches.get(tabId);
+  state.consumed = true;
   imageCaches.set(tabId, cache);
+  if (previous) for (const image of previous.images.values()) quietlyRelease(image.backing);
   notifyImages(tabId);
 }
-
 export function clearPendingImages(tabId: string): void {
+  const cache = imageCaches.get(tabId);
   imageCaches.delete(tabId);
+  clearTimeout(collectionTimers.get(tabId));
+  collectionTimers.delete(tabId);
+  if (cache) for (const image of cache.images.values()) quietlyRelease(image.backing);
   notifyImages(tabId);
 }
-
+/** Canonical identities for editor history; source text itself need not be rewritten. */
+export function imageIdentityReferences(tabId: string): PendingImageReference[] {
+  return [...(imageCaches.get(tabId)?.aliases ?? [])].map(([url, token]) => ({
+    placeholder: url,
+    relativePath: token,
+  }));
+}
+export function resolveImageIdentity(tabId: string, url: string): string {
+  return imageCaches.get(tabId)?.aliases.get(url) ?? url;
+}
+/** Only expose a raw URL while it still names this exact immutable image. */
+export function resolveImageReference(tabId: string, token: string): string {
+  const cache = imageCaches.get(tabId);
+  const image = cache?.images.get(token);
+  return image?.source && cache!.aliases.get(image.source.url) === token ? image.source.url : token;
+}
+export function imageSourceReferences(tabId: string): PendingImageReference[] {
+  return getPendingImages(tabId).flatMap((image) =>
+    image.source ? [{ placeholder: image.placeholder, relativePath: image.source.url }] : [],
+  );
+}
 export function resolveImageSource(tabId: string, url: string): string {
   const cache = imageCaches.get(tabId);
   const image = cache?.images.get(url) ?? cache?.images.get(cache.aliases.get(url) ?? '');
-  return image?.preview ?? url;
+  return image?.backing.previewUrl ?? url;
+}
+/** Diagnostics expose byte counts, not image contents. Encoded bytes live only in native stash. */
+export function imageCacheUsage(): { residentBytes: number; images: number } {
+  return {
+    residentBytes: 0,
+    images: [...imageCaches.values()].reduce((count, cache) => count + cache.images.size, 0),
+  };
 }
 
-interface ImageMigration {
+export interface ImageMigration {
   tabId: string;
   cache: ImageCache;
   targetFilePath: string;
   markdown: string;
   references: PendingImageReference[];
+  historyReferences: PendingImageReference[];
+  allocationIds: string[];
   updates: {
     image: PendingImage;
     filename: string;
     source: { url: string; absolutePath: string };
   }[];
 }
-
-/** 仅在文档写入成功后提交来源,失败的另存为不能改变后续迁移的基准目录。 */
+const migrationLeases = new WeakMap<ImageMigration, PendingImageLease>();
+function releaseMigration(migration: ImageMigration): void {
+  migrationLeases.get(migration)?.release();
+  migrationLeases.delete(migration);
+}
+/** Native ownership and visible cache adoption are deliberately separate decisions. */
+export async function finalizeImageMigration(
+  migration: ImageMigration,
+  state: 'unchanged' | 'committed' | 'unknown',
+): Promise<void> {
+  try {
+    if (!migration.allocationIds.length) return;
+    const allocationIds = migration.allocationIds.splice(0);
+    await invoke(state === 'unchanged' ? 'discard_image_assets' : 'commit_image_assets', {
+      allocationIds,
+    });
+  } finally {
+    releaseMigration(migration);
+  }
+}
+/** Adopt only after a successful document write and an unchanged document generation. */
 export function commitImageMigration(migration: ImageMigration): void {
   const cache = imageCaches.get(migration.tabId);
   if (!cache || cache !== migration.cache) return;
@@ -182,107 +426,92 @@ export function commitImageMigration(migration: ImageMigration): void {
   for (const { image, filename, source } of migration.updates) {
     const current = cache.images.get(image.placeholder);
     if (!current) continue;
-    if (current.source && cache.aliases.get(current.source.url) === current.placeholder) {
+    if (current.source && cache.aliases.get(current.source.url) === current.placeholder)
       cache.aliases.delete(current.source.url);
-    }
     cache.images.set(image.placeholder, { ...current, filename, relativePath: source.url, source });
     cache.aliases.set(source.url, image.placeholder);
   }
   cache.docPath = migration.targetFilePath;
   changed(migration.tabId, cache);
+  releaseMigration(migration);
 }
-
-/**
- * 将某个未保存标签中的图片写入目标文档 assets 目录，并重写 Markdown 引用。
- * 图片字节保存在前端内存中，因此不依赖临时目录和跨磁盘 rename。
- */
+/** Assets are provisional until finalize observes the document's actual write state. */
 export async function migratePendingImages(
   tabId: string,
   targetFilePath: string,
   markdown: string,
 ): Promise<ImageMigration> {
   const cache = cacheFor(tabId);
-  const pending = getPendingImages(tabId);
-  const context = { tabId, cache, targetFilePath };
-  const updates: ImageMigration['updates'] = [];
   const urls = new Set(getImageUrls(markdown));
-  const knownTokens = new Set(pending.map((image) => image.placeholder));
-  for (const url of urls) {
-    if (/^mdplus-image:/i.test(url) && !knownTokens.has(url)) {
-      throw new Error(`图片数据已丢失,无法保存: ${url}`);
-    }
-  }
-  if (pending.length === 0) return { ...context, markdown, updates, references: [] };
-
-  const dir = await dirname(targetFilePath);
-
-  const references: PendingImageReference[] = [];
-
-  for (const image of pending) {
-    const imageReferences = [image.placeholder, image.source?.url].filter(
-      (url): url is string => !!url && urls.has(url),
-    );
-    if (imageReferences.length === 0) continue;
-
-    // 磁盘上原有的图片:只要它相对新的保存位置仍然指向同一个文件,就把
-    // 原引用原样写回。这既保住了作者自己的目录结构(如 ./img/pic.png),
-    // 也避免了两张不同目录的同名图在 assets 里互相覆盖。
-    if (image.source) {
-      const resolved = await join(dir, image.source.url.replace(/^\.\//, ''));
-      if (isSamePath(resolved, image.source.absolutePath)) {
-        for (const reference of imageReferences) {
-          references.push({ placeholder: reference, relativePath: image.source.url });
-        }
-        updates.push({ image, filename: image.filename, source: image.source });
-        continue;
-      }
-    }
-
-    // Allocate and write in one native operation; per-tab queues cannot protect a shared assets directory.
-    const asset = await invoke<ImageReceipt>('save_image_asset', {
-      docPath: targetFilePath,
-      filename: image.filename,
-      data: image.data,
-    });
-    for (const reference of imageReferences) {
-      references.push({ placeholder: reference, relativePath: asset.relativePath });
-    }
-    updates.push({
-      image,
-      filename: asset.filename,
-      source: { url: asset.relativePath, absolutePath: asset.path },
-    });
-  }
-
-  return {
-    ...context,
-    markdown: rewriteImageReferences(markdown, references),
-    updates,
-    references,
+  const lease = capturePendingImages(tabId, urls);
+  const migration: ImageMigration = {
+    tabId,
+    cache,
+    targetFilePath,
+    markdown,
+    updates: [],
+    references: [],
+    historyReferences: imageIdentityReferences(tabId),
+    allocationIds: [],
   };
+  migrationLeases.set(migration, lease);
+  try {
+    const knownTokens = new Set(lease.images.map((image) => image.placeholder));
+    for (const url of urls) {
+      if (/^mdplus-image:/i.test(url) && !knownTokens.has(url))
+        throw new Error(`图片数据已丢失,无法保存: ${url}`);
+    }
+    if (!lease.images.length) return migration;
+    const dir = await dirname(targetFilePath);
+    for (const image of lease.images) {
+      const references = [image.placeholder, image.source?.url].filter(
+        (url): url is string => !!url && urls.has(url),
+      );
+      if (image.source) {
+        const resolved = await join(dir, image.source.url.replace(/^\.\//, ''));
+        if (isSamePath(resolved, image.source.absolutePath)) {
+          for (const placeholder of references)
+            migration.references.push({ placeholder, relativePath: image.source.url });
+          migration.updates.push({ image, filename: image.filename, source: image.source });
+          continue;
+        }
+      }
+      const asset = await lease.withDataBase64(image.placeholder, (dataBase64) =>
+        invoke<ImageReceipt & { allocationId: string | null }>('save_image_asset', {
+          docPath: targetFilePath,
+          filename: image.filename,
+          dataBase64,
+        }),
+      );
+      if (asset.allocationId) migration.allocationIds.push(asset.allocationId);
+      for (const placeholder of references)
+        migration.references.push({ placeholder, relativePath: asset.relativePath });
+      migration.updates.push({
+        image,
+        filename: asset.filename,
+        source: { url: asset.relativePath, absolutePath: asset.path },
+      });
+    }
+    migration.markdown = rewriteImageReferences(markdown, migration.references);
+    return migration;
+  } catch (error) {
+    try {
+      await finalizeImageMigration(migration, 'unchanged');
+    } catch (cleanup) {
+      console.error('未提交的图片资产清理失败', cleanup);
+    }
+    throw error;
+  }
 }
-
-/**
- * 两个路径是否指向同一个文件。Windows 下大小写不敏感、两种分隔符等价,
- * 与文档打开／另存为共用 pathKey：统一点路径、大小写、分隔符和扩展前缀。
- * 此处比较的是已解析的绝对目标；相对文稿路径先交由原生命令解析。
- */
 function isSamePath(a: string, b: string): boolean {
   return pathKey(a) === pathKey(b);
 }
-
 export interface PreparedImageReferences {
   markdown: string;
-  /** False means the tab/cache changed or this preparation was already consumed. */
   commit: () => boolean;
+  dispose: () => Promise<void>;
 }
-
-/**
- * Stage relative image reads without changing visible aliases, tokens or bytes.
- * The caller checks document generation/path/native revision before committing.
- * Only the per-tab lifetime record is reserved here, so closing an empty tab can
- * invalidate an outstanding read. Source Markdown is always returned verbatim.
- */
+/** Reads and stashes are staged; aliases are published only by a winning commit. */
 export async function prepareImageReferences(
   tabId: string,
   markdown: string,
@@ -290,48 +519,65 @@ export async function prepareImageReferences(
   options: { refresh?: boolean } = {},
 ): Promise<PreparedImageReferences> {
   const cache = cacheFor(tabId);
+  await collectUnusedImages();
   const generation = cache.generation;
-  const aliases = new Map(cache.aliases);
-  const images = new Map(cache.images);
   const sameDocument = cache.docPath !== null && isSamePath(cache.docPath, docPath);
-  const staged = new Map<string, PendingImage | null>();
-  for (const url of new Set(getImageUrls(markdown))) {
-    if (!isRelativeImageUrl(url)) continue;
-    const existing = images.get(aliases.get(url) ?? '');
-    if (sameDocument && existing && !options.refresh) continue;
-    const relativePath = url.replace(/^\.\//, '');
-    try {
-      const image = await readImageFile(docPath, relativePath);
-      const preview = bytesToDataUrl(new Uint8Array(image.data), image.mime);
-      if (
-        existing?.source &&
-        isSamePath(existing.source.absolutePath, image.path) &&
-        existing.preview === preview
-      ) {
-        staged.set(url, existing);
-      } else {
-        const placeholder = `mdplus-image:${imageId()}`;
-        staged.set(url, {
-          placeholder,
-          preview,
-          relativePath: url,
-          filename: basename(relativePath),
-          data: image.data,
-          source: { url, absolutePath: image.path },
-        });
-      }
-    } catch {
-      // Failure is also a staged observation. Do not keep serving an obsolete
-      // live URL after commit, but keep its immutable token available for undo.
-      staged.set(url, null);
-    }
-  }
+  const staged = new Map<string, CachedImage | null>();
   let consumed = false;
+  const dispose = async () => {
+    if (consumed) return;
+    consumed = true;
+    await Promise.all(
+      [...staged.values()].flatMap((image) => (image ? [releaseBacking(image.backing)] : [])),
+    );
+  };
+  try {
+    for (const url of new Set(getImageUrls(markdown))) {
+      if (!isRelativeImageUrl(url)) continue;
+      const existing = cache.images.get(cache.aliases.get(url) ?? '');
+      if (sameDocument && existing && !options.refresh) continue;
+      const relativePath = url.replace(/^\.\//, '');
+      // Missing/invalid source observations may retire a live alias. A stash-full
+      // error, however, must reject the preparation rather than retire good data.
+      const image = await imageIO(async () => {
+        let loaded: Awaited<ReturnType<typeof readImageFile>>;
+        try {
+          loaded = await readImageFile(docPath, relativePath);
+        } catch {
+          return null;
+        }
+        const reusable = existing?.source && isSamePath(existing.source.absolutePath, loaded.path);
+        const backing = await stashImage(
+          basename(relativePath),
+          loaded.dataBase64,
+          reusable ? existing.backing : undefined,
+        );
+        const placeholder =
+          backing === existing?.backing ? existing.placeholder : `mdplus-image:${imageId()}`;
+        return {
+          placeholder,
+          filename: basename(relativePath),
+          relativePath: url,
+          mime: backing.mime,
+          byteLength: backing.byteLength,
+          source: { url, absolutePath: loaded.path },
+          backing,
+        };
+      });
+      staged.set(url, image);
+    }
+  } catch (error) {
+    await dispose();
+    throw error;
+  }
   return {
     markdown,
+    dispose,
     commit: () => {
-      if (consumed || imageCaches.get(tabId) !== cache || cache.generation !== generation)
+      if (consumed || imageCaches.get(tabId) !== cache || cache.generation !== generation) {
+        void dispose().catch((error) => console.error('释放过期图片准备失败', error));
         return false;
+      }
       consumed = true;
       let visibleChange = false;
       if (!sameDocument && cache.docPath !== null) {
@@ -341,21 +587,19 @@ export async function prepareImageReferences(
       for (const [url, image] of staged) {
         if (image) {
           visibleChange ||= cache.aliases.get(url) !== image.placeholder;
+          const previous = cache.images.get(image.placeholder);
           cache.images.set(image.placeholder, image);
           cache.aliases.set(url, image.placeholder);
-        } else {
-          visibleChange = cache.aliases.delete(url) || visibleChange;
-        }
+          if (previous) quietlyRelease(previous.backing);
+        } else visibleChange = cache.aliases.delete(url) || visibleChange;
       }
       cache.docPath = docPath;
-      // Even an identical winning read must invalidate older pending results.
       changed(tabId, cache, visibleChange);
       return true;
     },
   };
 }
-
-/** First-open convenience: publish a checked cache, then tokenize only image URLs. */
+/** First-open adapter used by integrations that explicitly want compact tokens. */
 export async function loadImageReferences(
   tabId: string,
   markdown: string,
@@ -363,28 +607,33 @@ export async function loadImageReferences(
 ): Promise<string> {
   const prepared = await prepareImageReferences(tabId, markdown, docPath, { refresh: true });
   if (!prepared.commit()) throw new Error('图片缓存已在加载期间改变，请重新打开文档');
-  const cache = imageCaches.get(tabId)!;
-  const references = [...new Set(getImageUrls(markdown))].flatMap((url) => {
-    const token = cache.aliases.get(url);
-    return token ? [{ placeholder: url, relativePath: token }] : [];
-  });
-  return rewriteImageReferences(markdown, references);
+  return rewriteImageReferences(markdown, imageIdentityReferences(tabId));
 }
-
-/** 粘贴图片:返回短 token,显示数据留在缓存,保存/另存为统一迁移。 */
+/** Stash before publishing: bounded memory never discards the only copy of a paste. */
 export async function saveImage(blob: Blob, tabId: string): Promise<string> {
-  const buffer = await blob.arrayBuffer();
-  const data = new Uint8Array(buffer);
-  const extension = imageExtension(blob);
-  const filename = imageFilename(extension);
-  const preview = await blobToDataUrl(blob);
+  if (!blob.size || blob.size > LIMITS.imageFileBytes)
+    throw new Error('图片为空或超过 64 MiB 限制');
+  const cache = cacheFor(tabId);
+  const mime = blob.type.split(';', 1)[0].toLowerCase();
+  const filename = `image-${imageId()}.${IMAGE_EXTENSIONS[mime] ?? 'bin'}`;
+  await collectUnusedImages();
+  const backing = await imageIO(async () =>
+    stashImage(filename, encodeImage(new Uint8Array(await blob.arrayBuffer()))),
+  );
+  if (imageCaches.get(tabId) !== cache) {
+    await releaseBacking(backing);
+    throw new Error('标签已关闭，图片粘贴已取消');
+  }
   const placeholder = `mdplus-image:${imageId()}`;
-  rememberPendingImage(tabId, {
+  cache.images.set(placeholder, {
     placeholder,
-    preview,
-    relativePath: `./assets/${filename}`,
     filename,
-    data: Array.from(data),
+    relativePath: `./assets/${filename}`,
+    mime: backing.mime,
+    byteLength: backing.byteLength,
+    backing,
+    inserting: true,
   });
+  changed(tabId, cache);
   return placeholder;
 }

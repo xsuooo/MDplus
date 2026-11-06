@@ -108,6 +108,11 @@ export function useDocumentSession(initialTabs: Tab[] = []) {
 
   const pauseAutoSave = useCallback((id: string, mtime: number) => {
     blockedExternalMtime.current[id] = mtime;
+    // Keep dirty tied to edits so later disk revisions are still polled, but do
+    // not let close/recovery mistake the retained buffer for a backed-up copy.
+    tabsRef.current = tabsRef.current.map((tab) =>
+      tab.id === id ? { ...tab, preserveLocal: true } : tab,
+    );
     setTabs([...tabsRef.current]);
   }, []);
 
@@ -124,6 +129,11 @@ export function useDocumentSession(initialTabs: Tab[] = []) {
       },
       id: string = makeId(),
     ) => {
+      // Identity is a session invariant, not a responsibility of each async caller.
+      if (tabsRef.current.some((tab) => tab.id === id)) {
+        selectTab(id);
+        return id;
+      }
       const tab: Tab = {
         id,
         title: init.title,
@@ -133,6 +143,7 @@ export function useDocumentSession(initialTabs: Tab[] = []) {
         externalMtime: init.mtime ?? 0,
         diskRevision: init.revision ?? null,
         externalChanged: false,
+        preserveLocal: false,
         initialContent: init.content,
         savedContent: init.recovered ? '' : init.content,
         markdown: init.content,

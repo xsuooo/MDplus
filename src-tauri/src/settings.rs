@@ -1,79 +1,91 @@
-//! Only the application's fixed settings file may become a frontend Store resource.
+//! Fixed-path settings snapshots. No plugin resources, autosave or exit-time writes.
+//! A save receipt is returned only after the same atomic/CAS checks as documents.
 use std::collections::HashMap;
-use std::fs::{self, File};
-use std::io::Read;
-use std::path::Path;
-use std::sync::Mutex;
-use tauri::{Manager, ResourceId, State};
-use tauri_plugin_store::StoreExt;
+use std::fs;
+use std::path::{Path, PathBuf};
+use tauri::Manager;
 
 use crate::config::MAX_SETTINGS_FILE_BYTES;
+use crate::safe_files;
 
-#[derive(Default)]
-pub struct SettingsResource(Mutex<Option<ResourceId>>);
+type Values = HashMap<String, serde_json::Value>;
 
-fn read_settings(path: &Path) -> Result<HashMap<String, serde_json::Value>, String> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
-        Err(error) => return Err(error.to_string()),
-    };
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        if metadata.file_attributes() & 0x400 != 0 {
-            return Err("settings reparse points are not allowed".into());
-        }
-    }
-    if !metadata.is_file()
-        || metadata.file_type().is_symlink()
-        || metadata.len() > MAX_SETTINGS_FILE_BYTES
-    {
-        return Err("settings must be a regular file within the configured size limit".into());
-    }
-    let mut bytes = Vec::new();
-    File::open(path)
-        .map_err(|error| error.to_string())?
-        .take(MAX_SETTINGS_FILE_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|error| error.to_string())?;
-    if bytes.len() as u64 > MAX_SETTINGS_FILE_BYTES {
-        return Err("settings exceed the configured size limit".into());
-    }
-    serde_json::from_slice(&bytes)
-        .map_err(|error| format!("settings could not be read; original file retained: {error}"))
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsSnapshot {
+    values: Values,
+    revision: Option<String>,
 }
 
-#[tauri::command]
-pub fn load_settings(
-    app: tauri::AppHandle,
-    state: State<'_, SettingsResource>,
-) -> Result<ResourceId, String> {
-    let mut resource = state
-        .0
-        .lock()
-        .map_err(|_| "settings resource lock failed")?;
-    if let Some(id) = *resource {
-        return Ok(id);
+#[derive(Debug, serde::Serialize)]
+pub struct SettingsReceipt {
+    revision: String,
+}
+
+fn read_settings(path: &Path) -> Result<SettingsSnapshot, String> {
+    // This includes strict regular-file/reparse checks, bounded reading and a
+    // Windows sharing guard. Hash exactly the bytes parsed, never a later read.
+    let Some(raw) = safe_files::optional_snapshot(path, MAX_SETTINGS_FILE_BYTES)
+        .map_err(|error| error.message)?
+    else {
+        return Ok(SettingsSnapshot {
+            values: Values::new(),
+            revision: None,
+        });
+    };
+    let values = serde_json::from_slice(&raw.bytes)
+        .map_err(|error| format!("settings could not be read; original file retained: {error}"))?;
+    Ok(SettingsSnapshot {
+        values,
+        revision: Some(raw.revision),
+    })
+}
+
+fn persist_settings(
+    path: &Path,
+    values: Values,
+    expected_revision: Option<String>,
+) -> Result<SettingsReceipt, String> {
+    let content = serde_json::to_string(&values).map_err(|error| error.to_string())?;
+    if content.len() as u64 > MAX_SETTINGS_FILE_BYTES {
+        return Err("settings exceed the configured size limit; original file retained".into());
     }
-    let path = app
+    // Creating the application directory is deferred until an explicit save.
+    // Failed loads (including malformed JSON) never create or replace a file.
+    let parent = path.parent().ok_or("settings path has no parent")?;
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let receipt = safe_files::write_text_with_limit(
+        path.to_string_lossy().into_owned(),
+        content,
+        expected_revision,
+        MAX_SETTINGS_FILE_BYTES,
+    )
+    .map_err(|error| error.message)?;
+    Ok(SettingsReceipt {
+        revision: receipt.revision,
+    })
+}
+
+fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app
         .path()
         .app_data_dir()
         .map_err(|error| error.to_string())?
-        .join("mdplus-settings.json");
-    let values = read_settings(&path)?;
-    // StoreBuilder silently ignores file read errors. Seed only our validated snapshot,
-    // and disable its implicit saves: the frontend explicitly waits for save receipts.
-    let store = app
-        .store_builder(path)
-        .defaults(values)
-        .create_new()
-        .disable_auto_save()
-        .build()
-        .map_err(|error| error.to_string())?;
-    let id = app.resources_table().add_arc(store);
-    *resource = Some(id);
-    Ok(id)
+        .join("mdplus-settings.json"))
+}
+
+#[tauri::command]
+pub fn load_settings(app: tauri::AppHandle) -> Result<SettingsSnapshot, String> {
+    read_settings(&settings_path(&app)?)
+}
+
+#[tauri::command]
+pub fn save_settings(
+    app: tauri::AppHandle,
+    values: Values,
+    expected_revision: Option<String>,
+) -> Result<SettingsReceipt, String> {
+    persist_settings(&settings_path(&app)?, values, expected_revision)
 }
 
 #[cfg(test)]

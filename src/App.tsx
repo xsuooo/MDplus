@@ -87,7 +87,7 @@ export default function App() {
     createDocument,
   } = useDocumentFiles(session);
   const recovery = useRecovery(session);
-  useExternalChanges(session);
+  useExternalChanges(session, recovery);
   const { doSave, scheduleAutoSave, handleSave, handleSaveAs, savingId } = useDocumentSave(
     session,
     recovery,

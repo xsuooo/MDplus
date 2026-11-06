@@ -1,8 +1,16 @@
 import { memo, useEffect, useLayoutEffect, useRef } from 'react';
 import { useEditor, Milkdown, MilkdownProvider } from '@milkdown/react';
 import type { Editor } from '@milkdown/kit/core';
-import { createEditor, getCurrentState } from '../lib/editor';
-import { resolveImageSource, subscribeImageSources } from '../lib/imageOps';
+import { createEditor, getCurrentState, getEditorImageReferences } from '../lib/editor';
+import {
+  resolveImageSource,
+  subscribeImageSources,
+  resolveImageIdentity,
+  resolveImageReference,
+  registerImageReachability,
+  imageReferencesChanged,
+  settleImageInsertion,
+} from '../lib/imageOps';
 import type { Tab, EditorUpdate } from '../lib/types';
 import type { MediaPreview } from '../lib/media';
 
@@ -64,6 +72,10 @@ function EditorTabInner({
         onUpdate: (u) => onUpdateRef.current(tabIdRef.current, u),
         resolveImageSource: (url) => resolveImageSource(tabIdRef.current, url),
         subscribeImageSources: (listener) => subscribeImageSources(tabIdRef.current, listener),
+        resolveImageIdentity: (url) => resolveImageIdentity(tabIdRef.current, url),
+        resolveImageReference: (token) => resolveImageReference(tabIdRef.current, token),
+        onImageReferencesChanged: () => imageReferencesChanged(tabIdRef.current),
+        onImagePasteSettled: (token) => settleImageInsertion(tabIdRef.current, token),
         onMediaPreview: (media) => previewRef.current?.(media),
         captureImagePaste: () => {
           const current = activity.current;
@@ -79,6 +91,12 @@ function EditorTabInner({
   useEffect(() => {
     onRegisterRef.current(tab.id, loading ? null : (get() ?? null));
     return () => onRegisterRef.current(tab.id, null);
+  }, [get, loading, tab.id]);
+
+  useEffect(() => {
+    const editor = loading ? null : get();
+    if (!editor) return;
+    return registerImageReachability(tab.id, () => getEditorImageReferences(editor));
   }, [get, loading, tab.id]);
 
   // 编辑器就绪后,推送一次初始状态(大纲、统计、markdown 镜像)

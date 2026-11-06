@@ -8,7 +8,10 @@ fn main() {
     let mut constants = String::new();
     for (name, key, kind) in [
         ("MAX_TEXT_FILE_BYTES", "textFileBytes", "u64"),
+        ("MAX_HTML_EXPORT_BYTES", "htmlExportBytes", "u64"),
         ("MAX_IMAGE_FILE_BYTES", "imageFileBytes", "u64"),
+        ("MAX_IMAGE_STASH_BYTES", "imageStashBytes", "u64"),
+        ("MAX_IMAGE_STASH_ENTRIES", "imageStashEntries", "usize"),
         ("MAX_SETTINGS_FILE_BYTES", "settingsFileBytes", "u64"),
         ("MAX_SNAPSHOT_IMAGE_BYTES", "snapshotImageBytes", "u64"),
         ("MAX_RECOVERY_IMAGES", "recoveryImages", "usize"),

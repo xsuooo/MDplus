@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { Editor } from '@milkdown/kit/core';
 import {
   runSearch,
@@ -6,7 +6,7 @@ import {
   clearSearch,
   getSearchCount,
   subscribeSearchCount,
-  findTextMatches,
+  createTextSearch,
 } from '../lib/search';
 import { measureSourceText } from '../lib/sourcePosition';
 import { IconChevronDown, IconChevronUp, IconClose, IconSearch } from './icons';
@@ -26,8 +26,12 @@ export const SearchBar = memo(function SearchBar({ editor, source, onClose }: Se
   const previousFocus = useRef<HTMLElement | null>(null);
   const present = useIsPresent();
   const [sourceIndex, setSourceIndex] = useState(-1);
-  const sourceMatches = source ? findTextMatches(source.text, keyword, caseSensitive) : [];
-  const total = source ? sourceMatches.length : count;
+  const sourceText = source?.text;
+  const sourceMatches = useMemo(
+    () => createTextSearch(sourceText ?? '', keyword, caseSensitive),
+    [sourceText, keyword, caseSensitive],
+  );
+  const total = source ? sourceMatches.count : count;
 
   useEffect(() => {
     setSourceIndex(-1);
@@ -68,15 +72,16 @@ export const SearchBar = memo(function SearchBar({ editor, source, onClose }: Se
     if (!keyword) return;
     if (source) {
       const input = source.input;
-      if (!input?.isConnected || !sourceMatches.length) return;
+      if (!input?.isConnected || !sourceMatches.count) return;
       const next =
         sourceIndex < 0
           ? dir === 1
             ? 0
-            : sourceMatches.length - 1
-          : (sourceIndex + dir + sourceMatches.length) % sourceMatches.length;
+            : sourceMatches.count - 1
+          : (sourceIndex + dir + sourceMatches.count) % sourceMatches.count;
+      const match = sourceMatches.at(next);
+      if (!match) return;
       setSourceIndex(next);
-      const match = sourceMatches[next];
       input.setSelectionRange(match.from, match.to);
       measureSourceText(input, source.text, (top, lineHeight) => {
         const first = top(match.from);

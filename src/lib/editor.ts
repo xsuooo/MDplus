@@ -8,8 +8,14 @@ import {
   editorViewCtx,
 } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
-import { undo as pmUndo, redo as pmRedo, undoDepth, redoDepth } from '@milkdown/prose/history';
-import { Plugin, PluginKey, Selection } from '@milkdown/prose/state';
+import {
+  history as pmHistory,
+  undo as pmUndo,
+  redo as pmRedo,
+  undoDepth,
+  redoDepth,
+} from '@milkdown/prose/history';
+import { Plugin, PluginKey, Selection, type EditorState } from '@milkdown/prose/state';
 import { commonmark, imageSchema, headingIdGenerator } from '@milkdown/kit/preset/commonmark';
 import { Transform } from '@milkdown/prose/transform';
 import { gfm } from '@milkdown/kit/preset/gfm';
@@ -37,6 +43,11 @@ export interface EditorCallbacks {
   onImagePaste?: (file: File) => Promise<string>;
   resolveImageSource?: (url: string) => string;
   subscribeImageSources?: (listener: () => void) => () => void;
+  /** Rich document/history attributes use identities; only serialization exposes safe disk URLs. */
+  resolveImageIdentity?: (url: string) => string;
+  resolveImageReference?: (token: string) => string;
+  onImageReferencesChanged?: () => void;
+  onImagePasteSettled?: (token: string) => void;
   captureImagePaste?: () => () => boolean;
   onMediaPreview?: (media: MediaPreview) => void;
 }
@@ -77,6 +88,61 @@ export function createEditor(
       ctx.set(defaultValueCtx, content);
     })
     .config(configureMarkdownSchemas)
+    .config((ctx) => {
+      if (!callbacks.resolveImageIdentity && !callbacks.resolveImageReference) return;
+      ctx.update(imageSchema.key, (original) => (ctx) => {
+        const schema = original(ctx);
+        return {
+          ...schema,
+          parseDOM: schema.parseDOM?.map((rule) => {
+            if (!('tag' in rule) || !rule.getAttrs) return rule;
+            const getAttrs = rule.getAttrs;
+            return {
+              ...rule,
+              getAttrs: (dom: HTMLElement) => {
+                const attrs = getAttrs(dom);
+                if (!attrs) return attrs;
+                return { ...attrs, src: callbacks.resolveImageIdentity?.(attrs.src) ?? attrs.src };
+              },
+            };
+          }),
+          toDOM: schema.toDOM
+            ? (node) => {
+                const src = callbacks.resolveImageReference?.(node.attrs.src) ?? node.attrs.src;
+                return schema.toDOM!(
+                  src === node.attrs.src
+                    ? node
+                    : node.type.create({ ...node.attrs, src }, node.content, node.marks),
+                );
+              }
+            : undefined,
+          parseMarkdown: {
+            ...schema.parseMarkdown,
+            runner: (state, node, type) =>
+              schema.parseMarkdown.runner(
+                state,
+                {
+                  ...node,
+                  url: callbacks.resolveImageIdentity?.(String(node.url ?? '')) ?? node.url,
+                },
+                type,
+              ),
+          },
+          toMarkdown: {
+            ...schema.toMarkdown,
+            runner: (state, node) => {
+              const src = callbacks.resolveImageReference?.(node.attrs.src) ?? node.attrs.src;
+              schema.toMarkdown.runner(
+                state,
+                src === node.attrs.src
+                  ? node
+                  : node.type.create({ ...node.attrs, src }, node.content, node.marks),
+              );
+            },
+          },
+        };
+      });
+    })
     .use(commonmark)
     .use(gfm)
     .use(history)
@@ -91,19 +157,54 @@ export function createEditor(
               init: () => false,
               apply: (transaction) => transaction.getMeta(synchronization) === true,
             },
-            view: () => ({
-              update: (view, previous) => {
-                if (synchronization.getState(view.state)) return;
-                if (view.state.doc.eq(previous.doc)) return;
-                const markdown = ctx.get(serializerCtx)(view.state.doc);
-                callbacks.onUpdate({
-                  markdown,
-                  outline: extractOutline(view.state.doc),
-                  stats: computeStats(markdown),
-                  ...historyState(view.state),
+            appendTransaction: (transactions, _previous, state) => {
+              if (!callbacks.resolveImageIdentity) return null;
+              const tr = state.tr;
+              state.doc.descendants((node, pos) => {
+                if (node.type.name !== 'image') return;
+                const src = callbacks.resolveImageIdentity!(node.attrs.src);
+                if (src !== node.attrs.src)
+                  tr.setNodeMarkup(pos, undefined, { ...node.attrs, src });
+              });
+              if (!tr.docChanged) return null;
+              // Join a user insertion's history event, so its redo stores the token,
+              // not a directory-dependent raw URL. Silent sync stays non-history.
+              const silent = transactions.every((item) => item.getMeta(synchronization) === true);
+              tr.setMeta(synchronization, silent);
+              if (transactions.every((item) => item.getMeta('addToHistory') === false))
+                tr.setMeta('addToHistory', false);
+              return tr;
+            },
+            view: (view) => {
+              const normalize = () => {
+                if (!callbacks.resolveImageIdentity || view.isDestroyed) return;
+                const tr = view.state.tr;
+                view.state.doc.descendants((node, pos) => {
+                  if (node.type.name !== 'image') return;
+                  const src = callbacks.resolveImageIdentity!(node.attrs.src);
+                  if (src !== node.attrs.src)
+                    tr.setNodeMarkup(pos, undefined, { ...node.attrs, src });
                 });
-              },
-            }),
+                if (tr.docChanged)
+                  view.dispatch(tr.setMeta(synchronization, true).setMeta('addToHistory', false));
+              };
+              const unsubscribe = callbacks.subscribeImageSources?.(normalize);
+              return {
+                update: (view, previous) => {
+                  if (view.state !== previous) callbacks.onImageReferencesChanged?.();
+                  if (synchronization.getState(view.state)) return;
+                  if (view.state.doc.eq(previous.doc)) return;
+                  const markdown = ctx.get(serializerCtx)(view.state.doc);
+                  callbacks.onUpdate({
+                    markdown,
+                    outline: extractOutline(view.state.doc),
+                    stats: computeStats(markdown),
+                    ...historyState(view.state),
+                  });
+                },
+                destroy: () => unsubscribe?.(),
+              };
+            },
           }),
       ),
     )
@@ -146,8 +247,9 @@ export function createEditor(
           e.preventDefault();
           const original = view.state;
           const isCurrent = callbacks.captureImagePaste?.();
+          let imagePath = '';
           try {
-            const imagePath = await callbacks.onImagePaste(file);
+            imagePath = await callbacks.onImagePaste(file);
             if (
               !imagePath ||
               !view.dom.isConnected ||
@@ -167,6 +269,8 @@ export function createEditor(
             }
           } catch (err) {
             console.error('粘贴图片失败', err);
+          } finally {
+            if (imagePath) callbacks.onImagePasteSettled?.(imagePath);
           }
         };
 
@@ -240,6 +344,46 @@ export function setMarkdown(editor: Editor, markdown: string, addToHistory = tru
     }
   });
   return getCurrentState(editor);
+}
+
+const reachableImages = new WeakMap<EditorState, ReadonlySet<string>>();
+const imageHistoryKey = pmHistory().spec.key;
+/** Read history through public commands on isolated states; never run live editor plugins. */
+export function getEditorImageReferences(editor: Editor): ReadonlySet<string> {
+  return editor.action((ctx) => {
+    const state = ctx.get(editorViewCtx).state;
+    const cached = reachableImages.get(state);
+    if (cached) return cached;
+    const urls = new Set<string>();
+    const collect = (current: EditorState) => {
+      current.doc.descendants((node) => {
+        if (node.type.name === 'image') urls.add(node.attrs.src);
+      });
+    };
+    collect(state);
+    // Keep the original history plugin/configuration and its immutable state field.
+    // Other plugins can have side effects: Milkdown's tracker writes editorStateCtx
+    // even when apply() is called on a shadow rather than the visible editor state.
+    const historyPlugin = imageHistoryKey?.get(state);
+    const isolated = state.reconfigure({ plugins: historyPlugin ? [historyPlugin] : [] });
+    for (const [command, depth] of [
+      [pmUndo, undoDepth(isolated)],
+      [pmRedo, redoDepth(isolated)],
+    ] as const) {
+      let shadow = isolated;
+      for (let remaining = depth; remaining > 0; remaining--) {
+        if (
+          !command(shadow, (transaction) => {
+            shadow = shadow.apply(transaction);
+          })
+        )
+          break;
+        collect(shadow);
+      }
+    }
+    reachableImages.set(state, urls);
+    return urls;
+  });
 }
 
 /** 撤销 */

@@ -37,7 +37,9 @@ export function scheduleImagePreparation(
     cancel: () => {
       cancelled = true;
       clearTimeout(timer);
-      if (!started) resolve(false);
+      // Release every readiness waiter immediately, even if a slow native read
+      // is already running. That work still owns its generation check/disposal.
+      resolve(false);
     },
   };
 }

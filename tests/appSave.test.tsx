@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   prepareImageReferences: vi.fn(),
   migratePendingImages: vi.fn(),
   commitImageMigration: vi.fn(),
+  finalizeImageMigration: vi.fn(),
   setMarkdown: vi.fn(),
   confirmDialog: vi.fn(),
   showMessage: vi.fn(),
@@ -130,6 +131,7 @@ vi.mock('../src/lib/imageOps', () => ({
   prepareImageReferences: mocks.prepareImageReferences,
   migratePendingImages: mocks.migratePendingImages,
   commitImageMigration: mocks.commitImageMigration,
+  finalizeImageMigration: mocks.finalizeImageMigration,
   clearPendingImages: vi.fn(),
   saveImage: vi.fn(),
   loadImageReferences: vi.fn(),
@@ -193,7 +195,9 @@ beforeEach(() => {
   mocks.prepareImageReferences.mockImplementation(async (_id: string, markdown: string) => ({
     markdown,
     commit: () => true,
+    dispose: async () => {},
   }));
+  mocks.finalizeImageMigration.mockResolvedValue(undefined);
   mocks.migratePendingImages.mockImplementation(
     async (_id: string, _path: string, markdown: string) => ({
       markdown,
@@ -322,7 +326,11 @@ describe('App save entry points', () => {
   it.each(['onSave', 'onSaveAs'])(
     'waits for current image bytes before migrating through %s',
     async (action) => {
-      let release!: (value: { markdown: string; commit: () => boolean }) => void;
+      let release!: (value: {
+        markdown: string;
+        commit: () => boolean;
+        dispose: () => Promise<void>;
+      }) => void;
       const commit = vi.fn(() => true);
       mocks.prepareImageReferences.mockReturnValue(
         new Promise((resolve) => {
@@ -338,7 +346,7 @@ describe('App save entry points', () => {
       );
       expect(mocks.migratePendingImages).not.toHaveBeenCalled();
       expect(mocks.writeDocument).not.toHaveBeenCalled();
-      release({ markdown: 'current', commit });
+      release({ markdown: 'current', commit, dispose: async () => {} });
       await settle();
       expect(commit).toHaveBeenCalledTimes(1);
       expect(mocks.writeDocument).toHaveBeenCalledTimes(1);
@@ -349,7 +357,11 @@ describe('App save entry points', () => {
   );
 
   it('does not publish old image bytes or save after an edit during preparation', async () => {
-    let release!: (value: { markdown: string; commit: () => boolean }) => void;
+    let release!: (value: {
+      markdown: string;
+      commit: () => boolean;
+      dispose: () => Promise<void>;
+    }) => void;
     const commit = vi.fn(() => true);
     mocks.prepareImageReferences.mockReturnValueOnce(
       new Promise((resolve) => {
@@ -360,7 +372,7 @@ describe('App save entry points', () => {
     await settle();
     expect(mocks.prepareImageReferences).toHaveBeenCalledTimes(1);
     mocks.edit!();
-    release({ markdown: 'current', commit });
+    release({ markdown: 'current', commit, dispose: async () => {} });
     await settle();
     expect(commit).not.toHaveBeenCalled();
     expect(mocks.writeDocument).not.toHaveBeenCalled();
@@ -372,6 +384,7 @@ describe('App save entry points', () => {
     mocks.prepareImageReferences.mockResolvedValueOnce({
       markdown: 'current',
       commit: () => false,
+      dispose: async () => {},
     });
     mocks.toolbar.onSave();
     await settle();
@@ -593,6 +606,74 @@ describe('App document revision contract', () => {
     await settle();
     expect(mocks.writeDocument).toHaveBeenCalledExactlyOnceWith('D:/new/note.md', 'current', null);
     expect(mocks.legacyWriteFile).not.toHaveBeenCalled();
+  });
+});
+
+describe.each(['onSave', 'onSaveAs'])('asset ownership around %s', (action) => {
+  const failures = [
+    {
+      name: 'known unchanged write',
+      error: { message: 'conflict', writeState: 'unchanged' },
+      state: 'unchanged',
+    },
+    {
+      name: 'committed but unverified write',
+      error: { message: 'verify failed', writeState: 'committed' },
+      state: 'committed',
+    },
+    {
+      name: 'unknown native outcome',
+      error: { message: 'replacement uncertain', writeState: 'unknown' },
+      state: 'unknown',
+    },
+    {
+      name: 'transport failure without a receipt',
+      error: new Error('IPC disconnected'),
+      state: 'unknown',
+    },
+  ];
+  it.each(failures)(
+    'finalizes a $name without deleting possibly committed assets',
+    async ({ error, state }) => {
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const migration = { markdown: 'current', updates: [], allocationIds: ['owned'] };
+      mocks.migratePendingImages.mockResolvedValueOnce(migration);
+      mocks.writeDocument.mockRejectedValueOnce(error);
+      try {
+        mocks.toolbar[action]();
+        await settle();
+        expect(mocks.finalizeImageMigration).toHaveBeenCalledExactlyOnceWith(migration, state);
+        expect(mocks.commitImageMigration).not.toHaveBeenCalled();
+        expect(tabState().dirty).toBe(true);
+      } finally {
+        log.mockRestore();
+      }
+    },
+  );
+
+  it('commits ownership after a verified receipt and clears retained-local protection', async () => {
+    const migration = { markdown: 'current', updates: [], allocationIds: ['owned'] };
+    mocks.initialTab!.preserveLocal = true;
+    mocks.migratePendingImages.mockResolvedValueOnce(migration);
+    mocks.toolbar[action]();
+    await settle();
+    expect(mocks.finalizeImageMigration).toHaveBeenCalledExactlyOnceWith(migration, 'committed');
+    expect(tabState().preserveLocal).toBe(false);
+    expect(tabState().dirty).toBe(false);
+  });
+
+  it('discards provisional assets when the tab is closed before migration completes', async () => {
+    const migration = { markdown: 'current', updates: [], allocationIds: ['owned'] };
+    let release!: (value: typeof migration) => void;
+    mocks.migratePendingImages.mockReturnValueOnce(new Promise((resolve) => (release = resolve)));
+    mocks.toolbar[action]();
+    await settle();
+    expect(mocks.migratePendingImages).toHaveBeenCalledTimes(1);
+    await mocks.confirmClose!('discard');
+    release(migration);
+    await settle();
+    expect(mocks.writeDocument).not.toHaveBeenCalled();
+    expect(mocks.finalizeImageMigration).toHaveBeenCalledExactlyOnceWith(migration, 'unchanged');
   });
 });
 

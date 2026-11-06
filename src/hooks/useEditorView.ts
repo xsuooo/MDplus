@@ -4,6 +4,7 @@ import { TextSelection } from '@milkdown/prose/state';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { TAB_RENDER_MS } from '../config/constants';
 import { showMessage } from '../lib/dialog';
+import { needsDocumentProtection } from '../lib/documentProtection';
 import { redo, undo } from '../lib/editor';
 import {
   BODY_FONTS,
@@ -32,7 +33,7 @@ import {
   writeEditorZoom,
 } from '../lib/editorZoom';
 import { errorMessage } from '../lib/errors';
-import { saveImage } from '../lib/imageOps';
+import { saveImage, settleImageInsertion } from '../lib/imageOps';
 import { refreshMermaidTheme } from '../lib/mermaid';
 import { protectPastedImage } from '../lib/recovery';
 import { computeStats } from '../lib/stats';
@@ -57,6 +58,7 @@ export function useEditorView(
     tabMirror,
     tabsRef,
     contentGenerations,
+    saveGenerations,
     tabRenderTimers,
     currentView,
     sourceRegistry,
@@ -276,14 +278,14 @@ export function useEditorView(
       );
       if (isInitial) {
         const tab = tabsRef.current.find((tab) => tab.id === id);
-        if (tab && (tab.dirty || (tab.isNew && !!tab.markdown.trim()))) protectDraft(tab);
+        if (tab && needsDocumentProtection(tab)) protectDraft(tab);
         setTabs([...tabsRef.current]);
         return;
       }
       void prepareCurrentImages(id, true).catch((error) => console.warn('图片引用准备失败', error));
       if (dirty) scheduleAutoSave(id);
       const changed = tabsRef.current.find((tab) => tab.id === id);
-      if (changed && (dirty || changed.isNew)) protectDraft(changed);
+      if (changed && (dirty || changed.isNew || changed.preserveLocal)) protectDraft(changed);
       else if (changed) void cleanRecovery(id);
       scheduleTabRender(id);
     },
@@ -311,18 +313,31 @@ export function useEditorView(
   /* ---------- 图片粘贴处理 ---------- */
   const handleImagePaste = useCallback(
     async (tabId: string, file: File): Promise<string> => {
+      let imagePath: string | undefined;
+      const lifetime = saveGenerations.current[tabId] ?? 0;
+      const isCurrent = () =>
+        (saveGenerations.current[tabId] ?? 0) === lifetime &&
+        tabsRef.current.some((tab) => tab.id === tabId);
       try {
-        const imagePath = await saveImage(file, tabId);
-        await protectPastedImage(tabId, imagePath);
-        if (!tabsRef.current.some((tab) => tab.id === tabId)) return '';
+        imagePath = await saveImage(file, tabId);
+        if (!isCurrent()) {
+          settleImageInsertion(tabId, imagePath);
+          return '';
+        }
+        await protectPastedImage(tabId, imagePath, isCurrent);
+        if (!isCurrent()) {
+          settleImageInsertion(tabId, imagePath);
+          return '';
+        }
         return imagePath;
       } catch (err) {
+        if (imagePath) settleImageInsertion(tabId, imagePath);
         console.error('保存图片失败', err);
         await showMessage(`保存图片失败: ${errorMessage(err)}`, 'error');
         throw err;
       }
     },
-    [tabsRef],
+    [saveGenerations, tabsRef],
   );
 
   /* ---------- 撤销 / 重做 ---------- */
@@ -355,7 +370,7 @@ export function useEditorView(
       // The rendered editor can serialize this draft differently during sync.
       // Rebuild the preparation/recovery barrier against the preserved source.
       const current = tabsRef.current.find((candidate) => candidate.id === id);
-      if (current && (current.dirty || (current.isNew && !!resolveContent(current).trim())))
+      if (current && needsDocumentProtection(current, resolveContent(current)))
         protectDraft(current);
     } else {
       enteringSource.current = true;
@@ -407,7 +422,7 @@ export function useEditorView(
         );
         if (dirty) scheduleAutoSave(activeId);
         const changed = tabsRef.current.find((tab) => tab.id === activeId);
-        if (changed && (dirty || changed.isNew)) protectDraft(changed);
+        if (changed && (dirty || changed.isNew || changed.preserveLocal)) protectDraft(changed);
         else if (changed) void cleanRecovery(activeId);
         setTabs([...tabsRef.current]);
       }

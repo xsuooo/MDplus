@@ -1,4 +1,5 @@
 import { editorViewCtx } from '@milkdown/kit/core';
+import { createNativeMocks } from './nativeMocks';
 import { createEditor, undo } from '../../src/lib/editor';
 import { refreshMermaidTheme } from '../../src/lib/mermaid';
 import '../../src/styles/global.css';
@@ -28,6 +29,7 @@ async function until(condition: () => unknown) {
 
 /** Real Milkdown NodeView events and document history; no mocked commit algorithm. */
 export async function runMermaidCommitRegression(testCase: MermaidCase): Promise<string> {
+  createNativeMocks().install();
   document.documentElement.dataset.theme = 'light';
   const original = 'graph TD\nA-->B';
   const root = document.createElement('div');

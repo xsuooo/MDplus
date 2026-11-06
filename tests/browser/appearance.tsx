@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client';
+import { createNativeMocks } from './nativeMocks';
 import App from '../../src/App';
 import { createEditor, getCurrentState } from '../../src/lib/editor';
 import { CODE_FONTS, CODE_FONT_STORAGE_KEY } from '../../src/lib/editorFont';
@@ -53,6 +54,7 @@ async function settleAnimations() {
 }
 
 export async function runAppearanceRegression(testCase: AppearanceCase): Promise<string> {
+  createNativeMocks().install();
   if (testCase === 'images-centered') {
     const host = document.createElement('div');
     host.className = 'milkdown-container';
