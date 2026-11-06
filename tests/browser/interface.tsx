@@ -1,6 +1,9 @@
 import { createRoot } from 'react-dom/client';
 import { createNativeMocks } from './nativeMocks';
 import App from '../../src/App';
+import { StatusBar } from '../../src/components/StatusBar';
+import type { Tab } from '../../src/lib/types';
+import { version as packageVersion } from '../../package.json';
 import { longDocument } from './continuity';
 import { typographyDocument } from './typography';
 import '../../src/styles/global.css';
@@ -17,8 +20,12 @@ export const interfaceCases = [
   'interface-search-rich',
   'interface-layout-1440-900',
   'interface-layout-1100-768',
+  'interface-layout-1024-768',
+  'interface-layout-840-700',
   'interface-layout-800-600',
+  'interface-layout-480-700',
   'interface-layout-390-844',
+  'interface-layout-360-640',
   'interface-layout-320-640',
 ] as const;
 export type InterfaceCase = (typeof interfaceCases)[number];
@@ -60,6 +67,200 @@ function inViewport(element: Element, label: string) {
       box.bottom <= innerHeight + 1,
     `${label} is outside the viewport: ${JSON.stringify(box.toJSON())}`,
   );
+}
+function hitTarget(element: HTMLElement, label: string) {
+  inViewport(element, label);
+  const box = element.getBoundingClientRect();
+  const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+  check(hit && element.contains(hit), `${label} is clipped or covered by another element`);
+}
+function statusbarButton(selector: string) {
+  const button = document.querySelector<HTMLButtonElement>(`.statusbar-actions ${selector}`);
+  check(button, `Missing status bar action: ${selector}`);
+  check(
+    !button.disabled && button.getAttribute('aria-disabled') !== 'true',
+    `${selector} is disabled`,
+  );
+  hitTarget(button, button.getAttribute('aria-label') ?? selector);
+  button.focus({ preventScroll: true });
+  check(document.activeElement === button, `Status bar action cannot receive focus: ${selector}`);
+  return button;
+}
+function checkStatusbarLayout(label: string, hasDocument: boolean) {
+  const bar = document.querySelector<HTMLElement>('.statusbar')!;
+  check(bar, `${label}: status bar is missing`);
+  inViewport(bar, `${label}: status bar`);
+  check(bar.scrollWidth <= bar.clientWidth + 1, `${label}: status bar has horizontal overflow`);
+  const version = bar.querySelector<HTMLElement>('.statusbar-version');
+  check(version, `${label}: version is missing`);
+  check(
+    version.textContent?.trim() === `v${packageVersion}`,
+    `${label}: displayed version is stale`,
+  );
+  check(
+    version.title.includes(packageVersion) && version.getAttribute('aria-label') === version.title,
+    `${label}: version lacks accessible build details`,
+  );
+  hitTarget(version, `${label}: version`);
+  check(version.scrollWidth <= version.clientWidth + 1, `${label}: version text is truncated`);
+  version.focus({ preventScroll: true });
+  check(
+    version.tabIndex >= 0 && document.activeElement === version,
+    `${label}: version is not focusable`,
+  );
+  const buttons = Array.from(
+    bar.querySelectorAll<HTMLButtonElement>('.statusbar-actions .statusbar-theme'),
+  );
+  check(buttons.length === (hasDocument ? 4 : 3), `${label}: status bar actions are incomplete`);
+  for (const button of buttons) {
+    check(
+      button.getAttribute('aria-label'),
+      `${label}: a status bar action has no accessible name`,
+    );
+    statusbarButton(`[aria-label="${button.getAttribute('aria-label')}"]`);
+  }
+  const items = [
+    ...bar.querySelectorAll<HTMLElement>(
+      '.status-save, .status-recovery, .statusbar-details, .statusbar-location',
+    ),
+    ...buttons,
+    version,
+  ].filter((element) => {
+    const box = element.getBoundingClientRect();
+    return box.width > 0 && box.height > 0;
+  });
+  for (const item of items) inViewport(item, `${label}: ${item.className}`);
+  for (let first = 0; first < items.length; first++) {
+    const before = items[first].getBoundingClientRect();
+    for (const after of items.slice(first + 1)) {
+      const box = after.getBoundingClientRect();
+      const overlapWidth = Math.min(before.right, box.right) - Math.max(before.left, box.left);
+      const overlapHeight = Math.min(before.bottom, box.bottom) - Math.max(before.top, box.top);
+      check(
+        overlapWidth <= 0.5 || overlapHeight <= 0.5,
+        `${label}: status bar items overlap: ${items[first].className} / ${after.className}`,
+      );
+    }
+  }
+}
+async function checkAppStatusbar(label: string, hasDocument: boolean) {
+  await document.fonts.ready;
+  await settled();
+  checkStatusbarLayout(label, hasDocument);
+  statusbarButton('button[aria-label="恢复草稿"]').click();
+  await until(() => document.querySelector('.recovery-modal'));
+  click('.recovery-modal > .modal-actions button');
+  await until(() => !document.querySelector('.recovery-modal'));
+  statusbarButton('button[aria-label="排版设置"]').click();
+  await until(() => document.querySelector('.typography-panel'));
+  click('button[aria-label="关闭排版设置"]');
+  await until(() => !document.querySelector('.typography-panel'));
+  if (hasDocument) {
+    statusbarButton('.statusbar-zoom').click();
+    check(
+      document.querySelector('.statusbar-zoom')?.textContent?.trim() === '100%',
+      `${label}: zoom reset failed`,
+    );
+  }
+  const theme = statusbarButton('button[aria-label^="切换主题"]');
+  const before = theme.getAttribute('aria-label');
+  theme.click();
+  await until(
+    () =>
+      document
+        .querySelector('.statusbar-actions button[aria-label^="切换主题"]')
+        ?.getAttribute('aria-label') !== before,
+  );
+  await settled();
+  checkStatusbarLayout(label, hasDocument);
+}
+async function checkCrowdedStatusbar(root: ReturnType<typeof createRoot>, label: string) {
+  const path = `D:/notes/${'用于状态栏布局验证的较长目录/'.repeat(8)}document-with-a-long-name.md`;
+  const tab: Tab = {
+    id: 'statusbar-layout',
+    title: 'document-with-a-long-name.md',
+    path,
+    isNew: false,
+    dirty: true,
+    externalMtime: 0,
+    diskRevision: 'statusbar-fixture-revision',
+    externalChanged: true,
+    initialContent: '# Saved draft',
+    savedContent: '# Saved draft',
+    markdown: '# Local draft',
+    stats: { words: 1234567890, chars: 9876543210, lines: 123456789 },
+  };
+  const calls: string[] = [];
+  root.render(
+    <div className="app" data-body-font="misans" data-statusbar-fixture="true">
+      <main className="editor-area" />
+      <StatusBar
+        tab={tab}
+        themeMode="light"
+        onThemeMode={(mode) => {
+          calls.push(`theme:${mode}`);
+        }}
+        sourceMode={true}
+        saveState="paused"
+        zoom={200}
+        onResetZoom={() => {
+          calls.push('zoom');
+        }}
+        bodyFont="misans"
+        codeFont="jetbrains-sarasa"
+        onBodyFont={() => {}}
+        onCodeFont={() => {}}
+        recoveryStatus="error"
+        onRecovery={() => {
+          calls.push('recovery');
+        }}
+      />
+    </div>,
+  );
+  await until(() => document.querySelector('[data-statusbar-fixture]'));
+  await document.fonts.ready;
+  await settled();
+  checkStatusbarLayout(`${label}: paused save and recovery error`, true);
+  for (const selector of ['.status-save-paused', '.status-recovery.recovery-status-error']) {
+    const feedback = document.querySelector<HTMLElement>(selector);
+    check(
+      feedback && feedback.textContent?.trim(),
+      `${label}: critical save/recovery feedback is missing`,
+    );
+    hitTarget(feedback, `${label}: ${selector}`);
+    check(
+      feedback.title.includes('Ctrl+S'),
+      `${label}: critical feedback lacks a manual save instruction`,
+    );
+  }
+  const identity = document.querySelector<HTMLElement>('.status-file-identity');
+  check(
+    identity?.textContent === path && identity.title === path,
+    `${label}: long path identity was discarded`,
+  );
+  for (const [selector, value] of [
+    ['.status-metric-words', '1234567890'],
+    ['.status-metric-chars', '9876543210'],
+    ['.status-metric-lines', '123456789'],
+  ]) {
+    check(
+      document.querySelector(selector)?.textContent?.includes(value),
+      `${label}: large statistics were lost`,
+    );
+  }
+  statusbarButton('button[aria-label="恢复草稿"]').click();
+  statusbarButton('.statusbar-zoom').click();
+  statusbarButton('button[aria-label^="切换主题"]').click();
+  check(
+    calls.join('|') === 'recovery|zoom|theme:dark',
+    `${label}: an action missed or invoked the wrong handler`,
+  );
+  statusbarButton('button[aria-label="排版设置"]').click();
+  await until(() => document.querySelector('.typography-panel'));
+  click('button[aria-label="关闭排版设置"]');
+  await until(() => !document.querySelector('.typography-panel'));
+  await settled();
+  checkStatusbarLayout(`${label}: after crowded actions`, true);
 }
 async function openDocument(text: string) {
   click('button[title="新建文档 (Ctrl+N)"]');
@@ -354,7 +555,10 @@ export async function runInterfaceRegression(testCase: InterfaceCase): Promise<s
         innerWidth === width && innerHeight === height,
         `Runner viewport mismatch: ${innerWidth}x${innerHeight}`,
       );
+      await until(() => document.querySelector('.welcome'));
+      await checkAppStatusbar(`${width}x${height}: welcome`, false);
       const source = await openDocument(typographyDocument);
+      await checkAppStatusbar(`${width}x${height}: document`, true);
       for (const zoom of [1, 2]) {
         document
           .querySelector<HTMLElement>('.editor-area')!
@@ -364,6 +568,7 @@ export async function runInterfaceRegression(testCase: InterfaceCase): Promise<s
           `App overflows at ${zoom * 100}% editor zoom`,
         );
         inViewport(document.querySelector('.status-save')!, 'Save state');
+        checkStatusbarLayout(`${width}x${height}: document at ${zoom * 100}% zoom`, true);
       }
       document.querySelector<HTMLElement>('.editor-area')!.style.setProperty('--editor-zoom', '1');
       for (const button of document.querySelectorAll('.toolbar button')) {
@@ -411,6 +616,9 @@ export async function runInterfaceRegression(testCase: InterfaceCase): Promise<s
         document.querySelector('.shortcut-table-wrap')!.clientHeight > 0,
         'Shortcut content is inaccessible',
       );
+      click('button[aria-label="关闭快捷键设置"]');
+      await until(() => !document.querySelector('.shortcut-modal'));
+      await checkCrowdedStatusbar(root, `${width}x${height}`);
     }
     return `${testCase}: passed (real DOM, CSS transitions, focus, fonts and geometry; browser-only native boundary)`;
   } finally {

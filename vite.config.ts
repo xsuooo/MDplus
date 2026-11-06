@@ -32,7 +32,7 @@ export default defineConfig(async () => ({
       : undefined,
     watch: {
       // Native build and sandbox evidence files can be exclusively locked on Windows.
-      ignored: ['**/src-tauri/**', '**/.audit/**'],
+      ignored: ['**/src-tauri/**', '**/.audit/**', '**/_backup/**'],
     },
   },
   // 4. code-split third-party deps into stable vendor chunks

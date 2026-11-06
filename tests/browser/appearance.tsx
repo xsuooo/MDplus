@@ -210,8 +210,8 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
               animation.transitionProperty === 'background-color',
           );
         check(
-          fade?.effect?.getTiming().duration === 280 && fade.playState === 'running',
-          'Expected a live 280ms surface color transition',
+          fade?.effect?.getTiming().duration === 100 && fade.playState === 'running',
+          'Expected a live 100ms surface color transition',
         );
         check(
           getComputedStyle(surface).transitionTimingFunction.includes(
@@ -268,24 +268,43 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
           holder.querySelector('.md-mermaid-preview img')?.getBoundingClientRect().height,
           'Theme refresh lost the old diagram while its replacement was loading',
         );
-        for (const selector of source
-          ? ['.source-editor-head']
-          : [
-              '.ProseMirror',
-              '.ProseMirror h1',
-              '.ProseMirror strong',
-              '.ProseMirror code',
-              '.md-mermaid-holder',
-            ]) {
-          const animations = document.querySelector(selector)!.getAnimations();
+        if (source) {
+          const animations = document.querySelector('.source-editor-head')!.getAnimations();
           check(
             animations.some(
               (animation) =>
                 animation instanceof CSSTransition &&
-                animation.effect?.getTiming().duration === 280,
+                animation.effect?.getTiming().duration === 100,
             ),
-            `Explicit document color jumps instead of following the surface: ${selector}`,
+            'Source controls did not follow the fast surface feedback',
           );
+        } else {
+          check(
+            holder
+              .getAnimations()
+              .some(
+                (animation) =>
+                  animation instanceof CSSTransition &&
+                  animation.effect?.getTiming().duration === 100,
+              ),
+            'Diagram surface did not follow the fast surface feedback',
+          );
+          for (const [selector, expectedColor] of [
+            ['.ProseMirror', 'rgb(213, 221, 229)'],
+            ['.ProseMirror h1', 'rgb(244, 247, 250)'],
+            ['.ProseMirror strong', 'rgb(244, 247, 250)'],
+            ['.ProseMirror code', 'rgb(209, 218, 226)'],
+          ]) {
+            const element = document.querySelector(selector)!;
+            check(
+              !element.getAnimations().some((animation) => animation instanceof CSSTransition),
+              `Document leaf still queues its own theme animation: ${selector}`,
+            );
+            check(
+              getComputedStyle(element).color === expectedColor,
+              `Document colors did not reach the latest theme immediately: ${selector}`,
+            );
+          }
         }
         await fade.finished;
         await until(ready);

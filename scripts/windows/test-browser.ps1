@@ -45,7 +45,7 @@ if ($ListCases) {
 }
 if (!$EvidenceDirectory) { $EvidenceDirectory = Join-Path $repository ('.audit/browser-' + [guid]::NewGuid().ToString('N')) }
 $evidence = New-EmptyDirectory $EvidenceDirectory
-$Browser = (Get-Command $Browser -CommandType Application).Source
+$Browser = (Get-Command $Browser -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 if ([IO.Path]::GetExtension($Browser) -ine '.exe') { throw 'Pass the native agent-browser Windows EXE, not a cmd wrapper.' }
 $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
 $listener.Start(); $port = $listener.LocalEndpoint.Port; $listener.Stop()
@@ -73,7 +73,8 @@ function Invoke-Browser([string[]]$Arguments) {
     } finally { $command.Dispose() }
 }
 try {
-    $server = Start-Process -FilePath (Get-Command node.exe).Source -WorkingDirectory $repository -WindowStyle Hidden -PassThru `
+    $serverNode = (Get-Command node.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+    $server = Start-Process -FilePath $serverNode -WorkingDirectory $repository -WindowStyle Hidden -PassThru `
         -ArgumentList @('node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', $port, '--strictPort') `
         -RedirectStandardOutput (Join-Path $evidence 'vite.log') -RedirectStandardError (Join-Path $evidence 'vite-error.log')
     Write-AtomicJson (Join-Path $evidence 'server.json') @{ pid = $server.Id; port = $port }
