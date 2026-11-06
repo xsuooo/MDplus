@@ -1,6 +1,11 @@
 import { RECOVERY_DELAY_MS } from '../config/constants';
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import { getPendingImages, restorePendingImages } from './imageOps';
+import {
+  capturePendingImages,
+  restorePendingImages,
+  stagePendingImages,
+  type PendingImageLease,
+} from './imageOps';
 import { getImageUrls, isRelativeImageUrl, rewriteImageReferences } from './imagePaths';
 import type { Tab } from './types';
 
@@ -25,11 +30,23 @@ export interface RecoveryEntry {
 }
 export type RecoveryStatus = 'pending' | 'protected' | 'error' | 'idle';
 
+interface PendingCapture {
+  value: ReturnType<typeof capture> | null;
+}
 interface Journal {
   generation: number;
   timer?: ReturnType<typeof setTimeout>;
+  pending?: PendingCapture;
   tail: Promise<unknown>;
   cached: Set<string>;
+}
+function releasePendingCapture(entry: Journal): void {
+  const pending = entry.pending;
+  entry.pending = undefined;
+  if (!pending) return;
+  const value = pending.value;
+  pending.value = null;
+  value?.lease.release();
 }
 const journals = new Map<string, Journal>();
 function journal(id: string): Journal {
@@ -52,62 +69,79 @@ function imageKey(image: { placeholder: string; filename: string }): string {
 
 async function cacheImage(
   id: string,
-  image: { placeholder: string; filename: string; data: number[] },
+  image: { placeholder: string; filename: string },
   entry: Journal,
+  lease: PendingImageLease,
 ) {
   const key = imageKey(image);
   if (!entry.cached.has(key)) {
-    await invoke('cache_recovery_image', { id, key, data: image.data });
+    await lease.withDataBase64(image.placeholder, (dataBase64) =>
+      invoke('cache_recovery_image', { id, key, dataBase64 }),
+    );
     entry.cached.add(key);
   }
 }
 
 /** The paste handler must await this before inserting the image reference. */
-export async function protectPastedImage(id: string, placeholder: string): Promise<void> {
+export async function protectPastedImage(
+  id: string,
+  placeholder: string,
+  isCurrent: () => boolean = () => true,
+): Promise<void> {
   if (!isTauri()) return;
-  const image = getPendingImages(id).find((image) => image.placeholder === placeholder);
-  if (!image) throw new Error('图片缓存不可用，粘贴已取消');
-  const entry = journal(id);
-  await enqueue(entry, () => cacheImage(id, image, entry));
+  const lease = capturePendingImages(id, [placeholder]);
+  try {
+    const image = lease.images.find((image) => image.placeholder === placeholder);
+    if (!image) throw new Error('图片缓存不可用，粘贴已取消');
+    const entry = journal(id);
+    await enqueue(entry, async () => {
+      if (!isCurrent()) throw new Error('图片粘贴已取消');
+      await cacheImage(id, image, entry, lease);
+    });
+  } finally {
+    lease.release();
+  }
 }
 
 function capture(tab: Pick<Tab, 'id' | 'title' | 'path' | 'markdown'>) {
   const urls = new Set(getImageUrls(tab.markdown));
-  const images = getPendingImages(tab.id)
-    .filter(
-      (image) => urls.has(image.placeholder) || (!!image.source && urls.has(image.source.url)),
-    )
-    .map((image) => ({
+  const lease = capturePendingImages(tab.id, urls);
+  try {
+    const images = lease.images.map((image) => ({
       placeholder: image.placeholder,
       filename: image.filename,
       key: imageKey(image),
       sourceUrl: image.source?.url,
-      data: image.data,
+      byteLength: image.byteLength,
     }));
-  for (const url of urls) {
-    if (
-      (url.startsWith('mdplus-image:') || isRelativeImageUrl(url)) &&
-      !images.some(
-        (image) => (image.placeholder === url || image.sourceUrl === url) && image.data.length > 0,
-      )
-    ) {
-      throw new Error('恢复快照缺少图片数据，请立即手动保存文档');
+    for (const url of urls) {
+      if (
+        (/^mdplus-image:/i.test(url) || isRelativeImageUrl(url)) &&
+        !images.some(
+          (image) => (image.placeholder === url || image.sourceUrl === url) && image.byteLength > 0,
+        )
+      ) {
+        throw new Error('恢复快照缺少图片数据，请立即手动保存文档');
+      }
     }
+    const markdown = rewriteImageReferences(
+      tab.markdown,
+      images
+        .filter((image) => image.sourceUrl)
+        .map((image) => ({ placeholder: image.sourceUrl!, relativePath: image.placeholder })),
+    );
+    const snapshot: RecoverySnapshot = {
+      id: tab.id,
+      title: tab.title,
+      originalPath: tab.path,
+      markdown,
+      images: images.map(({ placeholder, filename, key }) => ({ placeholder, filename, key })),
+    };
+    return { snapshot, images, lease };
+  } catch (error) {
+    lease.release();
+    throw error;
   }
-  const markdown = rewriteImageReferences(
-    tab.markdown,
-    images
-      .filter((image) => image.sourceUrl)
-      .map((image) => ({ placeholder: image.sourceUrl!, relativePath: image.placeholder })),
-  );
-  const snapshot: RecoverySnapshot = {
-    id: tab.id,
-    title: tab.title,
-    originalPath: tab.path,
-    markdown,
-    images: images.map(({ placeholder, filename, key }) => ({ placeholder, filename, key })),
-  };
-  return { snapshot, images };
 }
 
 export function scheduleRecovery(
@@ -116,32 +150,46 @@ export function scheduleRecovery(
   ready?: Promise<boolean>,
 ): void {
   if (!isTauri()) return;
-  const entry = journal(tab.id);
+  const id = tab.id;
+  const entry = journal(id);
   const generation = ++entry.generation;
   clearTimeout(entry.timer);
   entry.timer = undefined;
+  releasePendingCapture(entry);
   onStatus('pending');
   const fail = () => {
     if (entry.generation === generation) onStatus('error');
   };
   const captureAndSchedule = () => {
     if (entry.generation !== generation) return;
-    // Without a preparation barrier, freeze aliases synchronously before Save As changes them.
-    let data: ReturnType<typeof capture>;
+    // A cancellable cell avoids retaining whole obsolete drafts behind slow I/O.
+    let pending: PendingCapture;
     try {
-      data = capture(tab);
+      pending = { value: capture(tab) };
     } catch {
       fail();
       return;
     }
+    entry.pending = pending;
     entry.timer = setTimeout(() => {
       entry.timer = undefined;
       void enqueue(entry, async () => {
-        if (entry.generation !== generation) return;
-        for (const image of data.images) await cacheImage(tab.id, image, entry);
-        if (entry.generation !== generation) return;
-        await invoke('write_recovery_snapshot', { snapshot: data.snapshot });
-        if (entry.generation === generation) onStatus('protected');
+        const data = pending.value;
+        pending.value = null;
+        if (entry.pending === pending) entry.pending = undefined;
+        if (!data) return;
+        try {
+          if (entry.generation !== generation) return;
+          for (const image of data.images) {
+            if (entry.generation !== generation) return;
+            await cacheImage(id, image, entry, data.lease);
+          }
+          if (entry.generation !== generation) return;
+          await invoke('write_recovery_snapshot', { snapshot: data.snapshot });
+          if (entry.generation === generation) onStatus('protected');
+        } finally {
+          data.lease.release();
+        }
       }).catch(fail);
     }, RECOVERY_DELAY_MS);
   };
@@ -160,6 +208,7 @@ export async function clearRecovery(id: string): Promise<void> {
   ++entry.generation;
   clearTimeout(entry.timer);
   entry.timer = undefined;
+  releasePendingCapture(entry);
   await enqueue(entry, async () => {
     await invoke('delete_recovery_snapshot', { id });
     entry.cached.clear();
@@ -171,13 +220,56 @@ export async function listRecovery(activeIds: string[] = []): Promise<RecoveryEn
   return invoke('list_recovery_snapshots', { activeIds });
 }
 
-export async function restoreRecovery(id: string): Promise<RecoverySnapshot> {
+export interface PreparedRecovery {
+  snapshot: RecoverySnapshot;
+  /** Publish only after the caller has rechecked the owning tab/session identity. */
+  commit: () => boolean;
+  dispose: () => Promise<void>;
+}
+
+/** Read/stash outside the commit; deletion invalidates outstanding reads. */
+export async function prepareRecovery(id: string): Promise<PreparedRecovery> {
+  const entry = journal(id);
+  const generation = entry.generation;
   const restored = await invoke<{
     snapshot: RecoverySnapshot;
-    images: (RecoveryImage & { data: number[]; mime: string })[];
+    images: (RecoveryImage & { dataBase64: string; mime: string })[];
   }>('read_recovery_snapshot', { id });
-  restorePendingImages(id, restored.images);
-  const entry = journal(id);
-  restored.images.forEach((image) => entry.cached.add(image.key));
-  return restored.snapshot;
+  const snapshot = restored.snapshot;
+  if (snapshot.id !== id) throw new Error('恢复副本身份不匹配，未替换当前内容');
+  if (entry.generation !== generation)
+    return { snapshot, commit: () => false, dispose: async () => {} };
+  const cachedKeys = restored.images.map((image) => image.key);
+  const stage = await stagePendingImages(restored.images);
+  let consumed = false;
+  let committed = false;
+  return {
+    snapshot,
+    commit: () => {
+      if (consumed || entry.generation !== generation) return false;
+      consumed = true;
+      restorePendingImages(id, stage);
+      committed = true;
+      ++entry.generation;
+      entry.cached.clear();
+      cachedKeys.forEach((key) => entry.cached.add(key));
+      return true;
+    },
+    dispose: async () => {
+      if (committed) return;
+      consumed = true;
+      await stage.dispose();
+    },
+  };
+}
+
+/** Standalone adapter; the session coordinator uses the staged API above. */
+export async function restoreRecovery(id: string): Promise<RecoverySnapshot> {
+  const prepared = await prepareRecovery(id);
+  try {
+    if (!prepared.commit()) throw new Error('恢复请求已失效，副本可能已被删除或重新恢复');
+    return prepared.snapshot;
+  } finally {
+    await prepared.dispose();
+  }
 }

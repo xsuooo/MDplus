@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import config from './config/application.json';
 import { buildId } from './config/build';
+import { katexWoff2 } from './config/katexFonts';
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -9,6 +10,7 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react()],
   define: { __MDPLUS_BUILD_ID__: JSON.stringify(buildId()) },
+  css: { postcss: { plugins: [katexWoff2()] } },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
@@ -30,7 +32,7 @@ export default defineConfig(async () => ({
       : undefined,
     watch: {
       // Native build and sandbox evidence files can be exclusively locked on Windows.
-      ignored: ['**/src-tauri/**', '**/.audit/**'],
+      ignored: ['**/src-tauri/**', '**/.audit/**', '**/_backup/**'],
     },
   },
   // 4. code-split third-party deps into stable vendor chunks

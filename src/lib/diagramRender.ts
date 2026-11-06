@@ -3,27 +3,152 @@ import { BODY_FONTS, type BodyFont } from './editorFont';
 import { diagramPreview, type MediaPreview } from './media';
 
 let queue: Promise<unknown> = Promise.resolve();
-let fontCache: { font: BodyFont; promise: ReturnType<typeof embeddedFonts> } | undefined;
+type DiagramMedia = MediaPreview & { kind: 'diagram' };
+type Consumer = { signal?: AbortSignal };
+type RenderRequest = { consumers: Set<Consumer>; promise: Promise<DiagramMedia> };
+const fontCache = new Map<BodyFont, ReturnType<typeof embeddedFonts>>();
+const requests = new Map<string, RenderRequest>();
+const previews = new Map<string, { media: DiagramMedia; bytes: number }>();
+// SVG images contain complete fonts. Bound retained results by both count and size.
+const MAX_PREVIEWS = 4;
+const MAX_PREVIEW_BYTES = 96 * 1024 * 1024;
+let previewBytes = 0;
+
+function rememberPreview(key: string, media: DiagramMedia): void {
+  const bytes = 2 * (key.length + media.src.length + media.svg.length);
+  if (bytes > MAX_PREVIEW_BYTES) return;
+  while (previews.size >= MAX_PREVIEWS || previewBytes + bytes > MAX_PREVIEW_BYTES) {
+    const oldest = previews.keys().next().value!;
+    previewBytes -= previews.get(oldest)!.bytes;
+    previews.delete(oldest);
+  }
+  previews.set(key, { media, bytes });
+  previewBytes += bytes;
+}
+
+function requireConsumer(isNeeded: () => boolean): void {
+  if (!isNeeded()) throw new DOMException('图表渲染已过期', 'AbortError');
+}
+
+function hasConsumer(consumers: Set<Consumer>): boolean {
+  for (const consumer of consumers) if (!consumer.signal?.aborted) return true;
+  return false;
+}
+
+/** Let colors and input paint before Mermaid's synchronous layout work. */
+function afterPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    // Animation frames stop in hidden tabs; export must still finish there.
+    if (document.visibilityState === 'hidden') {
+      setTimeout(resolve, 0);
+      return;
+    }
+    let frame: number | undefined;
+    let timer: ReturnType<typeof setTimeout>;
+    const finish = () => {
+      if (frame !== undefined) cancelAnimationFrame(frame);
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+      resolve();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        clearTimeout(timer);
+        timer = setTimeout(finish, 0);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    // Occluded WebViews can pause frames without a visibility event as well.
+    timer = setTimeout(finish, 100);
+    frame = requestAnimationFrame(() => {
+      frame = undefined;
+      clearTimeout(timer);
+      timer = setTimeout(finish, 0);
+    });
+  });
+}
 
 export async function renderDiagramMedia(
   code: string,
   theme: 'light' | 'dark',
   font: BodyFont,
-): Promise<MediaPreview & { kind: 'diagram' }> {
-  if (fontCache?.font !== font) fontCache = { font, promise: embeddedFonts(font) };
-  const pending = fontCache.promise;
+  options: { signal?: AbortSignal; reuse?: boolean } = {},
+): Promise<DiagramMedia> {
+  const { signal } = options;
+  signal?.throwIfAborted();
+  // Inline export SVGs need independent Mermaid IDs. Reuse is safe only for
+  // isolated SVG images, so NodeViews opt in and ordinary exports stay fresh.
+  if (!options.reuse) return renderUncached(code, theme, font, () => !signal?.aborted);
+  const key = JSON.stringify([font, theme, code]);
+  const cached = previews.get(key);
+  if (cached) {
+    previews.delete(key);
+    previews.set(key, cached);
+    // NodeViews stabilize their own layout; never mutate a shared cached result.
+    return { ...cached.media };
+  }
+  const consumer = { signal };
+  let request = requests.get(key);
+  if (request && !hasConsumer(request.consumers)) request = undefined;
+  if (request) request.consumers.add(consumer);
+  else {
+    const consumers = new Set([consumer]);
+    const isNeeded = () => hasConsumer(consumers);
+    const promise = renderUncached(code, theme, font, isNeeded);
+    request = { consumers, promise };
+    requests.set(key, request);
+    const pendingRequest = request;
+    void promise
+      .then(
+        (media) => {
+          if (isNeeded()) rememberPreview(key, media);
+        },
+        () => {},
+      )
+      .finally(() => {
+        if (requests.get(key) === pendingRequest) requests.delete(key);
+      });
+  }
+  try {
+    const media = await request.promise;
+    signal?.throwIfAborted();
+    return { ...media };
+  } finally {
+    request.consumers.delete(consumer);
+  }
+}
+
+async function renderUncached(
+  code: string,
+  theme: 'light' | 'dark',
+  font: BodyFont,
+  isNeeded: () => boolean,
+): Promise<DiagramMedia> {
+  await afterPaint();
+  requireConsumer(isNeeded);
+  let pending = fontCache.get(font);
+  if (!pending) {
+    pending = embeddedFonts(font);
+    fontCache.set(font, pending);
+  }
+  const fontRequest = pending;
   const resources = await pending.catch((error) => {
-    if (fontCache?.promise === pending) fontCache = undefined;
+    if (fontCache.get(font) === fontRequest) fontCache.delete(font);
     throw error;
   });
+  requireConsumer(isNeeded);
   const body = BODY_FONTS.find((entry) => entry.id === font)!;
   await Promise.all([
     document.fonts.load(`400 16px ${body.family}`, '中文 Mixed'),
     document.fonts.load(`${body.strongWeight} 16px ${body.family}`, '中文 Bold'),
   ]);
   await document.fonts.ready;
+  requireConsumer(isNeeded);
   const { default: mermaid } = await import('mermaid');
   const task = queue.then(async () => {
+    requireConsumer(isNeeded);
+    await afterPaint();
+    requireConsumer(isNeeded);
     // Strict rendering measures loaded app fonts; previews use inert SVG images.
     // Never call Mermaid's interactive bindFunctions.
     mermaid.initialize({
@@ -66,6 +191,7 @@ export async function renderDiagramMedia(
     observer.observe(host, { childList: true, subtree: true });
     try {
       let { svg } = await mermaid.render(`md-mmd-${crypto.randomUUID()}`, code, host);
+      requireConsumer(isNeeded);
       const parsed = new DOMParser().parseFromString(svg, 'text/html').querySelector('svg');
       if (parsed?.classList.contains('flowchart')) {
         // WebView2 can retain Mermaid's temporary label bounds in its live SVG.
@@ -74,6 +200,7 @@ export async function renderDiagramMedia(
         applyStyles();
         parsed.getBoundingClientRect();
         await document.fonts.ready;
+        requireConsumer(isNeeded);
         for (const label of parsed.querySelectorAll('foreignObject')) {
           const content = label.firstElementChild;
           const matrix = label.getScreenCTM();
@@ -106,6 +233,7 @@ export async function renderDiagramMedia(
         );
         svg = parsed.outerHTML;
       }
+      requireConsumer(isNeeded);
       const { imageSVG, ...preview } = diagramPreview(svg, resources.css);
       return {
         ...preview,

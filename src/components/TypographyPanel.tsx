@@ -54,15 +54,18 @@ export function TypographyPanel({
     >
       <button
         ref={trigger}
-        className="statusbar-theme"
+        className="statusbar-theme statusbar-typography"
         aria-label="排版设置"
         aria-expanded={open}
         aria-controls={open ? 'typography-panel' : undefined}
         aria-haspopup="dialog"
-        title="全局设置界面、正文与代码字体"
+        title="设置界面、正文与代码字体"
         onClick={() => setOpen((value) => !value)}
       >
-        排版
+        <span className="statusbar-typography-mark" aria-hidden="true">
+          Aa
+        </span>
+        <span className="statusbar-label">排版</span>
       </button>
       <Presence present={open}>
         <div
@@ -87,7 +90,7 @@ export function TypographyPanel({
           <div className="typography-head">
             <div>
               <h3 id="typography-title">排版设置</h3>
-              <p>找到适合你的阅读节奏</p>
+              <p>选择界面、正文和代码字体</p>
             </div>
             <button
               className="toolbar-btn toolbar-btn-icon"
@@ -128,7 +131,7 @@ export function TypographyPanel({
             <fieldset className="typography-group" aria-describedby="code-font-scope">
               <legend className="typography-label">源码与代码字体</legend>
               <p className="typography-description" id="code-font-scope">
-                用于源码、代码块、行内代码及快捷键按键。相同样张，直接比较；不改变正文。
+                用于源码、代码块、行内代码和快捷键。
               </p>
               <div className="font-options">
                 {CODE_FONTS.map((font) => (
@@ -178,9 +181,9 @@ export function TypographyPanel({
           </div>
           <div className="typography-footer">
             <p role="status">
-              当前代码方案：<strong>{selectedCode.purpose}</strong>
+              当前代码：<strong>{selectedCode.purpose}</strong>
             </p>
-            <span>全局即时生效，独立记住选择；不修改 Markdown。</span>
+            <span>选择会自动记住</span>
           </div>
         </div>
       </Presence>

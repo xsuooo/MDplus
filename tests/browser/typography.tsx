@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client';
+import { createNativeMocks } from './nativeMocks';
 import App from '../../src/App';
 import { ErrorBoundary } from '../../src/components/ErrorBoundary';
 import { CODE_FONTS } from '../../src/lib/editorFont';
@@ -137,6 +138,7 @@ async function openDocument(text = typographyDocument) {
 }
 
 export async function runTypographyRegression(testCase: TypographyCase): Promise<string> {
+  createNativeMocks().install();
   localStorage.removeItem('mdplus-body-font');
   localStorage.removeItem('mdplus-editor-font');
   if (testCase === 'typography-persistence')

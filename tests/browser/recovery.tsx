@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client';
-import { mockIPC, mockWindows } from '@tauri-apps/api/mocks';
+import { createNativeMocks } from './nativeMocks';
 import App from '../../src/App';
 import type { RecoverySnapshot } from '../../src/lib/recovery';
 
@@ -10,6 +10,7 @@ export const recoveryCases = [
   'recovery-paste-cache-failure',
   'recovery-source-checkpoint',
   'recovery-save-failure',
+  'recovery-escape-reopen',
 ] as const;
 export type RecoveryCase = (typeof recoveryCases)[number];
 
@@ -30,8 +31,6 @@ function click(selector: string) {
 }
 
 export async function runRecoveryRegression(testCase: RecoveryCase): Promise<string> {
-  mockWindows('main');
-  Object.assign(globalThis, { isTauri: true });
   const originalPath = 'C:/中文 目录/原文.md';
   const restoredPath = 'C:/导出 目录/恢复 副本.md';
   const files = new Map([[originalPath, 'original document\n']]);
@@ -51,30 +50,31 @@ export async function runRecoveryRegression(testCase: RecoveryCase): Promise<str
   const restores =
     testCase === 'recovery-restore-save' ||
     testCase === 'recovery-discard' ||
-    testCase === 'recovery-save-failure';
+    testCase === 'recovery-save-failure' ||
+    testCase === 'recovery-escape-reopen';
   const snapshots = new Map<string, RecoverySnapshot>(restores ? [[initial.id, initial]] : []);
   const events: string[] = [];
   const messages: string[] = [];
   const binaryWrites: string[] = [];
   const store = new Map<string, unknown>();
   let checkpoints = 0;
-  mockIPC(
-    async (command, payload) => {
-      const args = (payload ?? {}) as Record<string, any>;
+  let restoreReads = 0;
+  let releaseRestoreRead!: () => void;
+  const restoreReadGate = new Promise<void>((resolve) => {
+    releaseRestoreRead = resolve;
+  });
+  const native = createNativeMocks({
+    settings: store,
+    // Legacy containers belong only to this test's fake durable boundary. The
+    // wrapper validates compact IPC while retaining every failure branch below.
+    legacyImagePayloads: true,
+    fallback: async (command, payload) => {
+      const args = payload as Record<string, any>;
       switch (command) {
         case 'take_startup_files':
           return restores ? [] : [originalPath];
         case 'take_pending_open_files':
           return [];
-        case 'load_settings':
-          return 1;
-        case 'plugin:store|get':
-          return [store.get(args.key), store.has(args.key)];
-        case 'plugin:store|set':
-          store.set(args.key, args.value);
-          return;
-        case 'plugin:store|save':
-          return;
         case 'plugin:window|is_minimized':
         case 'plugin:window|is_maximized':
           return false;
@@ -134,11 +134,16 @@ export async function runRecoveryRegression(testCase: RecoveryCase): Promise<str
           return [...snapshots.values()]
             .filter((s) => !args.activeIds.includes(s.id))
             .map((s) => ({ ...s, updatedAt: Date.now(), damaged: false }));
-        case 'read_recovery_snapshot':
-          return {
+        case 'read_recovery_snapshot': {
+          check(snapshots.has(args.id), 'Missing requested recovery snapshot');
+          restoreReads += 1;
+          const restored = {
             snapshot: snapshots.get(args.id),
             images: [{ ...initial.images[0], data: [...png], mime: 'image/png' }],
           };
+          if (testCase === 'recovery-escape-reopen') await restoreReadGate;
+          return restored;
+        }
         case 'cache_recovery_image':
           if (testCase === 'recovery-paste-cache-failure') throw new Error('cache full');
           events.push('image-cached');
@@ -157,8 +162,8 @@ export async function runRecoveryRegression(testCase: RecoveryCase): Promise<str
           throw new Error(`Unmocked recovery IPC: ${command}`);
       }
     },
-    { shouldMockEvents: true },
-  );
+  });
+  native.install();
   const host = document.createElement('div');
   document.body.append(host);
   const root = createRoot(host);
@@ -167,6 +172,38 @@ export async function runRecoveryRegression(testCase: RecoveryCase): Promise<str
     if (restores) {
       await until(() => document.querySelector('.recovery-modal'));
       click('.recovery-entry .btn-primary');
+      if (testCase === 'recovery-escape-reopen') {
+        await until(() => restoreReads === 1);
+        document
+          .querySelector('.recovery-modal')!
+          .dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+          );
+        await until(() => !document.querySelector('.recovery-modal'));
+        check(
+          !document.querySelector('[role="tab"]') && snapshots.has(initial.id),
+          'Esc prematurely published a tab or removed the only recovery copy',
+        );
+        click('button[title="恢复草稿与清理缓存"]');
+        await until(
+          () =>
+            document.querySelector<HTMLButtonElement>('.recovery-entry .btn-primary')?.disabled ===
+            false,
+        );
+        click('.recovery-entry .btn-primary');
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        );
+        check(
+          restoreReads === 1,
+          'M1: Esc/reopen dispatched duplicate restore reads for one recovery identity',
+        );
+        check(
+          !document.querySelector('[role="tab"]'),
+          'A restore published before its native read completed',
+        );
+        releaseRestoreRead();
+      }
       await until(() => document.querySelector('.editor-tab.active .ProseMirror img'));
       const image = document.querySelector<HTMLImageElement>(
         '.editor-tab.active img:not(.ProseMirror-separator)',
@@ -174,6 +211,44 @@ export async function runRecoveryRegression(testCase: RecoveryCase): Promise<str
       await until(() => image.naturalWidth > 0);
       check(snapshots.has(initial.id), 'Recovering discarded the only durable copy');
       check(files.get(originalPath) === 'original document\n', 'Recovery overwrote the original');
+      if (testCase === 'recovery-escape-reopen') {
+        check(
+          document.querySelectorAll('[role="tab"]').length === 1,
+          'M1: one recovery created duplicate tabs',
+        );
+        check(
+          native.calls.filter((call) => call.command === 'stash_image').length === 1,
+          'M1: duplicate restore replaced the live image cache',
+        );
+        click('button[aria-label="切换源码模式"]');
+        await until(() => document.querySelector('.source-editor:not([hidden]) textarea'));
+        const field = document.querySelector<HTMLTextAreaElement>(
+          '.source-editor:not([hidden]) textarea',
+        )!;
+        const edited = `${field.value}\nUser edit after recovering once`;
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
+          field,
+          edited,
+        );
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        );
+        click('button[title="恢复草稿与清理缓存"]');
+        await until(() => document.querySelector('.recovery-modal'));
+        await until(() => document.querySelectorAll('.recovery-entry').length === 0);
+        check(
+          field.value === edited &&
+            restoreReads === 1 &&
+            document.querySelectorAll('[role="tab"]').length === 1,
+          'M1: reopening recovery reset the edited live tab or re-read its cache',
+        );
+        check(
+          snapshots.has(initial.id) && files.get(originalPath) === 'original document\n',
+          'M1: coalescing restore removed recovery data or overwrote the original',
+        );
+        return `${testCase}: escaped/reopened restore shares one read and publishes one tab/cache without resetting later edits`;
+      }
       if (testCase === 'recovery-discard') {
         click('.tab.active .tab-close');
         await until(() => document.querySelector('#close-document-title'));
@@ -246,6 +321,7 @@ export async function runRecoveryRegression(testCase: RecoveryCase): Promise<str
     }
     return `${testCase}: real React/Milkdown, simulated durable/native boundary passed`;
   } finally {
+    releaseRestoreRead();
     root.unmount();
     host.remove();
   }

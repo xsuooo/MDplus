@@ -2,6 +2,7 @@ import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { showMessage } from '../lib/dialog';
+import { needsDocumentProtection } from '../lib/documentProtection';
 import { errorMessage } from '../lib/errors';
 import type { Tab } from '../lib/types';
 
@@ -38,14 +39,19 @@ export function useDocumentClose(
       const request = ++closeGeneration.current;
       confirmingClose.current = null;
       setCloseBusy(false);
-      if (tab.dirty || (tab.isNew && !!tab.markdown.trim())) {
+      if (needsDocumentProtection(tab, resolveContent(tab))) {
+        protectDraft(tab);
         setPendingCloseTab(tab);
       } else {
         const generation = contentGenerations.current[id];
         void cleanRecovery(id).then((clean) => {
           if (closeGeneration.current !== request) return;
           const current = tabsRef.current.find((item) => item.id === id);
-          if (current && contentGenerations.current[id] !== generation) {
+          if (
+            current &&
+            (contentGenerations.current[id] !== generation ||
+              needsDocumentProtection(current, resolveContent(current)))
+          ) {
             protectDraft(current);
             setPendingCloseTab(current);
           } else if (clean) removeTab(id);
@@ -53,7 +59,15 @@ export function useDocumentClose(
         });
       }
     },
-    [tabsRef, setPendingCloseTab, contentGenerations, cleanRecovery, removeTab, protectDraft],
+    [
+      tabsRef,
+      setPendingCloseTab,
+      contentGenerations,
+      cleanRecovery,
+      removeTab,
+      protectDraft,
+      resolveContent,
+    ],
   );
 
   // Initially clean windows and the final confirmed tab share the same barriers.
@@ -62,8 +76,8 @@ export function useDocumentClose(
     async (request: number) => {
       const isCurrent = () => pendingWindowClose.current && closeGeneration.current === request;
       const offerDirtyTab = () => {
-        const dirty = tabsRef.current.find(
-          (tab) => tab.dirty || (tab.isNew && !!resolveContent(tab).trim()),
+        const dirty = tabsRef.current.find((tab) =>
+          needsDocumentProtection(tab, resolveContent(tab)),
         );
         if (!dirty) return false;
         protectDraft(dirty);
@@ -115,10 +129,12 @@ export function useDocumentClose(
       try {
         if (action === 'save') {
           const saved = await doSave(closedId, true);
+          const savedTab = tabsRef.current.find((candidate) => candidate.id === closedId);
           if (
             !isCurrent() ||
             !saved ||
-            tabsRef.current.find((candidate) => candidate.id === closedId)?.dirty
+            !savedTab ||
+            needsDocumentProtection(savedTab, resolveContent(savedTab))
           )
             return;
         }
@@ -126,14 +142,20 @@ export function useDocumentClose(
         const clean = await cleanRecovery(closedId);
         const current = tabsRef.current.find((tab) => tab.id === closedId);
         if (!isCurrent()) {
-          if (current?.dirty) protectDraft(current);
+          if (current && needsDocumentProtection(current, resolveContent(current)))
+            protectDraft(current);
           return;
         }
         if (!clean) {
           await showMessage('无法清理恢复副本，本次关闭已取消。请重试。', 'error');
           return;
         }
-        if (contentGenerations.current[closedId] !== closingGeneration) {
+        if (
+          contentGenerations.current[closedId] !== closingGeneration ||
+          (action === 'save' &&
+            current &&
+            needsDocumentProtection(current, resolveContent(current)))
+        ) {
           if (current) {
             protectDraft(current);
             setPendingCloseTab(current);
@@ -168,6 +190,7 @@ export function useDocumentClose(
       continueWindowClose,
       doSave,
       protectDraft,
+      resolveContent,
     ],
   );
 

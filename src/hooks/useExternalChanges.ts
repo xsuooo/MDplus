@@ -2,12 +2,18 @@ import { useCallback, useEffect } from 'react';
 import { EXTERNAL_POLL_MS } from '../config/constants';
 import { confirmDialog, showMessage } from '../lib/dialog';
 import { documentRevision, readDocument } from '../lib/fileOps';
-import { prepareImageReferences } from '../lib/imageOps';
+import { prepareImageReferences, type PreparedImageReferences } from '../lib/imageOps';
 import { computeStats } from '../lib/stats';
+import { needsDocumentProtection } from '../lib/documentProtection';
 
 import type { DocumentSession } from './useDocumentSession';
+import type { RecoveryController } from './useRecovery';
 
-export function useExternalChanges(session: DocumentSession) {
+export function useExternalChanges(
+  session: DocumentSession,
+  recovery: Pick<RecoveryController, 'cleanRecovery' | 'protectDraft'>,
+) {
+  const { cleanRecovery, protectDraft } = recovery;
   const {
     setTabs,
     activeId,
@@ -32,6 +38,7 @@ export function useExternalChanges(session: DocumentSession) {
     async (tabId: string, detectedMtime: number, detectedRevision: string | null) => {
       if (externalPrompts.current.has(tabId)) return;
       externalPrompts.current.add(tabId);
+      let images: PreparedImageReferences | undefined;
       try {
         const tab = tabsRef.current.find((candidate) => candidate.id === tabId);
         if (!tab?.path || tab.dirty || tabId in saveQueues.current) return;
@@ -73,7 +80,7 @@ export function useExternalChanges(session: DocumentSession) {
             await cancelReload();
             return;
           }
-          const images = await prepareImageReferences(tabId, snapshot.content, tab.path, {
+          images = await prepareImageReferences(tabId, snapshot.content, tab.path, {
             refresh: true,
           });
           if (!canApply()) {
@@ -116,10 +123,14 @@ export function useExternalChanges(session: DocumentSession) {
             externalMtime: loadedMtime,
             diskRevision: snapshot.revision,
             externalChanged: false,
+            preserveLocal: false,
             savedContent: content,
           });
           syncEditor(tabId, content);
           setTabs([...tabsRef.current]);
+          await cleanRecovery(tabId);
+          const current = tabsRef.current.find((candidate) => candidate.id === tabId);
+          if (current && needsDocumentProtection(current)) protectDraft(current);
         } else {
           // 保留本地内容时记录冲突 mtime,避免后续自动保存静默覆盖外部版本。
           pauseAutoSave(tabId, detectedMtime);
@@ -144,6 +155,11 @@ export function useExternalChanges(session: DocumentSession) {
         console.warn('检测外部文件变化失败', error);
       } finally {
         externalPrompts.current.delete(tabId);
+        try {
+          await images?.dispose();
+        } catch (error) {
+          console.error('释放外部图片准备失败', error);
+        }
       }
     },
     [
@@ -162,6 +178,8 @@ export function useExternalChanges(session: DocumentSession) {
       setTabs,
       currentView,
       activeId,
+      cleanRecovery,
+      protectDraft,
     ],
   );
 
@@ -215,6 +233,7 @@ export function useExternalChanges(session: DocumentSession) {
             const offered = detectedExternalStates.current[latest.id];
             if (offered?.revision === disk.revision && offered.mtime === mtime) return;
             detectedExternalStates.current[latest.id] = { revision: disk.revision, mtime };
+            updateTab(latest.id, { preserveLocal: true });
             if (latest.id === activeId) {
               await promptExternalReload(latest.id, mtime, disk.revision);
             } else {

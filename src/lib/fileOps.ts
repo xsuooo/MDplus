@@ -29,6 +29,8 @@ export interface ImageReceipt {
   filename: string;
   relativePath: string;
   path: string;
+  /** Native ownership of a newly created asset; null means an existing asset was reused. */
+  allocationId: string | null;
 }
 
 export async function readDocument(path: string): Promise<DocumentSnapshot> {
@@ -54,7 +56,7 @@ export async function readImageFile(
 ): Promise<{
   path: string;
   mime: string;
-  data: number[];
+  dataBase64: string;
 }> {
   return invoke('read_image_file', { docPath, relativePath });
 }

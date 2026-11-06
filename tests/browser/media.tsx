@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client';
+import { createNativeMocks } from './nativeMocks';
 import { editorViewCtx } from '@milkdown/kit/core';
 import { NodeSelection } from '@milkdown/prose/state';
 import { createEditor, getCurrentState, undo } from '../../src/lib/editor';
@@ -38,6 +39,7 @@ const image = (w: number, h: number) =>
     `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="teal"/></svg>`,
   );
 export async function runMediaRegression(testCase: MediaCase): Promise<string> {
+  createNativeMocks().install();
   if (testCase === 'media-app-close') {
     const host = document.createElement('div');
     document.body.append(host);

@@ -1,9 +1,15 @@
 import { useCallback, useState } from 'react';
 import { confirmDialog, showMessage } from '../lib/dialog';
+import { needsDocumentProtection } from '../lib/documentProtection';
 import { rebaseSourcePlace, renderedPlace } from '../lib/editorPosition';
 import { errorMessage } from '../lib/errors';
 import { basename, documentRevision, pickSaveFile, writeDocument } from '../lib/fileOps';
-import { commitImageMigration, migratePendingImages } from '../lib/imageOps';
+import {
+  commitImageMigration,
+  finalizeImageMigration,
+  migratePendingImages,
+  type ImageMigration,
+} from '../lib/imageOps';
 import { getImageUrls, isRelativeImageUrl } from '../lib/imagePaths';
 import { pathKey } from '../lib/pathIdentity';
 import { computeStats } from '../lib/stats';
@@ -13,6 +19,42 @@ import type { RecentFile, Tab } from '../lib/types';
 import { AUTO_SAVE_DELAY } from '../config/constants';
 import type { DocumentSession } from './useDocumentSession';
 import type { RecoveryController } from './useRecovery';
+
+type MigrationWriteState = 'unchanged' | 'committed' | 'unknown';
+
+/** A transport rejection cannot prove that native code did not commit. */
+async function writePreparedDocument(
+  path: string,
+  content: string,
+  expectedRevision: string | null,
+  setState: (state: MigrationWriteState) => void,
+) {
+  setState('unknown');
+  try {
+    const receipt = await writeDocument(path, content, expectedRevision);
+    setState('committed');
+    return receipt;
+  } catch (error) {
+    if (error && typeof error === 'object' && 'writeState' in error) {
+      if (error.writeState === 'unchanged' || error.writeState === 'committed')
+        setState(error.writeState);
+    }
+    throw error;
+  }
+}
+
+async function finishMigration(migration: ImageMigration | undefined, state: MigrationWriteState) {
+  if (!migration) return;
+  try {
+    await finalizeImageMigration(migration, state);
+  } catch (error) {
+    console.error('图片保存事务清理失败', error);
+    await showMessage(
+      `图片资产清理未完成，已保守保留文件，请稍后核对：${errorMessage(error)}`,
+      'error',
+    );
+  }
+}
 
 export function useDocumentSave(
   session: DocumentSession,
@@ -93,6 +135,8 @@ export function useDocumentSave(
       const isCurrentSave = () =>
         (saveGenerations.current[tab.id] ?? 0) === generation &&
         tabsRef.current.some((candidate) => candidate.id === tab.id);
+      let migration: ImageMigration | undefined;
+      let writeState: MigrationWriteState = 'unchanged';
       try {
         if (!isCurrentSave()) return false;
         const selected = await pickSaveFile(tab.path ?? `${tab.title}`);
@@ -138,7 +182,7 @@ export function useDocumentSave(
           );
           return false;
         }
-        const migration = await migratePendingImages(tab.id, target, content);
+        migration = await migratePendingImages(tab.id, target, content);
         const migratedContent = migration.markdown;
         if (!isCurrentSave()) return false;
         const latestDestination = await documentRevision(target);
@@ -161,7 +205,14 @@ export function useDocumentSave(
           );
           return false;
         }
-        const receipt = await writeDocument(target, migratedContent, destination.revision);
+        const receipt = await writePreparedDocument(
+          target,
+          migratedContent,
+          destination.revision,
+          (state) => {
+            writeState = state;
+          },
+        );
         if (!isCurrentSave()) return false;
         const contentChangedDuringWrite =
           (contentGenerations.current[tab.id] ?? 0) !== contentGeneration;
@@ -186,7 +237,10 @@ export function useDocumentSave(
         }
         if (!contentChangedDuringWrite) {
           commitImageMigration(migration);
-          sourceRewrites.current[tab.id] = migration.references ?? [];
+          sourceRewrites.current[tab.id] = [
+            ...(migration.historyReferences ?? []),
+            ...(migration.references ?? []),
+          ];
           applyMigratedContent(tab.id, migratedContent, content);
         }
         updateTab(tab.id, {
@@ -196,6 +250,7 @@ export function useDocumentSave(
           externalMtime: receipt.mtime,
           diskRevision: receipt.revision,
           externalChanged: false,
+          preserveLocal: false,
           markdown: contentChangedDuringWrite ? latestContent : migratedContent,
           savedContent: migratedContent,
           dirty: contentChangedDuringWrite ? latestContent !== migratedContent : false,
@@ -205,7 +260,8 @@ export function useDocumentSave(
         if (!contentChangedDuringWrite) {
           await cleanRecovery(tab.id);
           const latest = tabsRef.current.find((item) => item.id === tab.id);
-          if (latest?.dirty) protectDraft(latest);
+          if (latest && needsDocumentProtection(latest, resolveContent(latest)))
+            protectDraft(latest);
         }
         await pushRecentFile(receipt.path, basename(receipt.path), selected);
         setRecentFiles(await getRecentFiles());
@@ -218,6 +274,8 @@ export function useDocumentSave(
         if (latest) protectDraft(latest);
         await showMessage(`另存为失败:${errorMessage(err)}`, 'error');
         return false;
+      } finally {
+        await finishMigration(migration, writeState);
       }
     },
     [
@@ -259,6 +317,8 @@ export function useDocumentSave(
           : false;
       }
 
+      let migration: ImageMigration | undefined;
+      let writeState: MigrationWriteState = 'unchanged';
       try {
         const disk = await documentRevision(tab.path);
         const diskMtime = disk.mtime ?? 0;
@@ -299,7 +359,7 @@ export function useDocumentSave(
             );
           return false;
         }
-        const migration = await migratePendingImages(id, tab.path, rawContent);
+        migration = await migratePendingImages(id, tab.path, rawContent);
         const content = migration.markdown;
         if (!isCurrentSave()) return false;
         // The native writer also checks these bytes and preserves copies on an uncertain replacement.
@@ -313,13 +373,18 @@ export function useDocumentSave(
           return false;
         }
         if (!isCurrentSave()) return false;
-        const receipt = await writeDocument(tab.path, content, disk.revision);
+        const receipt = await writePreparedDocument(tab.path, content, disk.revision, (state) => {
+          writeState = state;
+        });
         if (!isCurrentSave()) return false;
         const contentChangedDuringWrite =
           (contentGenerations.current[id] ?? 0) !== contentGeneration;
         if (!contentChangedDuringWrite) {
           commitImageMigration(migration);
-          sourceRewrites.current[id] = migration.references ?? [];
+          sourceRewrites.current[id] = [
+            ...(migration.historyReferences ?? []),
+            ...(migration.references ?? []),
+          ];
           applyMigratedContent(id, content, rawContent);
         }
         const latest = contentChangedDuringWrite
@@ -331,6 +396,7 @@ export function useDocumentSave(
           externalMtime: receipt.mtime,
           diskRevision: receipt.revision,
           externalChanged: false,
+          preserveLocal: false,
           savedContent: content,
         });
         delete blockedExternalMtime.current[id];
@@ -338,7 +404,8 @@ export function useDocumentSave(
         if (!contentChangedDuringWrite) {
           await cleanRecovery(id);
           const current = tabsRef.current.find((item) => item.id === id);
-          if (current?.dirty) protectDraft(current);
+          if (current && needsDocumentProtection(current, resolveContent(current)))
+            protectDraft(current);
         }
         return true;
       } catch (err) {
@@ -350,6 +417,8 @@ export function useDocumentSave(
         if (latest) protectDraft(latest);
         await showMessage(`保存失败:${errorMessage(err)}`, 'error');
         return false;
+      } finally {
+        await finishMigration(migration, writeState);
       }
     },
     [

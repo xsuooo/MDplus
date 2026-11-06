@@ -11,7 +11,7 @@
   --radius-sm: 5px;
   --toolbar-h: 48px;
   --tabbar-h: 40px;
-  --statusbar-h: 30px;
+  --statusbar-h: 34px;
 
   --font-sans:
     -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
@@ -41,11 +41,12 @@
   --motion-exit: 160ms;
   --motion-enter: 220ms;
   --motion-layout: 280ms;
+  --motion-theme: 100ms;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in: cubic-bezier(0.4, 0, 1, 1);
   --theme-transition:
-    background-color var(--motion-layout) var(--ease-out),
-    color var(--motion-layout) var(--ease-out), border-color var(--motion-layout) var(--ease-out);
+    background-color var(--motion-theme) var(--ease-out), color var(--motion-theme) var(--ease-out),
+    border-color var(--motion-theme) var(--ease-out);
 }
 
 html[data-theme='light'] {
@@ -945,7 +946,8 @@ summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 12px;
+  gap: 16px;
+  padding: 0 14px;
   background: var(--bg-elevated);
   border-top: 1px solid var(--border);
   font-size: 12px;
@@ -954,38 +956,86 @@ summary {
 }
 
 .statusbar-left,
-.statusbar-right {
+.statusbar-right,
+.statusbar-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  min-width: 0;
 }
 .statusbar-left {
-  flex: 1;
+  flex: 1 1 auto;
+  gap: 12px;
   overflow: hidden;
 }
 .statusbar-right {
   flex-shrink: 0;
+  gap: 10px;
+}
+.statusbar-group {
+  gap: 10px;
+}
+.statusbar-document,
+.statusbar-details {
+  flex-shrink: 0;
+}
+.statusbar-document {
+  gap: 8px;
+}
+.statusbar-details,
+.statusbar-location {
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+}
+.statusbar-location {
+  flex: 1 1 100px;
+  overflow: hidden;
+}
+.statusbar-actions {
+  gap: 2px;
 }
 .status-metrics {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 10px;
   min-width: 0;
-  overflow: hidden;
 }
 .status-item {
   font-variant-numeric: tabular-nums;
 }
 .status-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   flex-shrink: 0;
 }
-.statusbar-left .recovery-status-error {
-  overflow: hidden;
-  text-overflow: ellipsis;
+.status-save-dot {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
 }
-
-.status-sep {
-  opacity: 0.5;
+.status-recovery {
+  font-size: 11px;
+  font-weight: 400;
+}
+.status-mode {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.statusbar-version {
+  flex: 0 0 auto;
+  border-left: 1px solid var(--border);
+  padding-left: 10px;
+  font-size: 11px;
+  line-height: 24px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.statusbar-version:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .status-save.dirty {
@@ -999,8 +1049,10 @@ summary {
   font-size: 12px;
   color: var(--text-muted);
   border-radius: 4px;
-  padding: 2px 6px;
-  min-height: 26px;
+  padding: 3px 7px;
+  min-height: 28px;
+  flex-shrink: 0;
+  white-space: nowrap;
   transition:
     background-color var(--motion-fast) var(--ease-out),
     color var(--motion-fast) var(--ease-out);
@@ -1011,6 +1063,17 @@ summary {
 }
 .statusbar-theme svg {
   display: block;
+  flex-shrink: 0;
+}
+.typography-control {
+  display: flex;
+  align-items: center;
+}
+.statusbar-typography-mark {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
 }
 
 .typography-panel {
@@ -1675,6 +1738,12 @@ body.dragging::after {
   position: relative;
   padding-top: 36px;
 }
+.md-mermaid-node:has(.md-mermaid-editing) {
+  padding-top: 0;
+}
+.milkdown .ProseMirror .md-mermaid-node.ProseMirror-selectednode:has(.md-mermaid-editing) {
+  outline: none;
+}
 
 .md-mermaid-holder {
   background: var(--bg-elevated);
@@ -1703,6 +1772,9 @@ body.dragging::after {
 }
 .md-mermaid-editing {
   display: block;
+  padding: 10px;
+  background: var(--editor-bg);
+  border-color: var(--border-strong);
 }
 .md-mermaid-node > .md-media-controls {
   top: 0;
@@ -1715,10 +1787,6 @@ body.dragging::after {
   visibility: hidden;
   pointer-events: none;
 }
-.md-mermaid-preview-revealing {
-  visibility: visible;
-}
-
 .md-mermaid-node.loading .md-mermaid-holder:empty::before {
   content: '渲染中…';
   color: var(--text-muted);
@@ -1742,16 +1810,22 @@ body.dragging::after {
   min-height: 120px;
   width: 100%;
   resize: vertical;
-  border: none;
+  border: 1px solid var(--border);
   outline: none;
-  background: var(--bg);
+  background: var(--code-bg);
   font-family: var(--font-code);
   font-variant-ligatures: normal;
   font-size: var(--source-size);
   line-height: var(--code-leading);
-  padding: 12px;
+  padding: 12px 14px;
   border-radius: var(--radius-sm);
-  color: var(--text);
+  color: var(--code-text);
+  transition: border-color var(--motion-fast) var(--ease-out);
+}
+.md-mermaid-textarea:focus,
+.md-mermaid-textarea:focus-visible {
+  border-color: var(--accent);
+  outline: none;
 }
 
 .md-mermaid-bar {
@@ -1759,12 +1833,13 @@ body.dragging::after {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 4px 2px 8px;
+  padding: 0 2px 8px;
 }
 
 .md-mermaid-hint {
   font-size: 12px;
   color: var(--text-muted);
+  line-height: 1.5;
 }
 
 .md-mermaid-commit {
@@ -1915,8 +1990,8 @@ body.dragging::after {
    全局动效收尾
    ============================================================ */
 
-/* Animate live color owners, not a root snapshot that removes controls from hit testing.
-   Low specificity preserves the faster feedback on interactive controls. */
+/* Keep theme feedback brief on the app chrome. Document descendants take their
+   new colors together without hundreds of independent paint animations. */
 :where(
   .app,
   .toolbar,
@@ -1992,31 +2067,13 @@ body.dragging::after {
   .md-image-error,
   .md-media-controls,
   .md-media-controls button,
-  .md-mermaid-holder,
-  .md-mermaid-textarea,
-  .md-mermaid-bar,
-  .md-mermaid-hint,
-  .milkdown .ProseMirror,
-  .ProseMirror h1,
-  .ProseMirror h2,
-  .ProseMirror h3,
-  .ProseMirror h4,
-  .ProseMirror h5,
-  .ProseMirror h6,
-  .ProseMirror strong,
-  .ProseMirror a,
-  .ProseMirror code,
-  .ProseMirror pre,
-  .ProseMirror blockquote,
-  .ProseMirror hr,
-  .ProseMirror th,
-  .ProseMirror td
+  .md-mermaid-holder
 ) {
   transition: var(--theme-transition);
 }
 .search-input::placeholder,
 .ProseMirror li::marker {
-  transition: color var(--motion-layout) var(--ease-out);
+  transition: color var(--motion-theme) var(--ease-out);
 }
 
 /* Presence never postpones the state change or remounts an editor. */
@@ -2359,7 +2416,7 @@ body.dragging::after {
 .status-file-identity {
   flex: 1 1 140px;
   min-width: 0;
-  max-width: 340px;
+  max-width: 420px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -2514,6 +2571,27 @@ body.dragging::after {
   .toolbar-btn-secondary {
     padding: 0 8px;
   }
+
+  .statusbar {
+    gap: 10px;
+  }
+
+  .statusbar-left {
+    gap: 10px;
+  }
+
+  .statusbar-details,
+  .statusbar-location {
+    padding-left: 10px;
+  }
+
+  .status-metric-lines {
+    display: none;
+  }
+
+  .statusbar-actions .statusbar-label {
+    display: none;
+  }
 }
 
 @media (max-width: 700px) {
@@ -2584,19 +2662,22 @@ body.dragging::after {
   }
 
   .statusbar-left {
-    gap: 5px;
+    gap: 8px;
   }
 
-  .statusbar-left .status-sep,
-  .status-metrics,
-  .status-mode,
+  .statusbar-details,
+  .statusbar-location,
   .recovery-status-pending,
   .recovery-status-protected {
     display: none;
   }
 
-  .statusbar-theme span {
-    display: none;
+  .statusbar-version {
+    padding-left: 8px;
+  }
+
+  .statusbar-right {
+    gap: 8px;
   }
 
   .welcome {
@@ -2670,7 +2751,25 @@ body.dragging::after {
     gap: 4px;
   }
   .statusbar-right {
-    gap: 2px;
+    gap: 6px;
+  }
+  .statusbar-document {
+    flex: 0 1 auto;
+    min-width: 0;
+    gap: 6px;
+  }
+  .status-recovery {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .statusbar-theme {
+    padding-inline: 5px;
+  }
+  .statusbar-version {
+    padding-left: 6px;
+  }
+  .statusbar-zoom {
+    min-width: 38px;
   }
 }
 

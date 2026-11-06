@@ -1,11 +1,33 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ invoke: vi.fn(), images: [] as any[], restore: vi.fn() }));
-vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke, isTauri: () => true }));
-vi.mock('../src/lib/imageOps', () => ({
-  getPendingImages: () => mocks.images,
-  restorePendingImages: mocks.restore,
+const mocks = vi.hoisted(() => ({
+  invoke: vi.fn(),
+  images: [] as any[],
+  restore: vi.fn(),
+  capture: vi.fn(),
+  stage: vi.fn(),
+  leases: [] as any[],
 }));
+vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke, isTauri: () => true }));
+function mockedImageOps() {
+  return {
+    getPendingImages: () => mocks.images,
+    capturePendingImages: mocks.capture,
+    restorePendingImages: mocks.restore,
+    stagePendingImages: mocks.stage,
+  };
+}
+vi.mock('../src/lib/imageOps', () => mockedImageOps());
+
+function imageTransport(command: string, args: any = {}) {
+  if (command === 'stash_image')
+    return {
+      key: args.dataBase64,
+      mime: 'image/png',
+      previewUrl: `http://mdplus-image-stash.localhost/${args.dataBase64}`,
+    };
+  if (command === 'read_stashed_image') return { mime: 'image/png', dataBase64: args.key };
+}
 
 const tab = {
   id: 'test-id',
@@ -25,9 +47,47 @@ function deferred<T = void>() {
 beforeEach(() => {
   vi.resetModules();
   vi.useFakeTimers();
-  mocks.invoke.mockReset().mockResolvedValue(undefined);
+  mocks.invoke
+    .mockReset()
+    .mockImplementation(async (command, args) => imageTransport(command, args));
   mocks.images = [];
+  mocks.leases = [];
   mocks.restore.mockReset();
+  mocks.stage
+    .mockReset()
+    .mockImplementation(async (images) => ({ images, dispose: vi.fn(async () => {}) }));
+  mocks.capture.mockReset().mockImplementation((_id: string, urls?: Iterable<string>) => {
+    const wanted = urls === undefined ? undefined : new Set(urls);
+    const bytes = new Map<string, string>();
+    const images = mocks.images
+      .filter((image) => !wanted || wanted.has(image.placeholder) || wanted.has(image.source?.url))
+      .map((image) => {
+        const { data, dataBase64, ...metadata } = image;
+        const encoded = dataBase64 ?? Buffer.from(data ?? []).toString('base64');
+        bytes.set(image.placeholder, encoded);
+        return {
+          ...metadata,
+          source: image.source ? { ...image.source } : undefined,
+          mime: image.mime ?? 'image/png',
+          byteLength: image.byteLength ?? Buffer.from(encoded, 'base64').length,
+        };
+      });
+    let released = false;
+    const lease = {
+      images,
+      release: vi.fn(() => {
+        released = true;
+      }),
+      withDataBase64: vi.fn(
+        async (placeholder: string, consume: (data: string) => Promise<unknown>) => {
+          if (released || !bytes.has(placeholder)) throw new Error('released image lease');
+          return consume(bytes.get(placeholder)!);
+        },
+      ),
+    };
+    mocks.leases.push(lease);
+    return lease;
+  });
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -149,7 +209,7 @@ describe('durable recovery journal', () => {
     const snapshot = { id: tab.id, markdown: 'recovered', originalPath: tab.path, images: [] };
     mocks.invoke.mockResolvedValue({ snapshot, images: [] });
     expect(await restoreRecovery(tab.id)).toEqual(snapshot);
-    expect(mocks.restore).toHaveBeenCalledWith(tab.id, []);
+    expect(mocks.restore).toHaveBeenCalledWith(tab.id, expect.objectContaining({ images: [] }));
     expect(mocks.invoke).toHaveBeenCalledExactlyOnceWith('read_recovery_snapshot', { id: tab.id });
   });
 });
@@ -159,10 +219,7 @@ describe('recovery image preparation boundary', () => {
     vi.doUnmock('../src/lib/imageOps');
   });
   afterEach(() => {
-    vi.doMock('../src/lib/imageOps', () => ({
-      getPendingImages: () => mocks.images,
-      restorePendingImages: mocks.restore,
-    }));
+    vi.doMock('../src/lib/imageOps', () => mockedImageOps());
   });
 
   it.each(['![](./img/new.png)', '![new][picture]\n\n[picture]: <./img/new.png>'])(
@@ -180,10 +237,10 @@ describe('recovery image preparation boundary', () => {
   it('captures current image bytes only after preparation commits', async () => {
     const { prepareImageReferences } = await import('../src/lib/imageOps');
     const { scheduleRecovery } = await import('../src/lib/recovery');
-    const image = { path: 'D:/中文 空格/img/new.png', mime: 'image/png', data: [65, 66, 67] };
+    const image = { path: 'D:/中文 空格/img/new.png', mime: 'image/png', dataBase64: 'QUJD' };
     const read = deferred<typeof image>();
-    mocks.invoke.mockImplementation((command) =>
-      command === 'read_image_file' ? read.promise : Promise.resolve(),
+    mocks.invoke.mockImplementation((command, args) =>
+      command === 'read_image_file' ? read.promise : Promise.resolve(imageTransport(command, args)),
     );
     const markdown = '![](./img/new.png)';
     const ready = prepareImageReferences(tab.id, markdown, tab.path).then((prepared) =>
@@ -197,7 +254,10 @@ describe('recovery image preparation boundary', () => {
     read.resolve(image);
     expect(await ready).toBe(true);
     await vi.advanceTimersByTimeAsync(999);
-    expect(mocks.invoke.mock.calls.map(([command]) => command)).toEqual(['read_image_file']);
+    expect(mocks.invoke.mock.calls.map(([command]) => command)).toEqual([
+      'read_image_file',
+      'stash_image',
+    ]);
     await vi.advanceTimersByTimeAsync(1);
     expect(status).toHaveBeenLastCalledWith('protected');
     const snapshot = mocks.invoke.mock.calls.find(
@@ -209,7 +269,7 @@ describe('recovery image preparation boundary', () => {
     expect(mocks.invoke).toHaveBeenCalledWith('cache_recovery_image', {
       id: tab.id,
       key: snapshot.images[0].key,
-      data: [65, 66, 67],
+      dataBase64: 'QUJD',
     });
   });
 
@@ -278,13 +338,13 @@ describe('recovery image preparation boundary', () => {
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
 
-  it('rejects a prepared raw alias whose image byte array is empty', async () => {
+  it('rejects an empty compact image before publishing an alias or recovery snapshot', async () => {
     const { prepareImageReferences } = await import('../src/lib/imageOps');
     const { scheduleRecovery } = await import('../src/lib/recovery');
     mocks.invoke.mockResolvedValue({
       path: 'D:/中文 空格/img/empty.png',
       mime: 'image/png',
-      data: [],
+      dataBase64: '',
     });
     const markdown = '![](./img/empty.png)';
     const ready = prepareImageReferences(tab.id, markdown, tab.path).then((prepared) =>
@@ -292,7 +352,7 @@ describe('recovery image preparation boundary', () => {
     );
     const status = vi.fn();
     scheduleRecovery({ ...tab, markdown }, status, ready);
-    expect(await ready).toBe(true);
+    await expect(ready).rejects.toThrow('图片为空');
     await vi.advanceTimersByTimeAsync(1000);
     expect(status.mock.calls).toEqual([['pending'], ['error']]);
     expect(mocks.invoke.mock.calls.map(([command]) => command)).toEqual(['read_image_file']);
@@ -327,5 +387,106 @@ describe('recovery image preparation boundary', () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(status).toHaveBeenLastCalledWith('error');
     expect(mocks.invoke).not.toHaveBeenCalled();
+  });
+});
+
+describe('bounded recovery capture leases', () => {
+  it('releases cancelled debounce captures immediately, including on explicit cleanup', async () => {
+    const { scheduleRecovery, clearRecovery } = await import('../src/lib/recovery');
+    scheduleRecovery(tab, vi.fn());
+    const first = mocks.leases[0];
+    expect(first.release).not.toHaveBeenCalled();
+    scheduleRecovery({ ...tab, markdown: 'newer' }, vi.fn());
+    expect(first.release).toHaveBeenCalledTimes(1);
+    const second = mocks.leases[1];
+    await clearRecovery(tab.id);
+    expect(second.release).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(
+      mocks.invoke.mock.calls.filter(([command]) => command === 'write_recovery_snapshot'),
+    ).toHaveLength(0);
+  });
+
+  it('drops obsolete queued captures but keeps a running image transfer pinned until it settles', async () => {
+    mocks.images = [{ placeholder: 'mdplus-image:image', filename: 'image.png', data: [1, 2] }];
+    const { scheduleRecovery } = await import('../src/lib/recovery');
+    const gate = deferred();
+    mocks.invoke.mockImplementation((command) =>
+      command === 'cache_recovery_image' ? gate.promise : Promise.resolve(),
+    );
+    scheduleRecovery({ ...tab, markdown: '![](mdplus-image:image)' }, vi.fn());
+    await vi.advanceTimersByTimeAsync(1000);
+    const running = mocks.leases[0];
+    expect(running.withDataBase64).toHaveBeenCalledTimes(1);
+    expect(running.release).not.toHaveBeenCalled();
+    scheduleRecovery({ ...tab, markdown: 'obsolete queued' }, vi.fn());
+    await vi.advanceTimersByTimeAsync(1000);
+    const queued = mocks.leases[1];
+    const status = vi.fn();
+    scheduleRecovery({ ...tab, markdown: 'latest' }, status);
+    expect(queued.release).toHaveBeenCalledTimes(1);
+    expect(running.release).not.toHaveBeenCalled();
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(running.release).toHaveBeenCalledTimes(1);
+    expect(mocks.leases[2].release).toHaveBeenCalledTimes(1);
+    const snapshots = mocks.invoke.mock.calls.filter(
+      ([command]) => command === 'write_recovery_snapshot',
+    );
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0][1].snapshot.markdown).toBe('latest');
+    expect(status).toHaveBeenLastCalledWith('protected');
+  });
+
+  it('releases the active capture even if its manifest write fails', async () => {
+    const { scheduleRecovery } = await import('../src/lib/recovery');
+    mocks.invoke.mockRejectedValueOnce(new Error('disk full'));
+    const status = vi.fn();
+    scheduleRecovery(tab, status);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(status).toHaveBeenLastCalledWith('error');
+    expect(mocks.leases[0].release).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases a paste capture if its owning tab is no longer current before queued I/O', async () => {
+    mocks.images = [{ placeholder: 'mdplus-image:image', filename: 'image.png', data: [1] }];
+    const { protectPastedImage } = await import('../src/lib/recovery');
+    await expect(protectPastedImage(tab.id, 'mdplus-image:image', () => false)).rejects.toThrow(
+      '取消',
+    );
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(mocks.leases[0].release).toHaveBeenCalledTimes(1);
+  });
+
+  it('disposes asynchronously staged images if deletion invalidates their pending restore', async () => {
+    const { prepareRecovery, clearRecovery } = await import('../src/lib/recovery');
+    const gate = deferred<{ dispose: ReturnType<typeof vi.fn> }>();
+    const dispose = vi.fn(async () => {});
+    mocks.invoke.mockImplementation(async (command) =>
+      command === 'read_recovery_snapshot'
+        ? {
+            snapshot: {
+              id: tab.id,
+              title: 'restored',
+              originalPath: null,
+              markdown: 'draft',
+              images: [],
+            },
+            images: [],
+          }
+        : undefined,
+    );
+    mocks.stage.mockReturnValueOnce(gate.promise);
+    const loading = prepareRecovery(tab.id);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mocks.stage).toHaveBeenCalledTimes(1);
+    await clearRecovery(tab.id);
+    gate.resolve({ dispose });
+    const prepared = await loading;
+    expect(prepared.commit()).toBe(false);
+    await prepared.dispose();
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(mocks.restore).not.toHaveBeenCalled();
   });
 });

@@ -7,7 +7,11 @@ import { makeId } from '../hooks/useDocumentSession';
 import { showMessage } from '../lib/dialog';
 import { errorMessage } from '../lib/errors';
 import { basename, documentRevision, pickOpenFile, readDocument } from '../lib/fileOps';
-import { clearPendingImages, prepareImageReferences } from '../lib/imageOps';
+import {
+  clearPendingImages,
+  prepareImageReferences,
+  type PreparedImageReferences,
+} from '../lib/imageOps';
 import { pathKey } from '../lib/pathIdentity';
 import { getRecentFiles, pushRecentFile, removeRecentFile } from '../lib/store';
 import { getTemplate } from '../lib/templates';
@@ -51,8 +55,9 @@ export function useDocumentFiles(session: DocumentSession) {
           selectTab(existing.id);
         } else {
           const id = makeId();
+          let images: PreparedImageReferences | undefined;
           try {
-            const images = await prepareImageReferences(id, content, canonicalPath, {
+            images = await prepareImageReferences(id, content, canonicalPath, {
               refresh: true,
             });
             const currentDisk = await documentRevision(canonicalPath);
@@ -83,6 +88,8 @@ export function useDocumentFiles(session: DocumentSession) {
           } catch (error) {
             clearPendingImages(id);
             throw error;
+          } finally {
+            await images?.dispose();
           }
         }
         // 最近文件持久化不应阻塞文档标签创建或启动窗口显示。

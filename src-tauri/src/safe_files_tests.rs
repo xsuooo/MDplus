@@ -1,5 +1,22 @@
 //! Completion 1-3: native filesystem guarantees, using disposable directories only.
-use crate::safe_files::{document_revision, read_document, save_image_asset, write_document};
+use crate::safe_files::{document_revision, read_document, write_document};
+
+// Legacy filesystem regression callers work with bytes; the exposed command is
+// base64-only. Finalize successful allocations so fixtures do not retain handles.
+fn save_image_asset(
+    doc_path: String,
+    filename: String,
+    data: Vec<u8>,
+) -> Result<crate::safe_files::ImageReceipt, Box<crate::safe_files::FileError>> {
+    let receipt = crate::safe_files::save_image_asset(
+        doc_path,
+        filename,
+        crate::image_data::encode_image(&data),
+    )?;
+    crate::safe_files::commit_image_assets(receipt.allocation_id.iter().cloned().collect())
+        .unwrap();
+    Ok(receipt)
+}
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Barrier};
@@ -252,6 +269,95 @@ fn completion_invalid_encoding_has_a_typed_error_and_no_write() {
 }
 
 #[test]
+fn review_m6_nul_is_rejected_after_decoding_every_supported_encoding() {
+    let root = TestDir::new();
+    let path = root.document();
+    let text = format!("{}中文\0tail", "a".repeat(8193));
+    let mut encodings = vec![text.as_bytes().to_vec()];
+    let (gbk, _, _) = encoding_rs::GBK.encode(&text);
+    encodings.push(gbk.into_owned());
+    for little_endian in [true, false] {
+        let mut bytes = if little_endian {
+            vec![0xFF, 0xFE]
+        } else {
+            vec![0xFE, 0xFF]
+        };
+        for unit in text.encode_utf16() {
+            bytes.extend_from_slice(&if little_endian {
+                unit.to_le_bytes()
+            } else {
+                unit.to_be_bytes()
+            });
+        }
+        encodings.push(bytes);
+    }
+    for bytes in encodings {
+        fs::write(&path, &bytes).unwrap();
+        let error = read_document(path.clone()).unwrap_err();
+        assert_eq!(error.code, "INVALID_ENCODING");
+        assert_eq!(error.write_state, "unchanged");
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn review_m6_nul_write_cannot_modify_or_create_a_document() {
+    let root = TestDir::new();
+    let path = root.document();
+    let error = write_document(path.clone(), "new\0draft".into(), None).unwrap_err();
+    assert_eq!(error.code, "INVALID_ENCODING");
+    assert!(!PathBuf::from(&path).exists());
+    fs::write(&path, "original").unwrap();
+    let expected = read_document(path.clone()).unwrap().revision;
+    let error = write_document(path.clone(), "new\0draft".into(), Some(expected)).unwrap_err();
+    assert_eq!(error.code, "INVALID_ENCODING");
+    assert_eq!(fs::read_to_string(path).unwrap(), "original");
+    assert_eq!(fs::read_dir(&root.0).unwrap().count(), 1);
+}
+
+#[test]
+fn review_m6_valid_utf16_documents_save_as_utf8_and_reopen_losslessly() {
+    let root = TestDir::new();
+    let path = root.document();
+    let content = "中文 Ā emoji 😀\nend";
+    for little_endian in [true, false] {
+        let mut bytes = if little_endian {
+            vec![0xFF, 0xFE]
+        } else {
+            vec![0xFE, 0xFF]
+        };
+        for unit in content.encode_utf16() {
+            bytes.extend_from_slice(&if little_endian {
+                unit.to_le_bytes()
+            } else {
+                unit.to_be_bytes()
+            });
+        }
+        fs::write(&path, bytes).unwrap();
+        let snapshot = read_document(path.clone()).unwrap();
+        assert_eq!(snapshot.content, content);
+        write_document(path.clone(), snapshot.content, Some(snapshot.revision)).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), content.as_bytes());
+        assert_eq!(read_document(path.clone()).unwrap().content, content);
+    }
+}
+
+#[test]
+fn review_m6_decoded_text_must_fit_the_same_utf8_write_budget() {
+    let root = TestDir::new();
+    let path = root.document();
+    let content = "中".repeat(crate::MAX_TEXT_FILE_BYTES as usize / 3 + 1);
+    let mut bytes = vec![0xFF, 0xFE];
+    for unit in content.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    assert!(bytes.len() as u64 <= crate::MAX_TEXT_FILE_BYTES);
+    fs::write(&path, &bytes).unwrap();
+    assert_eq!(read_document(path.clone()).unwrap_err().code, "TOO_LARGE");
+    assert_eq!(fs::read(&path).unwrap(), bytes);
+}
+
+#[test]
 fn completion_concurrent_images_keep_distinct_names_and_correct_bytes() {
     let root = TestDir::new();
     let document = root.document();
@@ -288,59 +394,55 @@ fn completion_concurrent_images_keep_distinct_names_and_correct_bytes() {
     );
 }
 
+#[cfg(windows)]
 #[test]
-fn completion_image_write_failure_keeps_file_and_reports_uncertain_path() {
+fn completion_image_write_failure_discards_only_the_still_owned_object() {
     use crate::safe_files::hooks::fail_next_image_write;
     let root = TestDir::new();
-    let bytes = b"<svg><text>local</text></svg>";
-    // Inject a terminal I/O error after real writes, not a host disk-full condition.
+    // Inject an I/O error while the DELETE-capable exclusive handle is held.
     fail_next_image_write();
-    let error = save_image_asset(root.document(), "same.svg".into(), bytes.to_vec()).unwrap_err();
+    let error = save_image_asset(
+        root.document(),
+        "same.svg".into(),
+        b"<svg><text>local</text></svg>".to_vec(),
+    )
+    .unwrap_err();
     let path = PathBuf::from(&error.path);
     assert!(
-        path.is_file(),
-        "failed image must be retained for manual review"
+        !path.exists(),
+        "partial owned image should be removed by handle"
     );
-    assert_eq!(fs::read(&path).unwrap(), bytes);
     assert_eq!(error.code, "IO_ERROR");
-    assert_eq!(error.write_state, "unknown");
-    assert!(error.message.contains(&error.path));
-    assert!(error.message.contains("未删除"));
+    assert_eq!(error.write_state, "unchanged");
     assert!(error.recovery_path.is_none() && error.backup_path.is_none());
-    assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
+    assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 0);
     assert!(!PathBuf::from(root.document()).exists());
     assert_contract("FileError", error);
 }
 
+#[cfg(windows)]
 #[test]
 fn completion_image_write_failure_never_deletes_a_later_external_file() {
     use crate::safe_files::hooks::{at, fail_next_image_write, Checkpoint};
     let root = TestDir::new();
-    let bytes = b"<svg><text>local</text></svg>";
     let external = b"<svg><text>external</text></svg>";
     fail_next_image_write();
     at(Checkpoint::ImageWriteFailed, move |path| {
-        // This is the real Windows rename/write interval after the exclusive handle closes.
-        fs::rename(path, path.with_file_name("failed-attempt.svg")).unwrap();
+        // Identity-safe cleanup already finished before closing the owned handle.
+        // Anything created now must never be deleted by that operation.
+        assert!(!path.exists());
         fs::write(path, external).unwrap();
     });
-    let error = save_image_asset(root.document(), "same.svg".into(), bytes.to_vec()).unwrap_err();
+    let error =
+        save_image_asset(root.document(), "same.svg".into(), b"<svg/>".to_vec()).unwrap_err();
     let path = PathBuf::from(&error.path);
-    assert_eq!(
-        fs::read(&path).expect("failure cleanup must not delete a later external image"),
-        external
-    );
-    assert_eq!(
-        fs::read(path.with_file_name("failed-attempt.svg")).unwrap(),
-        bytes
-    );
+    assert_eq!(fs::read(&path).unwrap(), external);
     assert!(
         !path.with_file_name("same-1.svg").exists(),
         "I/O errors must not retry"
     );
     assert_eq!(error.code, "IO_ERROR");
-    assert_eq!(error.write_state, "unknown");
-    assert!(error.message.contains(&error.path));
+    assert_eq!(error.write_state, "unchanged");
     assert_contract("FileError", error);
 }
 
@@ -361,6 +463,96 @@ fn completion_image_rejects_unsafe_names_and_non_images() {
     }
     assert!(save_image_asset(root.document(), "image.png".into(), b"not a png".to_vec()).is_err());
     assert_eq!(fs::read_dir(&root.0).unwrap().count(), 0);
+}
+
+#[cfg(windows)]
+#[ignore = "requires Windows symlink creation privilege; from src-tauri run: cargo test --lib review_p2_ -- --ignored --nocapture"]
+#[test]
+fn review_p2_read_and_revision_reject_leaf_symlinks_inserted_after_path_checks() {
+    use crate::safe_files::hooks::{at, Checkpoint};
+    for revision_only in [false, true] {
+        let root = TestDir::new();
+        let path = root.document();
+        fs::write(&path, "original").unwrap();
+        let original = fs::canonicalize(&path).unwrap();
+        let outside = root.0.join("outside.md");
+        fs::write(&outside, "must not read through the substituted link").unwrap();
+        let prepared_link = root.0.join("prepared-link.md");
+        std::os::windows::fs::symlink_file(&outside, &prepared_link).expect(
+            "real Windows file symlink creation failed; leaf-race regression is NOT skipped",
+        );
+        at(Checkpoint::BeforeReadOpen, move |target| {
+            assert_eq!(fs::canonicalize(target).unwrap(), original);
+            assert!(fs::symlink_metadata(&prepared_link)
+                .unwrap()
+                .file_type()
+                .is_symlink());
+            fs::rename(target, target.with_file_name("original-moved.md")).unwrap();
+            fs::rename(&prepared_link, target).unwrap();
+        });
+        let error = if revision_only {
+            document_revision(path.clone()).err()
+        } else {
+            read_document(path.clone()).err()
+        }
+        .expect("snapshot followed a leaf symlink installed after preflight");
+        assert_eq!(error.code, "INVALID_PATH");
+        assert_eq!(error.write_state, "unchanged");
+        assert!(fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            fs::read(root.0.join("original-moved.md")).unwrap(),
+            b"original"
+        );
+        assert_eq!(
+            fs::read(&outside).unwrap(),
+            b"must not read through the substituted link"
+        );
+    }
+}
+
+#[cfg(windows)]
+#[ignore = "requires Windows symlink creation privilege; from src-tauri run: cargo test --lib review_p2_ -- --ignored --nocapture"]
+#[test]
+fn review_p2_conditional_write_rejects_substituted_leaf_and_retains_local_draft() {
+    use crate::safe_files::hooks::{at, Checkpoint};
+    let root = TestDir::new();
+    let path = root.document();
+    fs::write(&path, "original").unwrap();
+    let expected = read_document(path.clone()).unwrap().revision;
+    let original = fs::canonicalize(&path).unwrap();
+    let outside = root.0.join("outside.md");
+    fs::write(&outside, "original").unwrap();
+    // Acquire the real-link fixture before entering DOCUMENT_WRITES so a missing
+    // OS privilege fails this test without poisoning unrelated write tests.
+    let prepared_link = root.0.join("prepared-link.md");
+    std::os::windows::fs::symlink_file(&outside, &prepared_link).expect(
+        "real Windows file symlink creation failed; conditional-write coverage is NOT skipped",
+    );
+    at(Checkpoint::BeforeReadOpen, move |target| {
+        assert_eq!(fs::canonicalize(target).unwrap(), original);
+        assert!(fs::symlink_metadata(&prepared_link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        fs::rename(target, target.with_file_name("original-moved.md")).unwrap();
+        fs::rename(&prepared_link, target).unwrap();
+    });
+    let error = write_document(path.clone(), "local draft".into(), Some(expected))
+        .expect_err("conditional write accepted the substituted leaf");
+    assert_eq!(error.code, "INVALID_PATH");
+    assert_eq!(error.write_state, "unchanged");
+    assert_eq!(
+        fs::read(error.recovery_path.unwrap()).unwrap(),
+        b"local draft"
+    );
+    assert!(fs::symlink_metadata(&path)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(fs::read(&outside).unwrap(), b"original");
 }
 
 #[cfg(windows)]

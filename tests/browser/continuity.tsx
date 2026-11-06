@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client';
+import { createNativeMocks } from './nativeMocks';
 import { editorViewCtx } from '@milkdown/kit/core';
 import { TextSelection, NodeSelection } from '@milkdown/prose/state';
 import { undoDepth } from '@milkdown/prose/history';
@@ -54,6 +55,7 @@ function input(field: HTMLTextAreaElement, text: string) {
 }
 
 export async function runContinuityRegression(testCase: ContinuityCase): Promise<string> {
+  createNativeMocks().install();
   if (testCase.startsWith('sync-')) {
     const host = document.createElement('div');
     host.className = 'milkdown-container';

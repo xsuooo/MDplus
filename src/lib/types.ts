@@ -27,6 +27,8 @@ export interface Tab {
   isNew: boolean;
   /** 是否有未保存改动 */
   dirty: boolean;
+  /** 磁盘已分歧或不可核验，当前缓冲区必须经保存／放弃确认才能丢弃。 */
+  preserveLocal?: boolean;
   /** 最近获知的磁盘修改时间(毫秒);外部变更以字节版本检测 */
   externalMtime: number;
   /** 与最近读取或保存的原始磁盘字节绑定；null 仅用于尚未落盘的文档。 */
