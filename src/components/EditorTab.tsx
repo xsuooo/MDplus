@@ -11,17 +11,20 @@ import {
   imageReferencesChanged,
   settleImageInsertion,
 } from '../lib/imageOps';
-import type { Tab, EditorUpdate } from '../lib/types';
+import type { EditorUpdate } from '../lib/types';
 import type { MediaPreview } from '../lib/media';
 
 interface EditorTabProps {
-  tab: Tab;
+  tabId: string;
+  initialContent: string;
   active: boolean;
   sourceMode: boolean;
-  onUpdate: (id: string, update: EditorUpdate, isInitial?: boolean) => void;
+  onUpdate: (id: string, update: EditorUpdate, isInitial?: boolean, coalesced?: boolean) => void;
+  onActivity: (id: string, update: Pick<EditorUpdate, 'canUndo' | 'canRedo'>) => void;
   onRegister: (id: string, editor: Editor | null) => void;
   onImagePaste?: (tabId: string, file: File) => Promise<string>;
   onMediaPreview?: (media: MediaPreview) => void;
+  onDocumentLink?: (tabId: string, href: string) => void;
 }
 
 /**
@@ -30,6 +33,10 @@ interface EditorTabProps {
  * 多编辑器共享一个 Provider 会互相覆盖导致内容丢失。
  */
 export const EditorTab = memo(function EditorTab(props: EditorTabProps) {
+  const activated = useRef(props.active);
+  if (props.active) activated.current = true;
+  // Session restore mounts only the visible editor; visited tabs stay alive afterwards.
+  if (!activated.current) return null;
   return (
     <MilkdownProvider>
       <EditorTabInner {...props} />
@@ -38,25 +45,32 @@ export const EditorTab = memo(function EditorTab(props: EditorTabProps) {
 });
 
 function EditorTabInner({
-  tab,
+  tabId,
+  initialContent,
   active,
   sourceMode,
   onUpdate,
+  onActivity,
   onRegister,
   onImagePaste,
   onMediaPreview,
+  onDocumentLink,
 }: EditorTabProps) {
   const previewRef = useRef(onMediaPreview);
   previewRef.current = onMediaPreview;
   const onUpdateRef = useRef(onUpdate);
   onUpdateRef.current = onUpdate;
+  const onActivityRef = useRef(onActivity);
+  onActivityRef.current = onActivity;
   const onRegisterRef = useRef(onRegister);
   onRegisterRef.current = onRegister;
   const onImagePasteRef = useRef(onImagePaste);
   onImagePasteRef.current = onImagePaste;
-  const tabIdRef = useRef(tab.id);
-  tabIdRef.current = tab.id;
-  const initialContentRef = useRef(tab.initialContent);
+  const linkRef = useRef(onDocumentLink);
+  linkRef.current = onDocumentLink;
+  const tabIdRef = useRef(tabId);
+  tabIdRef.current = tabId;
+  const initialContentRef = useRef(initialContent);
   const initializedRef = useRef(false);
   const activity = useRef(0);
   useLayoutEffect(() => {
@@ -64,12 +78,14 @@ function EditorTabInner({
     return () => {
       activity.current += 1;
     };
-  }, [active, sourceMode, tab.id]);
+  }, [active, sourceMode, tabId]);
 
   const { get, loading } = useEditor(
     (root) =>
       createEditor(root, initialContentRef.current, {
-        onUpdate: (u) => onUpdateRef.current(tabIdRef.current, u),
+        onUpdate: (u, coalesced) => onUpdateRef.current(tabIdRef.current, u, false, coalesced),
+        onActivity: (u) => onActivityRef.current(tabIdRef.current, u),
+        deferUpdates: true,
         resolveImageSource: (url) => resolveImageSource(tabIdRef.current, url),
         subscribeImageSources: (listener) => subscribeImageSources(tabIdRef.current, listener),
         resolveImageIdentity: (url) => resolveImageIdentity(tabIdRef.current, url),
@@ -77,6 +93,7 @@ function EditorTabInner({
         onImageReferencesChanged: () => imageReferencesChanged(tabIdRef.current),
         onImagePasteSettled: (token) => settleImageInsertion(tabIdRef.current, token),
         onMediaPreview: (media) => previewRef.current?.(media),
+        onDocumentLink: (href) => linkRef.current?.(tabIdRef.current, href),
         captureImagePaste: () => {
           const current = activity.current;
           return () => activity.current === current;
@@ -87,33 +104,31 @@ function EditorTabInner({
       }),
     [],
   );
+  const editor = loading ? null : (get() ?? null);
 
   useEffect(() => {
-    onRegisterRef.current(tab.id, loading ? null : (get() ?? null));
-    return () => onRegisterRef.current(tab.id, null);
-  }, [get, loading, tab.id]);
+    onRegisterRef.current(tabId, editor);
+    return () => onRegisterRef.current(tabId, null);
+  }, [editor, tabId]);
 
   useEffect(() => {
-    const editor = loading ? null : get();
     if (!editor) return;
-    return registerImageReachability(tab.id, () => getEditorImageReferences(editor));
-  }, [get, loading, tab.id]);
+    return registerImageReachability(tabId, () => getEditorImageReferences(editor));
+  }, [editor, tabId]);
 
   // 编辑器就绪后,推送一次初始状态(大纲、统计、markdown 镜像)
   useEffect(() => {
-    if (loading || initializedRef.current) return;
-    const editor = get();
-    if (!editor) return;
+    if (!editor || initializedRef.current) return;
     initializedRef.current = true;
-    onUpdateRef.current(tab.id, getCurrentState(editor), true);
-  }, [loading, get, tab.id]);
+    onUpdateRef.current(tabId, getCurrentState(editor, initialContentRef.current), true);
+  }, [editor, tabId]);
 
   return (
     <div
       className={`editor-tab${active ? ' active' : ''}`}
       data-active={active ? '1' : '0'}
-      {...{ inert: sourceMode ? '' : undefined }}
-      aria-hidden={sourceMode ? true : undefined}
+      {...{ inert: !active || sourceMode ? '' : undefined }}
+      aria-hidden={!active || sourceMode ? true : undefined}
     >
       <div className="milkdown-container">
         <Milkdown />

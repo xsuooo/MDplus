@@ -1,20 +1,25 @@
 import { BODY_FONTS, CODE_FONTS, type BodyFont, type CodeFont } from './editorFont';
+import miSansRegular from '../assets/fonts/MiSans-Regular.woff2?url';
+import miSansSemibold from '../assets/fonts/MiSans-Semibold.woff2?url';
+import sarasaRegular from '../assets/fonts/SarasaGothicSC-Regular.woff2?url';
+import sarasaSemibold from '../assets/fonts/SarasaGothicSC-SemiBold.woff2?url';
+import wenkaiRegular from '../assets/fonts/LXGWWenKai.woff2?url';
+import wenkaiMedium from '../assets/fonts/LXGWWenKai-Medium.woff2?url';
+import jetBrainsMono from '../assets/fonts/JetBrainsMono.woff2?url';
+import firaCode from '../assets/fonts/FiraCode.woff2?url';
+import cascadiaCode from '../assets/fonts/CascadiaCode.ttf?url';
 
-const urls = import.meta.glob('../assets/fonts/*', {
-  eager: true,
-  query: '?url',
-  import: 'default',
-}) as Record<string, string>;
+// Explicit imports prevent unused font sources or backups from entering every installer.
 const faces = [
-  ['MDPlus MiSans', 'MiSans-Regular.woff2', '400', 'MiSans-License.pdf'],
-  ['MDPlus MiSans', 'MiSans-Semibold.woff2', '600', 'MiSans-License.pdf'],
-  ['MDPlus Sarasa Gothic SC', 'SarasaGothicSC-Regular.woff2', '400', 'Sarasa-OFL.txt'],
-  ['MDPlus Sarasa Gothic SC', 'SarasaGothicSC-SemiBold.woff2', '600', 'Sarasa-OFL.txt'],
-  ['MDPlus LXGW WenKai', 'LXGWWenKai.woff2', '400', 'LXGWWenKai-OFL.txt'],
-  ['MDPlus LXGW WenKai', 'LXGWWenKai-Medium.woff2', '500', 'LXGWWenKai-OFL.txt'],
-  ['MDPlus JetBrains Mono', 'JetBrainsMono.woff2', '100 800', 'JetBrainsMono-OFL.txt'],
-  ['MDPlus Fira Code', 'FiraCode.woff2', '300 700', 'FiraCode-OFL.txt'],
-  ['MDPlus Cascadia Code', 'CascadiaCode.ttf', '200 700', 'CascadiaCode-OFL.txt'],
+  ['MDPlus MiSans', miSansRegular, '400', 'MiSans-License.pdf'],
+  ['MDPlus MiSans', miSansSemibold, '600', 'MiSans-License.pdf'],
+  ['MDPlus Sarasa Gothic SC', sarasaRegular, '400', 'Sarasa-OFL.txt'],
+  ['MDPlus Sarasa Gothic SC', sarasaSemibold, '600', 'Sarasa-OFL.txt'],
+  ['MDPlus LXGW WenKai', wenkaiRegular, '400', 'LXGWWenKai-OFL.txt'],
+  ['MDPlus LXGW WenKai', wenkaiMedium, '500', 'LXGWWenKai-OFL.txt'],
+  ['MDPlus JetBrains Mono', jetBrainsMono, '100 800', 'JetBrainsMono-OFL.txt'],
+  ['MDPlus Fira Code', firaCode, '300 700', 'FiraCode-OFL.txt'],
+  ['MDPlus Cascadia Code', cascadiaCode, '200 700', 'CascadiaCode-OFL.txt'],
 ] as const;
 
 export async function dataURL(url: string): Promise<string> {
@@ -54,8 +59,8 @@ export async function embeddedFonts(
   const css = (
     await Promise.all(
       selected.map(
-        async ([family, file, weight]) =>
-          `@font-face{font-family:"${family}";src:url("${await dataURL(urls[`../assets/fonts/${file}`])}");font-weight:${weight};font-display:block;}`,
+        async ([family, url, weight]) =>
+          `@font-face{font-family:"${family}";src:url("${await dataURL(url)}");font-weight:${weight};font-display:block;}`,
       ),
     )
   ).join('\n');

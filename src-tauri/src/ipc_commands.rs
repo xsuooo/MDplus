@@ -8,6 +8,7 @@ pub const COMMANDS: &[&str] = &[
     "commit_image_assets",
     "discard_image_assets",
     "stash_image",
+    "import_dropped_image",
     "read_stashed_image",
     "discard_stashed_images",
     "export_html",

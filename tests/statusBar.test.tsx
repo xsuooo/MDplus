@@ -4,6 +4,7 @@ import { StatusBar } from '../src/components/StatusBar';
 import type { Tab } from '../src/lib/types';
 import type { ComponentProps } from 'react';
 import { APP_VERSION_DETAILS, APP_VERSION_LABEL } from '../src/lib/appVersion';
+import { DEFAULT_SHORTCUTS } from '../src/lib/shortcuts';
 
 // The browser-only typography popover is covered by the browser suite, not these status-copy checks.
 vi.mock('../src/components/TypographyPanel', () => ({ TypographyPanel: () => null }));
@@ -30,17 +31,19 @@ function render(
 ) {
   return renderToStaticMarkup(
     <StatusBar
+      bindings={DEFAULT_SHORTCUTS}
       tab={current}
       saveState={saveState}
       themeMode="light"
       onThemeMode={() => {}}
       sourceMode={false}
-      zoom={100}
-      onResetZoom={() => {}}
+      editorAreaRef={{ current: null }}
       bodyFont="misans"
       codeFont="jetbrains-sarasa"
       onBodyFont={() => {}}
       onCodeFont={() => {}}
+      editorWidth="centered"
+      onEditorWidth={() => {}}
       recoveryStatus="protected"
       {...overrides}
     />,
@@ -48,6 +51,18 @@ function render(
 }
 
 describe('status feedback', () => {
+  it('uses the current save binding and falls back to the working toolbar action when unbound', () => {
+    const rebound = render('paused', tab, { bindings: { ...DEFAULT_SHORTCUTS, save: ['f8'] } });
+    expect(rebound).toContain('按 F8');
+    expect(rebound).not.toContain('Ctrl+S');
+    const unbound = render(
+      'unsaved',
+      { ...tab, path: null },
+      { bindings: { ...DEFAULT_SHORTCUTS, save: [] } },
+    );
+    expect(unbound).toContain('点击工具栏「保存」');
+    expect(unbound).not.toContain('Ctrl+S');
+  });
   it('distinguishes paused automatic saving from a saved document and offers a next step', () => {
     const html = render('paused');
     expect(html).toContain('保存已暂停');
@@ -61,6 +76,14 @@ describe('status feedback', () => {
     const html = render('saved');
     expect(html).toContain('title="C:/notes/project-b/same.md"');
     expect(html).toContain('status-file-identity');
+  });
+  it.each([
+    ['\\\\?\\E:\\桌面\\降智题.md', 'E:\\桌面\\降智题.md'],
+    ['\\\\?\\UNC\\Server\\笔记\\降智题.md', '\\\\Server\\笔记\\降智题.md'],
+  ])('shows a readable Windows path and complete tooltip for %s', (path, display) => {
+    const html = render('saved', { ...tab, path });
+    expect(html).toContain(`title="${display}">${display}</span>`);
+    expect(html).not.toContain('\\\\?\\');
   });
   it('does not equate a protected recovery copy with a formal save', () => {
     const html = render('dirty', { ...tab, dirty: true });

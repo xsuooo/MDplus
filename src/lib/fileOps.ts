@@ -78,6 +78,16 @@ export async function pickOpenFile(): Promise<string | null> {
   return null;
 }
 
+export async function pickImageFiles(): Promise<string[]> {
+  const selected = await open({
+    multiple: true,
+    directory: false,
+    filters: [{ name: 'PNG / JPEG 图片', extensions: ['png', 'jpg', 'jpeg'] }],
+    title: '插入本地图片',
+  });
+  return selected === null ? [] : typeof selected === 'string' ? [selected] : selected;
+}
+
 /** 弹出另存为对话框,返回路径或 null */
 export async function pickSaveFile(defaultPath?: string): Promise<string | null> {
   const selected = await save({

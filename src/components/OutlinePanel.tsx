@@ -18,16 +18,18 @@ interface OutlinePanelProps {
   open: boolean;
   onToggle: () => void;
   items: OutlineItem[];
+  status?: 'loading' | 'error';
   onJump: (pos: number) => void;
   width: number;
   onWidthChange: (width: number) => void;
 }
 
-/** 目录面板:折叠/展开带宽度过渡动画(收起时完全隐藏,仅由工具栏按钮开关) */
+/** 目录面板:收起时完全隐藏,仅由工具栏按钮开关。 */
 export const OutlinePanel = memo(function OutlinePanel({
   open,
   onToggle,
   items,
+  status,
   onJump,
   width,
   onWidthChange,
@@ -91,7 +93,13 @@ export const OutlinePanel = memo(function OutlinePanel({
           <span className="outline-title">目录</span>
         </div>
         <div className="outline-body">
-          {items.length === 0 ? (
+          {status ? (
+            <div className="outline-empty" role={status === 'error' ? 'alert' : 'status'}>
+              {status === 'error'
+                ? '目录读取失败，请修改文稿或重新打开目录后重试。'
+                : '正在更新目录…'}
+            </div>
+          ) : items.length === 0 ? (
             <div className="outline-empty">暂无标题</div>
           ) : (
             items.map((item, i) => (

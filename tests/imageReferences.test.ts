@@ -117,6 +117,77 @@ describe('transactional image references', () => {
     expect(mocks.readImageFile).toHaveBeenCalledExactlyOnceWith(document, 'img/new.png');
   });
 
+  it.each([
+    ['my%20photo.png', 'my photo.png'],
+    ['100%25.png', '100%.png'],
+    ['100%2520.png', '100%20.png'],
+    ['photo%23one.png', 'photo#one.png'],
+    ['%E5%9B%BE%E7%89%87.png', '图片.png'],
+  ])('loads encoded image URL %s without changing its source identity', async (url, filename) => {
+    const source = `![photo](./img/${url})`;
+    mocks.readImageFile.mockImplementation(async (doc: string, relative: string) => {
+      if (relative !== `img/${filename}`) throw new Error('image file not found');
+      return loaded(oldBytes, relative, doc);
+    });
+    const prepared = await prepareImageReferences('image-tx', source, document);
+    expect(prepared.markdown).toBe(source);
+    expect(prepared.commit()).toBe(true);
+    expect(mocks.readImageFile).toHaveBeenCalledExactlyOnceWith(document, `img/${filename}`);
+    expect(resolveImageSource('image-tx', `./img/${url}`)).toBe(preview(oldBytes));
+
+    const saved = await migratePendingImages('image-tx', document, source);
+    expect(saved.markdown).toBe(source);
+    expect(mocks.invoke.mock.calls.some(([command]) => command === 'save_image_asset')).toBe(false);
+    commitImageMigration(saved);
+
+    const savedAs = await migratePendingImages('image-tx', 'D:\\other\\note.md', source);
+    expect(savedAs.updates[0].filename).toBe(`1-${filename}`);
+    commitImageMigration(savedAs);
+    mocks.readImageFile.mockClear();
+    mocks.readImageFile.mockImplementation(async (doc: string, relative: string) => {
+      if (relative !== `assets/1-${filename}`) throw new Error('image file not found');
+      return loaded(oldBytes, relative, doc);
+    });
+    const reopened = await prepareImageReferences(
+      'other-image-tx',
+      savedAs.markdown,
+      'D:\\other\\note.md',
+    );
+    expect(reopened.commit()).toBe(true);
+    expect(mocks.readImageFile).toHaveBeenCalledExactlyOnceWith(
+      'D:\\other\\note.md',
+      `assets/1-${filename}`,
+    );
+    expect(resolveImageSource('other-image-tx', savedAs.references[0].relativePath)).toBe(
+      preview(oldBytes),
+    );
+  });
+
+  it.each(['100%.png', 'photo%2.png'])(
+    'retains support for a legacy filename with a malformed percent escape: %s',
+    async (filename) => {
+      const source = `![photo](./img/${filename})`;
+      const prepared = await prepareImageReferences('image-tx', source, document);
+      expect(prepared.commit()).toBe(true);
+      expect(mocks.readImageFile).toHaveBeenCalledExactlyOnceWith(document, `img/${filename}`);
+      expect(resolveImageSource('image-tx', `./img/${filename}`)).toBe(preview(oldBytes));
+    },
+  );
+
+  it.each([
+    ['%2e%2e/private.png', '../private.png'],
+    ['%2Fprivate.png', '/private.png'],
+    ['C%3A%5Cprivate.png', 'C:\\private.png'],
+  ])('lets native validation reject decoded unsafe URL %s', async (url, relative) => {
+    mocks.readImageFile.mockRejectedValue(new Error('image path outside document directory'));
+    const source = `![photo](${url})`;
+    const prepared = await prepareImageReferences('image-tx', source, document);
+    expect(prepared.commit()).toBe(true);
+    expect(prepared.markdown).toBe(source);
+    expect(mocks.readImageFile).toHaveBeenCalledExactlyOnceWith(document, relative);
+    expect(getPendingImages('image-tx')).toEqual([]);
+  });
+
   it('rejects an older preparation after a newer result commits', async () => {
     const gate = deferred<ReturnType<typeof loaded>>();
     mocks.readImageFile.mockReturnValueOnce(gate.promise).mockResolvedValueOnce(loaded(newBytes));

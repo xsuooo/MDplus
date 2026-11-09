@@ -168,10 +168,12 @@ mod windows {
     }
 
     fn normalized(path: &Path) -> String {
-        path.to_string_lossy()
-            .replace('/', "\\")
-            .trim_start_matches(r"\\?\")
-            .to_lowercase()
+        let path = path.to_string_lossy().replace('/', "\\").to_lowercase();
+        if let Some(unc) = path.strip_prefix(r"\\?\unc\") {
+            format!(r"\\{unc}")
+        } else {
+            path.strip_prefix(r"\\?\").unwrap_or(&path).to_owned()
+        }
     }
 
     unsafe extern "system" fn close_window(window: HWND, data: LPARAM) -> BOOL {

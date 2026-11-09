@@ -10,6 +10,7 @@ fn main() {
         ("MAX_TEXT_FILE_BYTES", "textFileBytes", "u64"),
         ("MAX_HTML_EXPORT_BYTES", "htmlExportBytes", "u64"),
         ("MAX_IMAGE_FILE_BYTES", "imageFileBytes", "u64"),
+        ("MAX_IMAGE_MEMORY_BYTES", "imageMemoryBytes", "u64"),
         ("MAX_IMAGE_STASH_BYTES", "imageStashBytes", "u64"),
         ("MAX_IMAGE_STASH_ENTRIES", "imageStashEntries", "usize"),
         ("MAX_SETTINGS_FILE_BYTES", "settingsFileBytes", "u64"),

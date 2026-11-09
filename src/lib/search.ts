@@ -111,14 +111,34 @@ function indexBlock(block: PMNode, keyword: string, caseSensitive: boolean): Blo
   return runs;
 }
 
+/** Hidden NodeView source is edited through its own editor or Markdown source mode. */
+export function isSearchableTextblock(block: PMNode): boolean {
+  return (
+    block.isTextblock &&
+    !block.isAtom &&
+    block.type.name !== 'math_inline' &&
+    block.type.name !== 'math_block' &&
+    !(
+      block.type.name === 'code_block' &&
+      String(block.attrs.language ?? '').toLowerCase() === 'mermaid'
+    )
+  );
+}
+
 /** Marks do not split a visible text run; blocks and inline atoms do. */
-function indexDocument(doc: PMNode, keyword: string, caseSensitive: boolean): TextSearchIndex {
+export function createDocumentSearch(
+  doc: PMNode,
+  keyword: string,
+  caseSensitive: boolean,
+): TextSearchIndex {
   if (!keyword) return emptyIndex;
   const parts: { pos: number; ordinal: number; index: TextSearchIndex }[] = [];
   let count = 0;
   let checkpointCount = 0;
   doc.descendants((block, pos) => {
+    if (block.isAtom) return false;
     if (!block.isTextblock) return true;
+    if (!isSearchableTextblock(block)) return false;
     for (const run of indexBlock(block, keyword, caseSensitive)) {
       parts.push({ pos: pos + run.offset, ordinal: count, index: run.index });
       count += run.index.count;
@@ -178,7 +198,7 @@ interface SearchPluginState {
 }
 
 type SearchMeta =
-  | { type: 'search'; keyword: string; caseSensitive: boolean }
+  | { type: 'search'; keyword: string; caseSensitive: boolean; current?: number }
   | { type: 'step'; dir: 1 | -1 }
   | { type: 'clear' };
 
@@ -248,8 +268,8 @@ export const searchPlugin = new Plugin<SearchPluginState>({
       if (meta?.type === 'search') {
         return withWindow(
           newState.doc,
-          indexDocument(newState.doc, meta.keyword, meta.caseSensitive),
-          0,
+          createDocumentSearch(newState.doc, meta.keyword, meta.caseSensitive),
+          meta.current ?? 0,
           meta.keyword,
           meta.caseSensitive,
         );
@@ -281,7 +301,7 @@ export const searchPlugin = new Plugin<SearchPluginState>({
       if (prev.keyword && newState.doc !== oldState.doc) {
         return withWindow(
           newState.doc,
-          indexDocument(newState.doc, prev.keyword, prev.caseSensitive),
+          createDocumentSearch(newState.doc, prev.keyword, prev.caseSensitive),
           prev.current,
           prev.keyword,
           prev.caseSensitive,

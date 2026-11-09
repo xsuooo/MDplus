@@ -1,42 +1,52 @@
-import { memo } from 'react';
+import { memo, type RefObject } from 'react';
+import { EditorZoom } from './EditorZoom';
 import type { Tab, ThemeMode } from '../lib/types';
 import { IconSun, IconMoon, IconMonitor, IconClock } from './icons';
 import type { BodyFont, CodeFont } from '../lib/editorFont';
+import type { EditorWidth } from '../lib/editorWidth';
 import { TypographyPanel } from './TypographyPanel';
 import type { RecoveryStatus } from '../lib/recovery';
 import { APP_VERSION_DETAILS, APP_VERSION_LABEL } from '../lib/appVersion';
+import { displayPath } from '../lib/pathDisplay';
+import { formatActionShortcuts, type ShortcutBindings } from '../lib/shortcuts';
 
 interface StatusBarProps {
+  bindings: ShortcutBindings;
   tab: Tab | null;
   themeMode: ThemeMode;
   onThemeMode: (mode: ThemeMode) => void;
   sourceMode: boolean;
   saveState: 'idle' | 'saving' | 'unsaved' | 'dirty' | 'saved' | 'paused';
-  zoom: number;
-  onResetZoom: () => void;
+  editorAreaRef: RefObject<HTMLElement>;
   bodyFont: BodyFont;
   codeFont: CodeFont;
   onBodyFont: (font: BodyFont) => void;
   onCodeFont: (font: CodeFont) => void;
+  editorWidth: EditorWidth;
+  onEditorWidth: (width: EditorWidth) => void;
   recoveryStatus?: RecoveryStatus;
   onRecovery?: () => void;
 }
 
 export const StatusBar = memo(function StatusBar({
+  bindings,
   tab,
   themeMode,
   onThemeMode,
   sourceMode,
   saveState,
-  zoom,
-  onResetZoom,
+  editorAreaRef,
   bodyFont,
   codeFont,
   onBodyFont,
   onCodeFont,
+  editorWidth,
+  onEditorWidth,
   recoveryStatus,
   onRecovery,
 }: StatusBarProps) {
+  const saveShortcut = formatActionShortcuts(bindings, 'save');
+  const saveAction = saveShortcut ? `按 ${saveShortcut}` : '点击工具栏「保存」';
   const next: ThemeMode =
     themeMode === 'system' ? 'light' : themeMode === 'light' ? 'dark' : 'system';
   const displaySaveState =
@@ -57,9 +67,9 @@ export const StatusBar = memo(function StatusBar({
           : '已保存';
   const saveTitle =
     displaySaveState === 'paused'
-      ? '自动保存已暂停。按 Ctrl+S 核对磁盘版本，或另存为保留两份。'
+      ? `自动保存已暂停。${saveAction}核对磁盘版本，或另存为保留两份。`
       : displaySaveState === 'unsaved'
-        ? '按 Ctrl+S 为文稿选择保存位置。'
+        ? `${saveAction}为文稿选择保存位置。`
         : displaySaveState === 'dirty'
           ? '更改尚未写入文件。'
           : undefined;
@@ -90,7 +100,7 @@ export const StatusBar = memo(function StatusBar({
                   role="status"
                   title={
                     recoveryStatus === 'error'
-                      ? '恢复副本写入失败，请按 Ctrl+S 手动保存文稿。'
+                      ? `恢复副本写入失败，请${saveAction}手动保存文稿。`
                       : '本机恢复副本包含文稿和图片，未加密；不等于正式保存。'
                   }
                 >
@@ -117,8 +127,8 @@ export const StatusBar = memo(function StatusBar({
                 {sourceMode ? '源码' : '编辑'}
               </span>
               {tab.path && (
-                <span className="status-item status-file-identity" title={tab.path}>
-                  {tab.path}
+                <span className="status-item status-file-identity" title={displayPath(tab.path)}>
+                  {displayPath(tab.path)}
                 </span>
               )}
             </div>
@@ -144,17 +154,10 @@ export const StatusBar = memo(function StatusBar({
             codeFont={codeFont}
             onBodyFont={onBodyFont}
             onCodeFont={onCodeFont}
+            editorWidth={editorWidth}
+            onEditorWidth={onEditorWidth}
           />
-          {tab && (
-            <button
-              className="statusbar-theme statusbar-zoom"
-              onClick={onResetZoom}
-              title="重置编辑器缩放为100%"
-              aria-label={`编辑器缩放${zoom}%,点击重置为100%`}
-            >
-              {zoom}%
-            </button>
-          )}
+          {tab && <EditorZoom area={editorAreaRef} tabId={tab.id} sourceMode={sourceMode} />}
           <button
             className="statusbar-theme"
             onClick={() => onThemeMode(next)}

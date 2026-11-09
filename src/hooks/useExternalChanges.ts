@@ -1,13 +1,16 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { EXTERNAL_POLL_MS } from '../config/constants';
 import { confirmDialog, showMessage } from '../lib/dialog';
 import { documentRevision, readDocument } from '../lib/fileOps';
 import { prepareImageReferences, type PreparedImageReferences } from '../lib/imageOps';
 import { computeStats } from '../lib/stats';
 import { needsDocumentProtection } from '../lib/documentProtection';
+import type { Tab } from '../lib/types';
 
 import type { DocumentSession } from './useDocumentSession';
 import type { RecoveryController } from './useRecovery';
+
+const BACKGROUND_EXTERNAL_POLL_MS = EXTERNAL_POLL_MS * 15;
 
 export function useExternalChanges(
   session: DocumentSession,
@@ -33,6 +36,8 @@ export function useExternalChanges(
     updateTab,
     pauseAutoSave,
   } = session;
+  const externalLastChecks = useRef<Record<string, number>>({});
+  const previousActiveId = useRef(activeId);
   /* ---------- 外部文件变化检测 ---------- */
   const promptExternalReload = useCallback(
     async (tabId: string, detectedMtime: number, detectedRevision: string | null) => {
@@ -62,7 +67,7 @@ export function useExternalChanges(
           // 不推进已知 mtime:下次检测仍需确认,自动保存也必须保留冲突保护。
           pauseAutoSave(tabId, detectedMtime);
           await showMessage(
-            `「${tab.title}」在重新加载期间发生变化,本次重载已取消,已保留本地内容。请按 Ctrl+S 手动处理。`,
+            `「${tab.title}」在重新加载期间发生变化,本次重载已取消,已保留本地内容。请点击工具栏「保存」手动处理。`,
             'info',
           );
         };
@@ -145,7 +150,7 @@ export function useExternalChanges(
           pauseAutoSave(tabId, -1);
           if (tab?.id === activeId) {
             await showMessage(
-              `无法读取「${tab.title}」的磁盘状态,文件可能已被删除或权限已变化。请按 Ctrl+S 手动处理。`,
+              `无法读取「${tab.title}」的磁盘状态,文件可能已被删除或权限已变化。请点击工具栏「保存」手动处理。`,
               'error',
             );
           } else {
@@ -201,79 +206,100 @@ export function useExternalChanges(
     promptExternalReload,
   ]);
 
+  const checkExternal = useCallback(
+    (candidate: Tab) => {
+      const path = candidate.path;
+      if (
+        !path ||
+        candidate.dirty ||
+        candidate.id in saveQueues.current ||
+        externalChecks.current.has(candidate.id) ||
+        externalPrompts.current.has(candidate.id)
+      )
+        return;
+      externalLastChecks.current[candidate.id] = Date.now();
+      externalChecks.current.add(candidate.id);
+      void (async () => {
+        try {
+          // Keep full byte revisions: timestamps and file sizes can be preserved.
+          const disk = await documentRevision(path);
+          const latest = tabsRef.current.find((tab) => tab.id === candidate.id);
+          if (
+            !latest ||
+            latest.path !== candidate.path ||
+            latest.dirty ||
+            latest.diskRevision !== candidate.diskRevision ||
+            latest.id in saveQueues.current
+          )
+            return;
+          if (disk.revision === null) throw new Error('文件已不在原位置');
+          const mtime = disk.mtime ?? 0;
+          if (disk.revision === latest.diskRevision && mtime === latest.externalMtime) return;
+          const offered = detectedExternalStates.current[latest.id];
+          if (offered?.revision === disk.revision && offered.mtime === mtime) return;
+          detectedExternalStates.current[latest.id] = { revision: disk.revision, mtime };
+          updateTab(latest.id, { preserveLocal: true });
+          if (latest.id === activeId) {
+            await promptExternalReload(latest.id, mtime, disk.revision);
+          } else {
+            updateTab(latest.id, { externalMtime: mtime, externalChanged: true });
+          }
+        } catch (error) {
+          const latest = tabsRef.current.find((tab) => tab.id === candidate.id);
+          if (
+            latest &&
+            latest.path === candidate.path &&
+            blockedExternalMtime.current[latest.id] !== -1
+          ) {
+            pauseAutoSave(latest.id, -1);
+            if (latest.id === activeId) {
+              await showMessage(
+                `无法读取「${latest.title}」的磁盘状态,文件可能已被删除或权限已变化。请点击工具栏「保存」手动处理。`,
+                'error',
+              );
+            } else {
+              updateTab(latest.id, { externalChanged: true });
+            }
+          }
+          console.warn('检测外部文件变化失败', error);
+        } finally {
+          externalChecks.current.delete(candidate.id);
+        }
+      })();
+    },
+    [
+      activeId,
+      blockedExternalMtime,
+      detectedExternalStates,
+      externalChecks,
+      externalPrompts,
+      pauseAutoSave,
+      promptExternalReload,
+      saveQueues,
+      tabsRef,
+      updateTab,
+    ],
+  );
+
   useEffect(() => {
     const timer = setInterval(() => {
-      const candidates = tabsRef.current.filter(
-        (tab) =>
-          tab.path &&
-          !tab.dirty &&
-          !(tab.id in saveQueues.current) &&
-          !externalChecks.current.has(tab.id) &&
-          !externalPrompts.current.has(tab.id),
-      );
-      for (const candidate of candidates) {
-        externalChecks.current.add(candidate.id);
-        void (async () => {
-          try {
-            // Poll byte revisions off the input path; timestamps can be preserved.
-            // A timestamp-only change still allows refreshing relative image bytes.
-            const disk = await documentRevision(candidate.path!);
-            const latest = tabsRef.current.find((tab) => tab.id === candidate.id);
-            if (
-              !latest ||
-              latest.path !== candidate.path ||
-              latest.dirty ||
-              latest.diskRevision !== candidate.diskRevision ||
-              latest.id in saveQueues.current
-            )
-              return;
-            if (disk.revision === null) throw new Error('文件已不在原位置');
-            const mtime = disk.mtime ?? 0;
-            if (disk.revision === latest.diskRevision && mtime === latest.externalMtime) return;
-            const offered = detectedExternalStates.current[latest.id];
-            if (offered?.revision === disk.revision && offered.mtime === mtime) return;
-            detectedExternalStates.current[latest.id] = { revision: disk.revision, mtime };
-            updateTab(latest.id, { preserveLocal: true });
-            if (latest.id === activeId) {
-              await promptExternalReload(latest.id, mtime, disk.revision);
-            } else {
-              updateTab(latest.id, { externalMtime: mtime, externalChanged: true });
-            }
-          } catch (error) {
-            const latest = tabsRef.current.find((tab) => tab.id === candidate.id);
-            if (
-              latest &&
-              latest.path === candidate.path &&
-              blockedExternalMtime.current[latest.id] !== -1
-            ) {
-              pauseAutoSave(latest.id, -1);
-              if (latest.id === activeId) {
-                await showMessage(
-                  `无法读取「${latest.title}」的磁盘状态,文件可能已被删除或权限已变化。请按 Ctrl+S 手动处理。`,
-                  'error',
-                );
-              } else {
-                updateTab(latest.id, { externalChanged: true });
-              }
-            }
-            console.warn('检测外部文件变化失败', error);
-          } finally {
-            externalChecks.current.delete(candidate.id);
-          }
-        })();
+      const now = Date.now();
+      for (const candidate of tabsRef.current) {
+        if (
+          candidate.id !== activeId &&
+          now - (externalLastChecks.current[candidate.id] ?? 0) < BACKGROUND_EXTERNAL_POLL_MS
+        )
+          continue;
+        checkExternal(candidate);
       }
     }, EXTERNAL_POLL_MS);
     return () => clearInterval(timer);
-  }, [
-    activeId,
-    promptExternalReload,
-    updateTab,
-    pauseAutoSave,
-    tabsRef,
-    saveQueues,
-    externalChecks,
-    externalPrompts,
-    detectedExternalStates,
-    blockedExternalMtime,
-  ]);
+  }, [activeId, checkExternal, tabsRef]);
+
+  useEffect(() => {
+    if (previousActiveId.current === activeId) return;
+    previousActiveId.current = activeId;
+    const candidate = tabsRef.current.find((tab) => tab.id === activeId);
+    if (candidate) checkExternal(candidate);
+  }, [activeId, checkExternal, tabsRef]);
 }

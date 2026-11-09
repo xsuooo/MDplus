@@ -10,6 +10,7 @@ const fixturePluginCommands = new Set([
   'plugin:window|outer_position',
   'plugin:window|is_minimized',
   'plugin:window|is_maximized',
+  'plugin:window|is_visible',
   'plugin:window|available_monitors',
   'plugin:window|set_size',
   'plugin:window|set_position',
@@ -185,6 +186,7 @@ export function createNativeMocks(options: NativeMockOptions = {}) {
     y: 0,
     minimized: false,
     maximized: false,
+    visible: false,
     destroyed: false,
   };
   const settingsSnapshot = (): FixtureSettingsSnapshot => {
@@ -204,6 +206,30 @@ export function createNativeMocks(options: NativeMockOptions = {}) {
     return await options.fallback(command, args);
   };
 
+  const retainedRecoveryKeys = (value: unknown) => {
+    const retained = keys(value);
+    check(
+      retained.every((key) => /^[A-Za-z0-9-]{1,100}\.(png|jpg|jpeg|gif|webp|svg)$/.test(key)),
+      'invalid recovery image key',
+    );
+    return retained;
+  };
+  const pruneRecoveryImages = (id: string, retained: string[]) => {
+    const current = recoverySnapshots.get(id);
+    const keep = new Set([
+      ...retained,
+      ...((current?.images ?? []) as Record<string, unknown>[]).map((image) => String(image.key)),
+    ]);
+    const removedKeys: string[] = [];
+    for (const key of recoveryImages.keys()) {
+      if (key.startsWith(`${id}/`) && !keep.has(key.slice(id.length + 1))) {
+        recoveryImages.delete(key);
+        removedKeys.push(key.slice(id.length + 1));
+      }
+    }
+    return { removedKeys, cleanupError: null };
+  };
+
   const invoke = async (command: string, payload?: unknown): Promise<unknown> => {
     const args = record(payload ?? {});
     check(
@@ -212,6 +238,42 @@ export function createNativeMocks(options: NativeMockOptions = {}) {
     );
     calls.push({ command, args: { ...args } });
     await options.beforeCommand?.(command, args);
+    if (command === 'import_dropped_image') {
+      const path = string(args.path, 'path');
+      check(/^(?:[a-z]:[\\/]|\\\\)/i.test(path), 'drop requires an absolute Windows path');
+      check(
+        ![...path].some((character) => character.charCodeAt(0) < 32),
+        'invalid dropped image path',
+      );
+      const filename = path.replace(/\\/g, '/').split('/').pop()!;
+      const mime = filenameMime(filename);
+      check(mime === 'image/png' || mime === 'image/jpeg', 'drop supports PNG/JPEG only');
+      const input = binaries.get(path) ?? binaries.get(normalized(path));
+      check(input, `missing dropped image: ${path}`);
+      const bytes = Uint8Array.from(input);
+      check(bytes.length > 0, 'dropped image is empty');
+      const dataBase64 = encodeFixtureBytes(bytes);
+      check(
+        stashBytes + bytes.length <= (options.stashByteLimit ?? LIMITS.imageStashBytes),
+        'session stash full',
+      );
+      check(
+        stashes.size < (options.stashEntryLimit ?? LIMITS.imageStashEntries),
+        'too many session images',
+      );
+      const key = token();
+      const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+      stashes.set(key, { dataBase64, mime, length: bytes.length });
+      stashBytes += bytes.length;
+      return {
+        key,
+        mime,
+        filename,
+        byteLength: bytes.length,
+        digest: [...hash].map((value) => value.toString(16).padStart(2, '0')).join(''),
+        previewUrl: `data:${mime};base64,${dataBase64}`,
+      };
+    }
     if (command === 'stash_image') {
       check(!('data' in args), 'stash accepts dataBase64 only');
       const bytes = decodeFixtureBase64(args.dataBase64);
@@ -340,18 +402,91 @@ export function createNativeMocks(options: NativeMockOptions = {}) {
       });
       return { ...receipt, allocationId: id };
     }
-    if (options.fallback) {
-      if (options.legacyImagePayloads && command === 'cache_recovery_image') {
-        check(!('data' in args), 'recovery image accepts dataBase64 only');
-        return delegate(command, { ...args, data: [...decodeFixtureBase64(args.dataBase64)] });
+    // Visibility belongs to the shared window fixture, including older scenarios
+    // whose application fallback predates the initial reveal handshake.
+    if (command === 'plugin:window|is_visible') return geometry.visible;
+    if (command === 'cache_recovery_image') {
+      check(!('data' in args) && !('dataBase64' in args), 'recovery image accepts stashKey only');
+      const stashed = stashes.get(string(args.stashKey, 'stashKey'));
+      check(stashed, 'unknown session image key');
+      const bytes = decodeFixtureBase64(stashed.dataBase64);
+      const id = string(args.id, 'id');
+      const imageKey = retainedRecoveryKeys([args.key])[0];
+      const retained = retainedRecoveryKeys(args.retainedKeys);
+      if (options.fallback)
+        await delegate(command, options.legacyImagePayloads ? { ...args, data: [...bytes] } : args);
+      const cleanup = pruneRecoveryImages(id, [...retained, imageKey]);
+      const key = `${id}/${imageKey}`;
+      const image = { dataBase64: stashed.dataBase64, mime: filenameMime(imageKey) };
+      check(image.mime === stashed.mime, 'recovery image type does not match the stash');
+      const previous = recoveryImages.get(key);
+      check(
+        !previous || previous.dataBase64 === image.dataBase64,
+        'immutable recovery image changed',
+      );
+      const total = [...recoveryImages].reduce(
+        (size, [cachedKey, cached]) =>
+          size +
+          (cachedKey.startsWith(`${id}/`) && cachedKey !== key
+            ? decodeFixtureBase64(cached.dataBase64).length
+            : 0),
+        bytes.length,
+      );
+      check(
+        total <= 2 * LIMITS.snapshotImageBytes + LIMITS.textFileBytes + 1024 * 1024,
+        'recovery cache full',
+      );
+      recoveryImages.set(key, image);
+      return cleanup;
+    }
+    if (command === 'write_recovery_snapshot') {
+      const snapshot = structuredClone(record(args.snapshot));
+      const id = string(snapshot.id, 'id');
+      const retained = retainedRecoveryKeys(args.retainedKeys);
+      check(
+        typeof snapshot.markdown === 'string' &&
+          new TextEncoder().encode(snapshot.markdown).length <= LIMITS.textFileBytes,
+        'invalid recovery text',
+      );
+      check(
+        Array.isArray(snapshot.images) && snapshot.images.length <= LIMITS.recoveryImages,
+        'invalid recovery images',
+      );
+      let total = 0;
+      for (const entry of snapshot.images) {
+        const image = recoveryImages.get(`${id}/${string(record(entry).key, 'image key')}`);
+        check(image, 'snapshot references uncached image');
+        total += decodeFixtureBase64(image.dataBase64).length;
       }
+      check(total <= LIMITS.snapshotImageBytes, 'recovery attachment limit');
+      if (options.fallback) await delegate(command, args);
+      recoverySnapshots.set(id, snapshot);
+      return pruneRecoveryImages(id, retained);
+    }
+    if (options.fallback) {
       const result = await delegate(command, args);
       if (options.legacyImagePayloads && command === 'read_image_file') return compactImage(result);
-      if (options.legacyImagePayloads && command === 'read_recovery_snapshot') {
+      if (command === 'read_recovery_snapshot') {
         const restored = record(result);
         check(Array.isArray(restored.images), 'recovery response omitted images');
-        return { ...restored, images: restored.images.map(compactImage) };
+        const images = restored.images.map((image) =>
+          options.legacyImagePayloads ? compactImage(image) : record(image),
+        );
+        const snapshot = record(restored.snapshot);
+        recoverySnapshots.set(String(snapshot.id), structuredClone(snapshot));
+        for (const image of images)
+          recoveryImages.set(`${snapshot.id}/${image.key}`, {
+            dataBase64: String(image.dataBase64),
+            mime: String(image.mime),
+          });
+        return { ...restored, images };
       }
+      if (command === 'delete_recovery_snapshot') {
+        recoverySnapshots.delete(String(args.id));
+        for (const key of recoveryImages.keys())
+          if (key.startsWith(`${args.id}/`)) recoveryImages.delete(key);
+      }
+      if (command === 'plugin:window|show') geometry.visible = true;
       return result;
     }
     // Explicit defaults for ordinary UI fixtures. Unrecognized IPC is always an error.
@@ -359,42 +494,6 @@ export function createNativeMocks(options: NativeMockOptions = {}) {
       case 'take_startup_files':
       case 'take_pending_open_files':
         return [];
-      case 'cache_recovery_image': {
-        check(!('data' in args), 'recovery image accepts dataBase64 only');
-        decodeFixtureBase64(args.dataBase64);
-        const key = `${string(args.id, 'id')}/${string(args.key, 'key')}`;
-        const image = {
-          dataBase64: args.dataBase64 as string,
-          mime: filenameMime(String(args.key)),
-        };
-        const previous = recoveryImages.get(key);
-        check(
-          !previous || previous.dataBase64 === image.dataBase64,
-          'immutable recovery image changed',
-        );
-        recoveryImages.set(key, image);
-        return;
-      }
-      case 'write_recovery_snapshot': {
-        const snapshot = structuredClone(record(args.snapshot));
-        const id = string(snapshot.id, 'id');
-        check(
-          typeof snapshot.markdown === 'string' &&
-            new TextEncoder().encode(snapshot.markdown).length <= LIMITS.textFileBytes,
-          'invalid recovery text',
-        );
-        check(
-          Array.isArray(snapshot.images) && snapshot.images.length <= LIMITS.recoveryImages,
-          'invalid recovery images',
-        );
-        for (const image of snapshot.images)
-          check(
-            recoveryImages.has(`${id}/${string(record(image).key, 'image key')}`),
-            'snapshot references uncached image',
-          );
-        recoverySnapshots.set(id, snapshot);
-        return;
-      }
       case 'list_recovery_snapshots': {
         check(Array.isArray(args.activeIds), 'active recovery ids missing');
         return [...recoverySnapshots.values()]
@@ -465,6 +564,8 @@ export function createNativeMocks(options: NativeMockOptions = {}) {
         return;
       }
       case 'plugin:window|show':
+        geometry.visible = true;
+        return;
       case 'plugin:window|set_focus':
         return;
       case 'plugin:window|unminimize':

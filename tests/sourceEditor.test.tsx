@@ -7,6 +7,10 @@ vi.mock('@tauri-apps/api/path', () => ({
   dirname: async (file: string) => file.slice(0, file.lastIndexOf('/')),
   join: async (...parts: string[]) => parts.join('/'),
 }));
+vi.mock('../src/lib/imagePaths', async (original) => {
+  const actual = await original<typeof import('../src/lib/imagePaths')>();
+  return { ...actual, getImageUrls: vi.fn(actual.getImageUrls) };
+});
 
 // Run the component's handlers and layout effects without a WebView dependency.
 const hooks = vi.hoisted(() => ({
@@ -89,7 +93,7 @@ function mount(initial = 'abc', saveImage = vi.fn(async () => 'image.png')) {
       const tree = SourceEditor({
         tabId: 'tab',
         value,
-        onChange: (next) => {
+        onChange: (_tabId, next) => {
           value = next;
           changes(next);
         },
@@ -415,5 +419,24 @@ describe('SourceEditor history', () => {
     expect(editor.input.value.slice(editor.input.selectionStart, editor.input.selectionEnd)).toBe(
       'suffix',
     );
+  });
+
+  it('reuses image scans for unchanged undo snapshots', async () => {
+    const original = '![photo](./img/pic.png)\n\ntext';
+    await loadImageReferences('tab', original, 'C:/old/note.md');
+    const editor = mount(original);
+    editor.change(`${original}\n\none`);
+    vi.advanceTimersByTime(500);
+    editor.change(`${original}\n\none two`);
+    const scan = vi.mocked(getImageUrls);
+    scan.mockClear();
+
+    await collectUnusedImages('tab');
+    expect(scan).toHaveBeenCalledTimes(3);
+    scan.mockClear();
+
+    await collectUnusedImages('tab');
+    expect(scan).toHaveBeenCalledTimes(1);
+    expect(scan).toHaveBeenCalledWith(`${original}\n\none two`);
   });
 });

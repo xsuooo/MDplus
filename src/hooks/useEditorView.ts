@@ -2,10 +2,11 @@ import type { Editor } from '@milkdown/kit/core';
 import { editorViewCtx } from '@milkdown/kit/core';
 import { TextSelection } from '@milkdown/prose/state';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { TAB_RENDER_MS } from '../config/constants';
+import { IMAGE_PREPARATION_MS, TAB_RENDER_MS } from '../config/constants';
 import { showMessage } from '../lib/dialog';
 import { needsDocumentProtection } from '../lib/documentProtection';
 import { redo, undo } from '../lib/editor';
+import { flushEditorUpdate } from '../lib/editorUpdates';
 import {
   BODY_FONTS,
   CODE_FONTS,
@@ -17,27 +18,27 @@ import {
   type CodeFont,
 } from '../lib/editorFont';
 import {
+  extractSourceOutline,
   renderedPlace,
   restoreRendered,
   restoreSource,
+  restoreSessionRendered,
+  restoreSessionSource,
   sourcePlace,
   toRendered,
   toSource,
+  type Ast,
   type RenderedPlace,
   type SourcePlace,
 } from '../lib/editorPosition';
-import {
-  bindEditorZoomControls,
-  nextEditorZoom,
-  readEditorZoom,
-  writeEditorZoom,
-} from '../lib/editorZoom';
+import { measureSourceText } from '../lib/sourcePosition';
+import { readEditorWidth, writeEditorWidth, type EditorWidth } from '../lib/editorWidth';
 import { errorMessage } from '../lib/errors';
 import { saveImage, settleImageInsertion } from '../lib/imageOps';
 import { refreshMermaidTheme } from '../lib/mermaid';
 import { protectPastedImage } from '../lib/recovery';
 import { computeStats } from '../lib/stats';
-import type { EditorUpdate } from '../lib/types';
+import type { EditorUpdate, OutlineItem } from '../lib/types';
 
 import type { DocumentSession } from './useDocumentSession';
 import type { RecoveryController } from './useRecovery';
@@ -47,6 +48,7 @@ export function useEditorView(
   recovery: RecoveryController,
   scheduleAutoSave: (id: string) => void,
   changeSourcePreference: (source: boolean) => void,
+  outlineOpen: boolean,
 ) {
   const {
     setTabs,
@@ -63,15 +65,82 @@ export function useEditorView(
     currentView,
     sourceRegistry,
     positions,
+    positionVersion,
     enteringSource,
     syncEditor,
     rememberActive,
     resolveContent,
   } = session;
   const { prepareCurrentImages, protectDraft, cleanRecovery } = recovery;
-  const [editorZoom, setEditorZoom] = useState(readEditorZoom);
   const [codeFont, setCodeFont] = useState(readCodeFont);
   const [bodyFont, setBodyFont] = useState(readBodyFont);
+  const [editorWidth, setEditorWidth] = useState(readEditorWidth);
+  // Worker inputs follow committed state; discarded renders must not consume newer mirror content.
+  const sourceMarkdown = session.activeTab?.markdown ?? '';
+  const [sourceOutline, setSourceOutline] = useState<{
+    id: string;
+    markdown: string;
+    items: OutlineItem[];
+    error: boolean;
+  } | null>(null);
+  const sourceEditor = activeId ? editorRegistry.current[activeId] : null;
+  useEffect(() => {
+    if (!outlineOpen || !sourceMode || !activeId || !sourceEditor) return;
+    let worker: Worker | undefined;
+    const fail = (error: unknown) => {
+      worker?.terminate();
+      console.warn('源码目录读取失败', error);
+      setSourceOutline({ id: activeId, markdown: sourceMarkdown, items: [], error: true });
+    };
+    const timer = setTimeout(() => {
+      try {
+        worker = new Worker(new URL('../lib/sourceOutline.worker.ts', import.meta.url), {
+          type: 'module',
+        });
+        worker.onmessage = (event: MessageEvent<Ast>) => {
+          worker?.terminate();
+          try {
+            setSourceOutline({
+              id: activeId,
+              markdown: sourceMarkdown,
+              items: extractSourceOutline(sourceEditor, sourceMarkdown, event.data),
+              error: false,
+            });
+          } catch (error) {
+            fail(error);
+          }
+        };
+        worker.onerror = (event) => {
+          event.preventDefault();
+          fail(event.message);
+        };
+        worker.postMessage(sourceMarkdown);
+      } catch (error) {
+        fail(error);
+      }
+    }, IMAGE_PREPARATION_MS);
+    return () => {
+      clearTimeout(timer);
+      worker?.terminate();
+    };
+  }, [outlineOpen, sourceMode, activeId, sourceMarkdown, sourceEditor]);
+  const currentSourceOutline =
+    sourceOutline?.id === activeId && sourceOutline.markdown === sourceMarkdown
+      ? sourceOutline
+      : null;
+  const outlineItems = sourceMode
+    ? (currentSourceOutline?.items ?? [])
+    : activeId
+      ? (tabMirror.current[activeId]?.outline ?? [])
+      : [];
+  const outlineStatus =
+    sourceMode && outlineOpen && activeId
+      ? currentSourceOutline
+        ? currentSourceOutline.error
+          ? ('error' as const)
+          : undefined
+        : ('loading' as const)
+      : undefined;
   useEffect(() => {
     void refreshMermaidTheme();
   }, [bodyFont]);
@@ -81,6 +150,89 @@ export function useEditorView(
     source?: SourcePlace;
     rendered?: RenderedPlace;
   } | null>(null);
+  const sessionRestoreCleanups = useRef<Record<string, () => void>>({});
+  useEffect(
+    () => () => {
+      for (const cancel of Object.values(sessionRestoreCleanups.current)) cancel();
+    },
+    [],
+  );
+  const restoreSessionPosition = useCallback(
+    (id: string) => {
+      if (currentView.current.activeId !== id) return;
+      const saved = positions.current[id];
+      const pending = saved?.pendingSessionPlace;
+      if (!pending) return;
+      const input = sourceRegistry.current[id];
+      const editor = editorRegistry.current[id];
+      const markdown =
+        tabMirror.current[id]?.markdown ??
+        tabsRef.current.find((tab) => tab.id === id)?.markdown ??
+        '';
+      if (currentView.current.sourceMode) {
+        if (!input || !input.isConnected || input.closest('[hidden]')) return;
+        restoreSessionSource(input, pending);
+        saved.source = sourcePlace(input);
+      } else {
+        if (!editor) return;
+        restoreSessionRendered(editor, markdown, pending);
+        saved.rendered = renderedPlace(editor);
+      }
+      saved.sourceMode = currentView.current.sourceMode;
+      delete saved.pendingSessionPlace;
+      sessionRestoreCleanups.current[id]?.();
+      const source = currentView.current.sourceMode;
+      const generation = contentGenerations.current[id] ?? 0;
+      let cancelled = false;
+      let frame: number | undefined;
+      let remaining = 2;
+      const cancel = () => {
+        if (cancelled) return;
+        cancelled = true;
+        if (frame !== undefined) cancelAnimationFrame(frame);
+        for (const event of ['wheel', 'keydown', 'pointerdown', 'input'])
+          window.removeEventListener(event, cancel, true);
+        if (sessionRestoreCleanups.current[id] === cancel)
+          delete sessionRestoreCleanups.current[id];
+      };
+      const settle = () => {
+        if (
+          !cancelled &&
+          currentView.current.activeId === id &&
+          currentView.current.sourceMode === source &&
+          (contentGenerations.current[id] ?? 0) === generation
+        ) {
+          if (source && input?.isConnected) {
+            restoreSessionSource(input, pending);
+            saved.source = sourcePlace(input);
+          } else if (editor && editorRegistry.current[id] === editor) {
+            restoreSessionRendered(editor, markdown, pending);
+            saved.rendered = renderedPlace(editor);
+          }
+        }
+        if (--remaining === 0) cancel();
+      };
+      sessionRestoreCleanups.current[id] = cancel;
+      for (const event of ['wheel', 'keydown', 'pointerdown', 'input'])
+        window.addEventListener(event, cancel, true);
+      // The first restore works even in a hidden WebView; these bounded repeats
+      // account for the first visible layout and bundled-font metrics settling.
+      if (typeof requestAnimationFrame === 'function') frame = requestAnimationFrame(settle);
+      else queueMicrotask(settle);
+      void Promise.resolve(document.fonts?.ready).then(settle, () => {
+        if (--remaining === 0) cancel();
+      });
+    },
+    [
+      contentGenerations,
+      currentView,
+      editorRegistry,
+      positions,
+      sourceRegistry,
+      tabMirror,
+      tabsRef,
+    ],
+  );
   const captureFontPosition = useCallback(() => {
     rememberActive();
     const { activeId: id, sourceMode: source } = currentView.current;
@@ -108,6 +260,14 @@ export function useEditorView(
       setCodeFont(font);
     },
     [codeFont, captureFontPosition],
+  );
+  const changeEditorWidth = useCallback(
+    (width: EditorWidth) => {
+      if (width === editorWidth) return;
+      captureFontPosition();
+      setEditorWidth(width);
+    },
+    [editorWidth, captureFontPosition],
   );
 
   useLayoutEffect(() => {
@@ -162,7 +322,7 @@ export function useEditorView(
       for (const event of ['wheel', 'keydown', 'pointerdown', 'input'])
         window.removeEventListener(event, cancel, true);
     };
-  }, [bodyFont, codeFont, activeId, sourceMode, sourceRegistry, editorRegistry]);
+  }, [bodyFont, codeFont, editorWidth, activeId, sourceMode, sourceRegistry, editorRegistry]);
 
   useLayoutEffect(() => {
     if (!activeId) return;
@@ -173,6 +333,11 @@ export function useEditorView(
       tabMirror.current[activeId]?.markdown ??
       tabsRef.current.find((tab) => tab.id === activeId)?.markdown ??
       '';
+    if (saved.pendingSessionPlace) {
+      restoreSessionPosition(activeId);
+      // Registration of an asynchronous rich editor completes this restoration later.
+      if (saved.pendingSessionPlace) return;
+    }
     if (sourceMode && input) {
       if (enteringSource.current && editor) {
         // The source component first applies any newer rendered draft in its layout effect.
@@ -193,7 +358,14 @@ export function useEditorView(
         });
       } else if (saved.source) restoreSource(input, saved.source);
     } else if (editor) {
-      syncEditor(activeId, markdown);
+      // Rich tabs retain their editor and receive edits, reloads and image saves
+      // through their own update paths. Only a source-mode return needs sync.
+      if (
+        saved.sourceMode === true &&
+        (saved.exchange?.markdown !== markdown ||
+          saved.exchange.rendered.doc !== renderedPlace(editor).doc)
+      )
+        syncEditor(activeId, markdown);
       // React has now removed inert, so a source-mode return can restore visible focus.
       if (saved.rendered) restoreRendered(editor, saved.rendered, saved.sourceMode === true);
     }
@@ -205,6 +377,8 @@ export function useEditorView(
     editorRegistry,
     enteringSource,
     positions,
+    positionVersion,
+    restoreSessionPosition,
     sourceMode,
     sourceRegistry,
     syncEditor,
@@ -212,59 +386,88 @@ export function useEditorView(
     tabsRef,
   ]);
   useEffect(() => {
-    const area = editorAreaRef.current;
-    if (!area) return;
-    return bindEditorZoomControls(area, (action) =>
-      setEditorZoom((value) => nextEditorZoom(value, action)),
-    );
-  }, []);
-
-  useEffect(() => {
-    writeEditorZoom(editorZoom);
-  }, [editorZoom]);
-
-  useEffect(() => {
     writeCodeFont(codeFont);
   }, [codeFont]);
   useEffect(() => {
     writeBodyFont(bodyFont);
   }, [bodyFont]);
+  useEffect(() => {
+    writeEditorWidth(editorWidth);
+  }, [editorWidth]);
 
   /* ---------- 编辑器更新回传 ---------- */
-  // 输入节流:tabsRef 始终即时更新(保存/关闭等正确性路径读取它),
-  // 仅节流 React setTabs(视觉渲染),避免每次敲键都重渲染整个 App。
+  // dirty 和 generation 即时更新，Markdown、统计和大纲按 120ms 合并。
+  // 保存、关闭、导出和模式切换先 flushEditorUpdate，避免读取旧快照。
+  const statsDirty = useRef(new Set<string>());
   const scheduleTabRender = useCallback(
-    (id: string) => {
+    (id: string, refreshStats = false) => {
+      if (refreshStats) statsDirty.current.add(id);
       const existing = tabRenderTimers.current[id];
-      if (existing) clearTimeout(existing);
+      if (existing) return;
       tabRenderTimers.current[id] = setTimeout(() => {
         delete tabRenderTimers.current[id];
+        if (statsDirty.current.delete(id)) {
+          const tab = tabsRef.current.find((candidate) => candidate.id === id);
+          if (tab) {
+            const stats = computeStats(tab.markdown);
+            tabsRef.current = tabsRef.current.map((candidate) =>
+              candidate.id === id ? { ...candidate, stats } : candidate,
+            );
+            const mirror = tabMirror.current[id];
+            if (mirror) tabMirror.current[id] = { ...mirror, stats };
+          }
+        }
         setTabs([...tabsRef.current]);
       }, TAB_RENDER_MS);
     },
-    [setTabs, tabRenderTimers, tabsRef],
+    [setTabs, tabMirror, tabRenderTimers, tabsRef],
+  );
+
+  const handleEditorActivity = useCallback(
+    (id: string, activity: Pick<EditorUpdate, 'canUndo' | 'canRedo'>) => {
+      const tab = tabsRef.current.find((candidate) => candidate.id === id);
+      if (!tab) return;
+      contentGenerations.current[id] = (contentGenerations.current[id] ?? 0) + 1;
+      const mirror = tabMirror.current[id];
+      if (mirror) tabMirror.current[id] = { ...mirror, ...activity };
+      tabsRef.current = tabsRef.current.map((candidate) =>
+        candidate.id === id ? { ...candidate, dirty: true } : candidate,
+      );
+      scheduleAutoSave(id);
+      scheduleTabRender(id);
+    },
+    [contentGenerations, scheduleAutoSave, scheduleTabRender, tabMirror, tabsRef],
   );
 
   const handleTabUpdate = useCallback(
-    (id: string, update: EditorUpdate, isInitial = false) => {
-      if (isInitial && (contentGenerations.current[id] ?? 0) > 0) {
-        const latest = tabMirror.current[id]?.markdown;
-        if (latest !== undefined) syncEditor(id, latest);
+    (id: string, update: EditorUpdate, isInitial = false, coalesced = false) => {
+      const prev = tabsRef.current.find((t) => t.id === id);
+      const generation = contentGenerations.current[id] ?? 0;
+      const latest = tabMirror.current[id]?.markdown;
+      // Save As can rewrite image URLs before registration without a user edit.
+      // Compare the mirror with the fixed creation source, not its serialization.
+      if (
+        isInitial &&
+        (generation > 0 ||
+          (prev !== undefined && latest !== undefined && latest !== prev.initialContent))
+      ) {
+        if (latest !== undefined) syncEditor(id, latest, generation > 0);
         scheduleTabRender(id);
         return;
       }
-      const prev = tabsRef.current.find((t) => t.id === id);
       // 初始化只更新派生状态，不能用序列化结果改写尚未编辑的原文。
-      const markdown = isInitial
-        ? (tabMirror.current[id]?.markdown ?? prev?.markdown ?? update.markdown)
-        : update.markdown;
+      const markdown = isInitial ? (latest ?? prev?.markdown ?? update.markdown) : update.markdown;
       const currentUpdate = isInitial
-        ? { ...update, markdown, stats: computeStats(markdown) }
+        ? {
+            ...update,
+            markdown,
+            stats: markdown === update.markdown ? update.stats : computeStats(markdown),
+          }
         : update;
       tabMirror.current[id] = currentUpdate;
       if (isInitial) {
         contentGenerations.current[id] ??= 0;
-      } else {
+      } else if (!coalesced) {
         contentGenerations.current[id] = (contentGenerations.current[id] ?? 0) + 1;
       }
       // 以「最近一次保存成功的内容」为基线判定 dirty,避免编辑又回到打开时内容后误判为已保存
@@ -283,7 +486,7 @@ export function useEditorView(
         return;
       }
       void prepareCurrentImages(id, true).catch((error) => console.warn('图片引用准备失败', error));
-      if (dirty) scheduleAutoSave(id);
+      if (dirty && !coalesced) scheduleAutoSave(id);
       const changed = tabsRef.current.find((tab) => tab.id === id);
       if (changed && (dirty || changed.isNew || changed.preserveLocal)) protectDraft(changed);
       else if (changed) void cleanRecovery(id);
@@ -306,8 +509,10 @@ export function useEditorView(
   const registerEditor = useCallback(
     (id: string, editor: Editor | null) => {
       editorRegistry.current[id] = editor;
+      if (editor) restoreSessionPosition(id);
+      else sessionRestoreCleanups.current[id]?.();
     },
-    [editorRegistry],
+    [editorRegistry, restoreSessionPosition],
   );
 
   /* ---------- 图片粘贴处理 ---------- */
@@ -354,15 +559,22 @@ export function useEditorView(
   /* ---------- 源码模式 ---------- */
   const toggleSourceMode = useCallback(() => {
     const { activeId: id, sourceMode: wasSource } = currentView.current;
+    const pendingEditor = id ? editorRegistry.current[id] : null;
+    if (pendingEditor) flushEditorUpdate(pendingEditor);
     rememberActive();
     if (id && wasSource) {
       const tab = tabsRef.current.find((tab) => tab.id === id);
       const input = sourceRegistry.current[id];
       const editor = editorRegistry.current[id];
       const markdown = tabMirror.current[id]?.markdown ?? tab?.markdown ?? '';
-      syncEditor(id, markdown);
+      const saved = (positions.current[id] ??= {});
+      if (
+        !editor ||
+        saved.exchange?.markdown !== markdown ||
+        saved.exchange.rendered.doc !== renderedPlace(editor).doc
+      )
+        syncEditor(id, markdown);
       if (input && editor) {
-        const saved = (positions.current[id] ??= {});
         toRendered(editor, markdown, input, saved.exchange);
         saved.rendered = renderedPlace(editor);
         saved.exchange = { markdown, source: sourcePlace(input), rendered: saved.rendered };
@@ -402,7 +614,6 @@ export function useEditorView(
         contentGenerations.current[activeId] = (contentGenerations.current[activeId] ?? 0) + 1;
         const prev = tabsRef.current.find((t) => t.id === activeId);
         const dirty = prev ? text !== prev.savedContent : true;
-        const stats = computeStats(text);
         tabMirror.current[activeId] = {
           ...(tabMirror.current[activeId] ?? {
             markdown: text,
@@ -412,10 +623,9 @@ export function useEditorView(
             canRedo: false,
           }),
           markdown: text,
-          stats,
         };
         tabsRef.current = tabsRef.current.map((t) =>
-          t.id === activeId ? { ...t, markdown: text, stats, dirty } : t,
+          t.id === activeId ? { ...t, markdown: text, dirty } : t,
         );
         void prepareCurrentImages(activeId, true).catch((error) =>
           console.warn('图片引用准备失败', error),
@@ -424,7 +634,7 @@ export function useEditorView(
         const changed = tabsRef.current.find((tab) => tab.id === activeId);
         if (changed && (dirty || changed.isNew || changed.preserveLocal)) protectDraft(changed);
         else if (changed) void cleanRecovery(activeId);
-        setTabs([...tabsRef.current]);
+        scheduleTabRender(activeId, true);
       }
     },
     [
@@ -435,14 +645,29 @@ export function useEditorView(
       scheduleAutoSave,
       protectDraft,
       cleanRecovery,
-      setTabs,
+      scheduleTabRender,
     ],
   );
 
   /* ---------- 大纲跳转 ---------- */
   const jumpToOutline = useCallback(
     (pos: number) => {
-      const editor = activeId ? editorRegistry.current[activeId] : null;
+      const { activeId: id, sourceMode: source } = currentView.current;
+      if (source) {
+        const input = id ? sourceRegistry.current[id] : null;
+        if (!input?.isConnected || pos < 0 || pos > input.value.length) return;
+        const top = measureSourceText(input, input.value, (at) => Math.max(0, at(pos) - 24));
+        input.focus({ preventScroll: true });
+        input.setSelectionRange(pos, pos);
+        input.scrollTo({
+          top,
+          behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+            ? 'instant'
+            : 'smooth',
+        });
+        return;
+      }
+      const editor = id ? editorRegistry.current[id] : null;
       if (!editor) return;
       editor.action((ctx) => {
         const view = ctx.get(editorViewCtx);
@@ -454,6 +679,12 @@ export function useEditorView(
         view.focus();
         // Navigate once; normal editing and selection restoration remain instant.
         requestAnimationFrame(() => {
+          if (
+            currentView.current.activeId !== id ||
+            currentView.current.sourceMode ||
+            editorRegistry.current[id!] !== editor
+          )
+            return;
           const dom = view.nodeDOM(pos);
           const scroller = view.dom.closest<HTMLElement>('.milkdown-container');
           if (dom instanceof HTMLElement && scroller) {
@@ -471,18 +702,19 @@ export function useEditorView(
         });
       });
     },
-    [activeId, editorRegistry],
+    [currentView, sourceRegistry, editorRegistry],
   );
 
   return {
     editorAreaRef,
-    editorZoom,
-    setEditorZoom,
     bodyFont,
     codeFont,
+    editorWidth,
     changeBodyFont,
     changeCodeFont,
+    changeEditorWidth,
     handleTabUpdate,
+    handleEditorActivity,
     registerEditor,
     handleImagePaste,
     handleUndo,
@@ -490,5 +722,7 @@ export function useEditorView(
     toggleSourceMode,
     handleSourceChange,
     jumpToOutline,
+    outlineItems,
+    outlineStatus,
   };
 }

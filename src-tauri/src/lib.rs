@@ -3,6 +3,7 @@ mod config;
 #[cfg(test)]
 mod image_asset_tests;
 mod image_data;
+mod image_import;
 mod image_stash;
 mod owned_file;
 mod recovery;
@@ -474,10 +475,13 @@ pub fn run() {
             }
 
             if let Some(window) = app.get_webview_window("main") {
-                // 确保窗口可见并获得焦点
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
+                // 初次显现由前端在恢复位置与布局后完成,第二实例不抢先显示隐藏窗口。
+                if window.is_visible().unwrap_or(false) {
+                    if window.is_minimized().unwrap_or(false) {
+                        let _ = window.unminimize();
+                    }
+                    let _ = window.set_focus();
+                }
 
                 // 如果有文件，传递给前端
                 if has_files {
@@ -485,16 +489,6 @@ pub fn run() {
                 }
             }
         }))
-        .on_page_load(|webview, payload| {
-            // 页面一开始加载就显示窗口,避免用户双击后长时间看不到任何反馈。
-            // 窗口配置了 backgroundColor(#f6f5f1),配合前端的 startup-placeholder,
-            // 在内容渲染完成前不会闪白或闪欢迎页。
-            if payload.event() == tauri::webview::PageLoadEvent::Started {
-                let window = webview.window();
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-        })
         .invoke_handler(tauri::generate_handler![
             safe_files::read_document,
             safe_files::document_revision,
@@ -503,6 +497,7 @@ pub fn run() {
             safe_files::commit_image_assets,
             safe_files::discard_image_assets,
             image_stash::stash_image,
+            image_import::import_dropped_image,
             image_stash::read_stashed_image,
             image_stash::discard_stashed_images,
             read_image_file,

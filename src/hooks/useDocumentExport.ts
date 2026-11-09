@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { showMessage } from '../lib/dialog';
+import { flushEditorUpdate } from '../lib/editorUpdates';
 import { type BodyFont, type CodeFont } from '../lib/editorFont';
 import { errorMessage } from '../lib/errors';
 import { assertExportBytes, captureExport, exportHTML, exportPDF } from '../lib/export';
@@ -28,6 +29,8 @@ export function useDocumentExport(
       setExporting(true);
       let images: PendingImageLease | undefined;
       try {
+        const pendingEditor = editorRegistry.current[activeTab.id];
+        if (pendingEditor) flushEditorUpdate(pendingEditor);
         await saveQueues.current[activeTab.id];
         const tab = tabsRef.current.find((candidate) => candidate.id === activeTab.id);
         const editor = editorRegistry.current[activeTab.id];

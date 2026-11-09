@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { clearMocks } from '@tauri-apps/api/mocks';
+import { createHash } from 'node:crypto';
 import { LIMITS } from '../src/config/constants';
 import { createNativeMocks, decodeFixtureBase64, encodeFixtureBytes } from './browser/nativeMocks';
 
@@ -22,6 +23,66 @@ afterEach(() => {
 });
 
 describe('strict pure-browser native fixtures', () => {
+  it('keeps a complete recovery snapshot and in-flight batch while collecting obsolete images', async () => {
+    const native = createNativeMocks();
+    const id = 'draft';
+    const { key: stashKey } = (await native.invoke('stash_image', image)) as { key: string };
+    const cache = (key: string, retainedKeys: string[] = []) =>
+      native.invoke('cache_recovery_image', { id, key, stashKey, retainedKeys });
+    await cache('old.png');
+    const snapshot = {
+      id,
+      title: 'draft.md',
+      originalPath: null,
+      markdown: '![](mdplus-image:old)',
+      images: [{ key: 'old.png', placeholder: 'mdplus-image:old', filename: 'old.png' }],
+    };
+    await native.invoke('write_recovery_snapshot', { snapshot, retainedKeys: [] });
+    await cache('a.png', ['a.png', 'b.png']);
+    await cache('b.png', ['a.png', 'b.png']);
+    expect(native.recoveryImages.size).toBe(3);
+    const next = { ...snapshot, markdown: 'no images', images: [] };
+    expect(
+      await native.invoke('write_recovery_snapshot', {
+        snapshot: next,
+        retainedKeys: ['a.png', 'b.png'],
+      }),
+    ).toEqual({ removedKeys: ['old.png'], cleanupError: null });
+    expect(native.recoveryImages.size).toBe(2);
+    await native.invoke('write_recovery_snapshot', { snapshot: next, retainedKeys: [] });
+    expect(native.recoveryImages.size).toBe(0);
+    await expect(cache('new.png', ['../escape.png'])).rejects.toThrow('invalid recovery image key');
+  });
+  it('imports a dropped image into an owned stash without changing its source bytes', async () => {
+    const bytes = [...decodeFixtureBase64(png)];
+    const path = 'C:/drop/picture.png';
+    const binaries = new Map([[path, [...bytes]]]);
+    const native = createNativeMocks({ binaries });
+    const imported = (await native.invoke('import_dropped_image', { path })) as {
+      key: string;
+      digest: string;
+    };
+    expect(imported).toMatchObject({
+      filename: 'picture.png',
+      mime: 'image/png',
+      byteLength: bytes.length,
+      digest: createHash('sha256').update(Uint8Array.from(bytes)).digest('hex'),
+      previewUrl: `data:image/png;base64,${png}`,
+    });
+    expect(binaries.get(path)).toEqual(bytes);
+    expect(native.stashes.size).toBe(1);
+    await native.invoke('discard_stashed_images', { keys: [imported.key] });
+    expect(native.stashes.size).toBe(0);
+    expect(binaries.get(path)).toEqual(bytes);
+    await expect(native.invoke('import_dropped_image', { path: 'picture.png' })).rejects.toThrow(
+      'absolute Windows path',
+    );
+    await expect(
+      native.invoke('import_dropped_image', { path: 'C:/drop/picture.gif' }),
+    ).rejects.toThrow('PNG/JPEG');
+    expect(native.stashes.size).toBe(0);
+  });
+
   it('rejects unknown and removed IPC even with a permissive legacy fallback', async () => {
     const fallback = vi.fn(() => undefined);
     const native = createNativeMocks({ fallback });
@@ -230,8 +291,14 @@ describe('strict pure-browser native fixtures', () => {
       throw failure;
     });
     const native = createNativeMocks({ legacyImagePayloads: true, fallback });
+    const { key: stashKey } = (await native.invoke('stash_image', image)) as { key: string };
     await expect(
-      native.invoke('cache_recovery_image', { id: 'tab', key: 'p.png', dataBase64: png }),
+      native.invoke('cache_recovery_image', {
+        id: 'tab',
+        key: 'p.png',
+        stashKey,
+        retainedKeys: [],
+      }),
     ).rejects.toBe(failure);
     expect(fallback.mock.calls[0]).toEqual([
       'cache_recovery_image',
@@ -331,17 +398,37 @@ describe('strict pure-browser native fixtures', () => {
       markdown: '![](mdplus-image:p)',
       images: [{ key: 'p.png', filename: 'p.png', placeholder: 'mdplus-image:p' }],
     };
-    await expect(native.invoke('write_recovery_snapshot', { snapshot })).rejects.toThrow(
-      'uncached image',
-    );
-    await native.invoke('cache_recovery_image', { id: 'tab', key: 'p.png', dataBase64: png });
-    await native.invoke('write_recovery_snapshot', { snapshot });
+    await expect(
+      native.invoke('write_recovery_snapshot', { snapshot, retainedKeys: [] }),
+    ).rejects.toThrow('uncached image');
+    await native.invoke('cache_recovery_image', {
+      id: 'tab',
+      key: 'p.png',
+      stashKey: stashed.key,
+      retainedKeys: [],
+    });
+    await native.invoke('write_recovery_snapshot', { snapshot, retainedKeys: [] });
     await native.invoke('delete_recovery_snapshot', { id: 'tab' });
     expect(native.recoverySnapshots.size).toBe(0);
     expect(native.recoveryImages.size).toBe(0);
     await expect(native.invoke('read_stashed_image', { key: stashed.key })).resolves.toMatchObject({
       dataBase64: png,
     });
+  });
+
+  it('copies recovery bytes by held stash key and rejects raw bytes or unknown keys', async () => {
+    const native = createNativeMocks();
+    const { key: stashKey } = (await native.invoke('stash_image', image)) as { key: string };
+    const request = { id: 'tab', key: 'p.png', stashKey, retainedKeys: [] };
+    await native.invoke('cache_recovery_image', request);
+    expect(native.recoveryImages.get('tab/p.png')?.dataBase64).toBe(png);
+    await expect(
+      native.invoke('cache_recovery_image', { ...request, dataBase64: png }),
+    ).rejects.toThrow('stashKey only');
+    await expect(
+      native.invoke('cache_recovery_image', { ...request, stashKey: 'missing' }),
+    ).rejects.toThrow('unknown session image key');
+    expect(native.recoveryImages.size).toBe(1);
   });
 
   it('does not pretend an unstubbed document write succeeded and defaults dialogs to cancellation', async () => {

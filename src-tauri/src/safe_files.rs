@@ -305,7 +305,7 @@ fn validate_text(path: &Path, content: &str, limit: u64) -> Result<(), Box<FileE
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_document(path: String) -> Result<DocumentSnapshot, Box<FileError>> {
     let path = target_path(Path::new(&path))?;
     let raw = raw_snapshot(&path, MAX_TEXT_FILE_BYTES)?;
@@ -327,7 +327,7 @@ pub fn read_document(path: String) -> Result<DocumentSnapshot, Box<FileError>> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn document_revision(path: String) -> Result<RevisionState, Box<FileError>> {
     revision_with_limit(path, MAX_TEXT_FILE_BYTES)
 }
@@ -457,7 +457,7 @@ fn publish_new(staging: &Path, target: &Path) -> io::Result<()> {
     fs::remove_file(staging)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn write_document(
     path: String,
     content: String,
@@ -807,3 +807,7 @@ pub(crate) mod hooks {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/perf/native.rs"]
+mod perf_native;

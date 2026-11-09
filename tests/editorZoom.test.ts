@@ -133,7 +133,7 @@ describe('editor zoom controls', () => {
     const event = keyEvent(key);
     view.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
-    expect(actions).toHaveBeenCalledWith(action);
+    expect(actions).toHaveBeenCalledWith(action, event);
     doc.activeElement = outside;
     const outsideEvent = keyEvent(key);
     view.dispatchEvent(outsideEvent);
@@ -176,7 +176,7 @@ describe('editor zoom controls', () => {
       const event = wheelEvent(content, delta);
       root.dispatchEvent(event);
       expect(event.defaultPrevented).toBe(true);
-      expect(actions).toHaveBeenLastCalledWith(action);
+      expect(actions).toHaveBeenLastCalledWith(action, event);
     }
     cleanup();
   });

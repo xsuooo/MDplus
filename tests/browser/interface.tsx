@@ -2,10 +2,13 @@ import { createRoot } from 'react-dom/client';
 import { createNativeMocks } from './nativeMocks';
 import App from '../../src/App';
 import { StatusBar } from '../../src/components/StatusBar';
+import { DEFAULT_SHORTCUTS } from '../../src/lib/shortcuts';
 import type { Tab } from '../../src/lib/types';
 import { version as packageVersion } from '../../package.json';
 import { longDocument } from './continuity';
 import { typographyDocument } from './typography';
+import { checkTabSwitches, installTabSwitchMocks } from './tabSwitch';
+import { runWindowOpenRegression, windowOpenCases, type WindowOpenCase } from './windowOpen';
 import '../../src/styles/global.css';
 
 export const interfaceCases = [
@@ -16,8 +19,11 @@ export const interfaceCases = [
   'interface-navigation-scroll',
   'interface-tab-scroll',
   'interface-tab-scroll-reduced',
+  'interface-tab-switch-rich',
+  'interface-tab-switch-source',
   'interface-search-source',
   'interface-search-rich',
+  'interface-search-mode-switch',
   'interface-layout-1440-900',
   'interface-layout-1100-768',
   'interface-layout-1024-768',
@@ -27,6 +33,10 @@ export const interfaceCases = [
   'interface-layout-390-844',
   'interface-layout-360-640',
   'interface-layout-320-640',
+  'window-open-delayed-recents',
+  'window-open-delayed-preferences',
+  'window-open-delayed-file',
+  'window-open-error-after-show',
 ] as const;
 export type InterfaceCase = (typeof interfaceCases)[number];
 
@@ -157,8 +167,9 @@ async function checkAppStatusbar(label: string, hasDocument: boolean) {
   await until(() => !document.querySelector('.typography-panel'));
   if (hasDocument) {
     statusbarButton('.statusbar-zoom').click();
+    await until(() => document.querySelector('.statusbar-zoom')?.textContent?.trim() === '100%');
     check(
-      document.querySelector('.statusbar-zoom')?.textContent?.trim() === '100%',
+      document.querySelector<HTMLElement>('.editor-tab.active .milkdown')?.style.zoom === '1',
       `${label}: zoom reset failed`,
     );
   }
@@ -175,7 +186,8 @@ async function checkAppStatusbar(label: string, hasDocument: boolean) {
   checkStatusbarLayout(label, hasDocument);
 }
 async function checkCrowdedStatusbar(root: ReturnType<typeof createRoot>, label: string) {
-  const path = `D:/notes/${'用于状态栏布局验证的较长目录/'.repeat(8)}document-with-a-long-name.md`;
+  const display = `D:\\notes\\${'用于状态栏布局验证的较长目录\\'.repeat(8)}document-with-a-long-name.md`;
+  const path = `\\\\?\\${display}`;
   const tab: Tab = {
     id: 'statusbar-layout',
     title: 'document-with-a-long-name.md',
@@ -191,10 +203,12 @@ async function checkCrowdedStatusbar(root: ReturnType<typeof createRoot>, label:
     stats: { words: 1234567890, chars: 9876543210, lines: 123456789 },
   };
   const calls: string[] = [];
+  localStorage.setItem('mdplus-editor-zoom', '200');
   root.render(
     <div className="app" data-body-font="misans" data-statusbar-fixture="true">
       <main className="editor-area" />
       <StatusBar
+        bindings={DEFAULT_SHORTCUTS}
         tab={tab}
         themeMode="light"
         onThemeMode={(mode) => {
@@ -202,14 +216,13 @@ async function checkCrowdedStatusbar(root: ReturnType<typeof createRoot>, label:
         }}
         sourceMode={true}
         saveState="paused"
-        zoom={200}
-        onResetZoom={() => {
-          calls.push('zoom');
-        }}
+        editorAreaRef={{ current: null }}
         bodyFont="misans"
         codeFont="jetbrains-sarasa"
         onBodyFont={() => {}}
         onCodeFont={() => {}}
+        editorWidth="centered"
+        onEditorWidth={() => {}}
         recoveryStatus="error"
         onRecovery={() => {
           calls.push('recovery');
@@ -235,8 +248,8 @@ async function checkCrowdedStatusbar(root: ReturnType<typeof createRoot>, label:
   }
   const identity = document.querySelector<HTMLElement>('.status-file-identity');
   check(
-    identity?.textContent === path && identity.title === path,
-    `${label}: long path identity was discarded`,
+    identity?.textContent === display && identity.title === display,
+    `${label}: long path identity was discarded or exposes the internal Windows prefix`,
   );
   for (const [selector, value] of [
     ['.status-metric-words', '1234567890'],
@@ -252,7 +265,8 @@ async function checkCrowdedStatusbar(root: ReturnType<typeof createRoot>, label:
   statusbarButton('.statusbar-zoom').click();
   statusbarButton('button[aria-label^="切换主题"]').click();
   check(
-    calls.join('|') === 'recovery|zoom|theme:dark',
+    calls.join('|') === 'recovery|theme:dark' &&
+      localStorage.getItem('mdplus-editor-zoom') === '100',
     `${label}: an action missed or invoked the wrong handler`,
   );
   statusbarButton('button[aria-label="排版设置"]').click();
@@ -286,7 +300,12 @@ async function openDocument(text: string) {
 }
 
 export async function runInterfaceRegression(testCase: InterfaceCase): Promise<string> {
-  createNativeMocks().install();
+  if (windowOpenCases.includes(testCase as WindowOpenCase))
+    return runWindowOpenRegression(testCase as WindowOpenCase);
+  const switching =
+    testCase === 'interface-tab-switch-rich' || testCase === 'interface-tab-switch-source';
+  if (switching) installTabSwitchMocks();
+  else createNativeMocks().install();
   localStorage.removeItem('mdplus-body-font');
   localStorage.removeItem('mdplus-editor-font');
   const host = document.createElement('div');
@@ -295,7 +314,59 @@ export async function runInterfaceRegression(testCase: InterfaceCase): Promise<s
   root.render(<App />);
   try {
     await until(() => document.querySelector('button[title="新建文档 (Ctrl+N)"]'));
-    if (testCase === 'interface-search-source' || testCase === 'interface-search-rich') {
+    if (switching) {
+      return await checkTabSwitches(testCase === 'interface-tab-switch-source');
+    } else if (testCase === 'interface-search-mode-switch') {
+      const source = await openDocument('# Search\n\nNeedle **needle** Needle\n');
+      const original = source.value;
+      click('button[aria-label="切换源码模式"]');
+      await until(() => document.querySelector('.source-editor:not([hidden]) textarea'));
+      click('button[aria-label="搜索当前文档"]');
+      await until(() => document.querySelector('.search-input'));
+      const input = document.querySelector<HTMLInputElement>('.search-input')!;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+        input,
+        'Needle',
+      );
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      await until(() => document.querySelector('.search-count')?.textContent === '3 处');
+      click('.search-case input');
+      await until(() => document.querySelector('.search-count')?.textContent === '2 处');
+
+      click('button[aria-label="切换源码模式"]');
+      await until(() => !document.querySelector('.source-editor:not([hidden])'));
+      await settled();
+
+      check(input.value === 'Needle', 'Mode switching cleared the active search query');
+      check(
+        document.querySelector<HTMLInputElement>('.search-case input')?.checked,
+        'Mode switching cleared the case-sensitive preference',
+      );
+      check(
+        document.querySelector('.search-count')?.textContent === '2 处',
+        'Rendered search did not reapply the source query after mode switching',
+      );
+      const firstMatch = document.querySelector('.editor-tab.active .md-search-current');
+      check(firstMatch?.textContent === 'Needle', 'Rendered search is missing its initial match');
+      click('button[aria-label="下一条匹配"]');
+      await settled();
+      const nextMatch = document.querySelector('.editor-tab.active .md-search-current');
+      check(
+        nextMatch?.textContent === 'Needle' && nextMatch !== firstMatch,
+        'Rendered search cannot navigate the retained query',
+      );
+      check(source.value === original, 'Searching across modes changed the source Markdown');
+      click('button[aria-label="关闭搜索"]');
+      await until(() => !document.querySelector('.searchbar'));
+      check(
+        document.activeElement === document.querySelector('.editor-tab.active .ProseMirror'),
+        'Closing search after mode switching did not restore rendered editor focus',
+      );
+      check(
+        document.getSelection()?.toString() === 'Needle',
+        'Closing search did not restore the selected occurrence along with editor focus',
+      );
+    } else if (testCase === 'interface-search-source' || testCase === 'interface-search-rich') {
       const source = await openDocument('# Search\n\nhello **world**\n');
       const sourceCase = testCase === 'interface-search-source';
       const query = sourceCase ? 'source+[marker]' : 'hello world';
@@ -528,26 +599,24 @@ export async function runInterfaceRegression(testCase: InterfaceCase): Promise<s
         new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }),
       );
       await frame();
-      await frame();
       check(
-        calls.length === 1 && calls[0].behavior === (reduced ? 'instant' : 'smooth'),
-        'Keyboard tab selection must scroll once with the motion preference',
+        calls.length === 1 && calls[0].behavior === 'instant',
+        'Keyboard tab selection must reveal the target once before its first display frame',
       );
       const target = calls[0].left!;
       check(
         target > 100 && document.activeElement === last,
         'Keyboard did not select and focus the offscreen tab',
       );
-      // Windows can make native smooth scrolling instant; observe focus itself instead.
       check(
         positions[0] === 0 && focusStability.length === 1 && focusStability[0],
         'Tab focus scrolled independently of the explicit navigation',
       );
-      await until(() => Math.abs(strip.scrollLeft - target) < 2);
       check(
-        tabs[tabs.length - 1].getBoundingClientRect().right <=
-          strip.getBoundingClientRect().right + 1,
-        'Active tab remained clipped',
+        Math.abs(strip.scrollLeft - target) < 2 &&
+          tabs[tabs.length - 1].getBoundingClientRect().right <=
+            strip.getBoundingClientRect().right + 1,
+        'Active tab was clipped in its first display frame',
       );
     } else {
       const [width, height] = testCase.split('-').slice(-2).map(Number);
@@ -560,9 +629,8 @@ export async function runInterfaceRegression(testCase: InterfaceCase): Promise<s
       const source = await openDocument(typographyDocument);
       await checkAppStatusbar(`${width}x${height}: document`, true);
       for (const zoom of [1, 2]) {
-        document
-          .querySelector<HTMLElement>('.editor-area')!
-          .style.setProperty('--editor-zoom', String(zoom));
+        document.querySelector<HTMLElement>('.editor-tab.active .milkdown')!.style.zoom =
+          String(zoom);
         check(
           document.documentElement.scrollWidth <= width,
           `App overflows at ${zoom * 100}% editor zoom`,
@@ -570,10 +638,55 @@ export async function runInterfaceRegression(testCase: InterfaceCase): Promise<s
         inViewport(document.querySelector('.status-save')!, 'Save state');
         checkStatusbarLayout(`${width}x${height}: document at ${zoom * 100}% zoom`, true);
       }
-      document.querySelector<HTMLElement>('.editor-area')!.style.setProperty('--editor-zoom', '1');
+      document.querySelector<HTMLElement>('.editor-tab.active .milkdown')!.style.zoom = '1';
+      const toolbar = document.querySelector('.toolbar')!.getBoundingClientRect();
       for (const button of document.querySelectorAll('.toolbar button')) {
-        if (button.getBoundingClientRect().width)
+        const box = button.getBoundingClientRect();
+        if (box.width) {
           inViewport(button, button.getAttribute('title') ?? 'Toolbar control');
+          check(
+            box.top >= toolbar.top - 1 && box.bottom <= toolbar.bottom + 1,
+            'Toolbar control overlaps the tab strip or leaves its header',
+          );
+        }
+      }
+      const imageButton = document.querySelector('.toolbar-insert-image')!;
+      const imagePicker = imageButton.getBoundingClientRect();
+      check(
+        imagePicker.width >= 44 && imagePicker.height >= 44,
+        'Image picker target is too small',
+      );
+      const imageIcon = imageButton.querySelector('svg')!.getBoundingClientRect();
+      const fileActions = Array.from(
+        document.querySelectorAll('.toolbar-file-actions .toolbar-btn'),
+      );
+      for (const action of fileActions) {
+        const box = action.getBoundingClientRect();
+        const icon = action.querySelector('svg')!.getBoundingClientRect();
+        check(
+          Math.abs(box.top - imagePicker.top) < 0.5 && box.height === imagePicker.height,
+          'File actions do not share one aligned hit area',
+        );
+        check(icon.width === 16 && icon.height === 16, 'File-action icons use different grids');
+        check(
+          Math.abs(icon.top + icon.height / 2 - imageIcon.top - imageIcon.height / 2) < 0.5,
+          'File-action icon centers disagree',
+        );
+      }
+      const label = imageButton.querySelector('.toolbar-btn-label')!.getBoundingClientRect();
+      if (!label.width)
+        check(
+          Math.abs(
+            imageIcon.left + imageIcon.width / 2 - imagePicker.left - imagePicker.width / 2,
+          ) < 1,
+          'Compact image icon is not centered in its button',
+        );
+      for (const icon of document.querySelectorAll('.toolbar-file-actions button > svg')) {
+        const box = icon.getBoundingClientRect();
+        check(
+          Math.abs(box.top + box.height / 2 - imageIcon.top - imageIcon.height / 2) < 1,
+          'File action icons do not share a vertical center',
+        );
       }
       const original = source.value;
       click('button[aria-label="排版设置"]');

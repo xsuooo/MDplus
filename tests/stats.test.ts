@@ -25,4 +25,13 @@ describe('computeStats', () => {
   it('counts lines by newline', () => {
     expect(computeStats('a\nb\nc').lines).toBe(3);
   });
+
+  it('preserves the whitespace and Chinese ranges across all UTF-16 code units', () => {
+    const text = Array.from({ length: 65536 }, (_, code) => String.fromCharCode(code)).join('');
+    expect(computeStats(text)).toEqual({ chars: 65511, words: 20904, lines: 2 });
+  });
+
+  it('keeps astral character, digit boundary and CRLF counting unchanged', () => {
+    expect(computeStats('AB12CD中文🙂\r\nZ')).toEqual({ chars: 11, words: 5, lines: 2 });
+  });
 });

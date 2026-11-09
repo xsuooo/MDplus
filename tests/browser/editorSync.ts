@@ -9,6 +9,7 @@ import {
 } from '../../src/lib/editor';
 import { DOMParser, DOMSerializer } from '@milkdown/prose/model';
 import { undoDepth, redoDepth } from '@milkdown/prose/history';
+import { TextSelection } from '@milkdown/prose/state';
 import type { EditorUpdate } from '../../src/lib/types';
 
 /** Run through Vite in a real browser; no mocked editor or React hooks. */
@@ -144,6 +145,14 @@ export async function runImageHistoryRegression(): Promise<string[]> {
     check(
       reachable.has(oldToken) && reachable.has(newToken),
       'both immutable histories were not rooted',
+    );
+    editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(1))));
+    });
+    check(
+      scanImageReferences() === reachable,
+      'Selection-only changes replayed the whole image undo/redo history',
     );
     editor.action((ctx) => {
       const view = ctx.get(editorViewCtx);

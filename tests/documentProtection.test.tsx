@@ -58,9 +58,9 @@ const initial = (): Tab => ({
 });
 const persist = async () => {};
 const onClosing = () => {};
-function setup() {
+function setup(tabs: Tab[] = [initial()]) {
   return renderHook(() => {
-    const session = useDocumentSession([initial()]);
+    const session = useDocumentSession(tabs);
     const recovery = useRecovery(session);
     useExternalChanges(session, recovery);
     const close = useDocumentClose(session, recovery, mocks.save, persist, onClosing);
@@ -179,5 +179,40 @@ describe('local versions without a matching disk copy', () => {
     await act(() => hook.result.current.close.confirmClose('discard'));
     expect(hook.result.current.session.tabsRef.current).toHaveLength(0);
     expect(mocks.clear).toHaveBeenCalledTimes(1);
+  });
+
+  it('polls background tabs less often and checks them on activation', async () => {
+    const second: Tab = {
+      ...initial(),
+      id: 'b',
+      title: 'b.md',
+      path: 'C:/notes/b.md',
+      diskRevision: 'B',
+    };
+    mocks.revision.mockImplementation(async (path: string) => ({
+      path,
+      revision: path === 'C:/notes/a.md' ? 'A' : 'B',
+      mtime: 1,
+    }));
+    const hook = setup([initial(), second]);
+
+    await poll();
+    expect(mocks.revision).toHaveBeenCalledTimes(2);
+    mocks.revision.mockClear();
+
+    await poll();
+    expect(mocks.revision).toHaveBeenCalledExactlyOnceWith('C:/notes/a.md');
+    mocks.revision.mockClear();
+
+    await act(() => vi.advanceTimersByTimeAsync(EXTERNAL_POLL_MS * 7));
+    expect(mocks.revision).toHaveBeenCalledTimes(7);
+    expect(mocks.revision.mock.calls.every(([path]) => path === 'C:/notes/a.md')).toBe(true);
+    mocks.revision.mockClear();
+
+    await act(async () => {
+      hook.result.current.session.selectTab('b');
+      await Promise.resolve();
+    });
+    expect(mocks.revision).toHaveBeenCalledExactlyOnceWith('C:/notes/b.md');
   });
 });

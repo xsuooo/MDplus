@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
 import config from './config/application.json';
 import { buildId } from './config/build';
@@ -9,6 +10,18 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [react()],
+  // The Markdown decoder's browser export needs document, which Workers do not have.
+  resolve: {
+    alias: {
+      'decode-named-character-reference': fileURLToPath(
+        import.meta.resolve('decode-named-character-reference'),
+      ),
+    },
+  },
+  // Avoid a dependency-optimization reload when the first outline Worker starts.
+  optimizeDeps: {
+    include: ['unified', 'remark-parse', 'remark-gfm', 'remark-math', 'mdast-util-to-markdown'],
+  },
   define: { __MDPLUS_BUILD_ID__: JSON.stringify(buildId()) },
   css: { postcss: { plugins: [katexWoff2()] } },
 

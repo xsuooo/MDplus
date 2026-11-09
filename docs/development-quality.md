@@ -4,22 +4,30 @@
 
 `App.tsx` 保留页面组合、菜单和快捷键连接。文稿操作由以下模块拥有，避免把同一异步流程分散在多个组件的 effect 中。
 
-| 模块                                          | 职责                                                               |
-| --------------------------------------------- | ------------------------------------------------------------------ |
-| `useDocumentSession`                          | 标签身份、当前视图、编辑器注册、内容镜像、内容／保存代次及共享队列 |
-| `useDocumentSave`                             | 自动／手动保存与另存为队列、图片迁移、条件写入与提交基线           |
-| `useDocumentClose`                            | 标签／窗口关闭协调、独立取消代次、忙碌状态及异步后的重检查         |
-| `useWindowLifecycle` + `services/windowState` | 物理像素恢复、窗口监听及几何状态保存                               |
-| `usePreferences` + `services/settingsStore`   | 设置初始化、用户选择优先、失败重试及固定原生资源访问               |
-| `useRecovery`                                 | 延迟图片准备、恢复副本、恢复状态与恢复列表                         |
-| `useDocumentFiles`                            | 打开、新建、原生启动／单实例／拖放输入及最近列表                   |
-| `useExternalChanges`                          | 字节版本轮询、外改提示、重载并发校验                               |
-| `useEditorView`                               | 输入、源码切换、选区／滚动位置、字体和缩放                         |
-| `useDocumentExport`                           | 冻结导出快照、图片准备与 HTML/PDF 导出状态                         |
+| 模块                                                            | 职责                                                                   |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `useDocumentSession`                                            | 标签身份、当前视图、编辑器注册、内容镜像、内容／保存代次及共享队列     |
+| `useDocumentSave`                                               | 自动／手动保存与另存为队列、图片迁移、条件写入与提交基线               |
+| `useDocumentClose`                                              | 标签／窗口关闭协调、独立取消代次、忙碌状态及异步后的重检查             |
+| `useWindowLifecycle` + `services/windowState`                   | 物理像素恢复、窗口监听及几何状态保存                                   |
+| `usePreferences` + `services/settingsStore`                     | 设置初始化、用户选择优先、失败重试及固定原生资源访问                   |
+| `useRecovery`                                                   | 延迟图片准备、恢复副本、恢复状态与恢复列表                             |
+| `useDocumentFiles`                                              | 打开、新建、原生启动／单实例／拖放输入及最近列表                       |
+| `useSessionPersistence` + `documentSession` + `sessionPosition` | 会话设置、保存文稿清单、短文本位置锚点、失败条目及退出前完整会话捕获   |
+| `useImageDrop` + `imageDrop`                                    | 捕获鼠标落点或选择器前的选区末尾、异步位置映射、整批导入与模式代次取消 |
+| `documentLinks` + 编辑器链接事件                                | 以来源文稿解析相对 Markdown 路径，按编辑器焦点路由 Ctrl 操作           |
+| `replace` + `sourceEditorApi`                                   | 冻结匹配集、富文本格式保留、源码实时批量编辑及独立撤销边界             |
+| `useExternalChanges`                                            | 字节版本轮询、外改提示、重载并发校验                                   |
+| `useEditorView` + `editorPosition` + `sourceOutline.worker`     | 输入、源码切换、可取消的源码目录解析、选区／滚动位置、字体和缩放       |
+| `useDocumentExport`                                             | 冻结导出快照、图片准备与 HTML/PDF 导出状态                             |
 
 同步内容镜像和代次用于跨异步步骤核对最新状态；React 状态用于显示。保存与关闭的代次独立，取消关闭不能使已发出的保存失效。新增异步步骤时，应先补延迟、失败、取消或并发编辑的回归，再调整该流程。
 
 保存单测通过公开的会话 hook 注入初始标签，不再依赖 App 的 `useState` 声明索引。设置和关闭协调器另有真实 React hook 测试；浏览器回归继续使用真实 React/Milkdown，仅模拟原生 IPC。
+
+查找替换、会话恢复和图片插入的浏览器用例分别位于 `tests/browser/replace.ts`、`session.ts` 和 `imageDrop.ts`；源码目录、文稿链接、提示和对比度位于 `polish.tsx`。各组注册在统一 runner 与 Windows 用例目录中，`-Cases all` 全部包含。源码的程序化替换与图片插入通过同一 `SourceEditorApi` 读取实时草稿，按操作前坐标提交整批编辑。会话记录只保存路径、标题和短文本锚点，不保存正文，也不复用草稿恢复 ID。
+
+恢复回收在原生侧测试完整旧快照、在途批次、损坏 manifest、辅助失败及两套合法大附件过渡；前端测试删除回执失效缓存、重新缓存和 pending capture 保全。两个写命令的响应与测试模拟同步，独立撤销 stash 不参加恢复回收。2026-11-08 的实际验证见[本轮记录](quality-fixes-2026-11-08.md)。
 
 ## 本地入口与 CI
 

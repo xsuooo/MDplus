@@ -2,6 +2,7 @@ import { RECOVERY_DELAY_MS } from '../config/constants';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import {
   capturePendingImages,
+  getInFlightImages,
   restorePendingImages,
   stagePendingImages,
   type PendingImageLease,
@@ -29,6 +30,11 @@ export interface RecoveryEntry {
   damaged: boolean;
 }
 export type RecoveryStatus = 'pending' | 'protected' | 'error' | 'idle';
+
+export interface RecoveryCleanup {
+  removedKeys: string[];
+  cleanupError: string | null;
+}
 
 interface PendingCapture {
   value: ReturnType<typeof capture> | null;
@@ -67,18 +73,49 @@ function imageKey(image: { placeholder: string; filename: string }): string {
   return `${image.placeholder.slice('mdplus-image:'.length)}.${image.filename.split('.').pop()!.toLowerCase()}`;
 }
 
+function retainedKeys(
+  id: string,
+  entry: Journal,
+  images: readonly { placeholder: string; filename: string }[],
+): string[] {
+  return [
+    ...new Set(
+      [...getInFlightImages(id), ...(entry.pending?.value?.images ?? []), ...images].map(imageKey),
+    ),
+  ];
+}
+function applyCleanup(entry: Journal, cleanup: RecoveryCleanup): void {
+  for (const key of cleanup.removedKeys) entry.cached.delete(key);
+  if (cleanup.cleanupError) {
+    entry.cached.clear();
+    console.warn('恢复图片回收未完成，将在下次写入时重试', cleanup.cleanupError);
+  }
+}
+
 async function cacheImage(
   id: string,
   image: { placeholder: string; filename: string },
   entry: Journal,
   lease: PendingImageLease,
+  images: readonly { placeholder: string; filename: string }[],
 ) {
   const key = imageKey(image);
   if (!entry.cached.has(key)) {
-    await lease.withDataBase64(image.placeholder, (dataBase64) =>
-      invoke('cache_recovery_image', { id, key, dataBase64 }),
-    );
-    entry.cached.add(key);
+    try {
+      const cleanup = await lease.withStashKey(image.placeholder, (stashKey) =>
+        invoke<RecoveryCleanup>('cache_recovery_image', {
+          id,
+          key,
+          stashKey,
+          retainedKeys: retainedKeys(id, entry, images),
+        }),
+      );
+      applyCleanup(entry, cleanup);
+      entry.cached.add(key);
+    } catch (error) {
+      entry.cached.clear();
+      throw error;
+    }
   }
 }
 
@@ -96,7 +133,7 @@ export async function protectPastedImage(
     const entry = journal(id);
     await enqueue(entry, async () => {
       if (!isCurrent()) throw new Error('图片粘贴已取消');
-      await cacheImage(id, image, entry, lease);
+      await cacheImage(id, image, entry, lease, lease.images);
     });
   } finally {
     lease.release();
@@ -182,10 +219,21 @@ export function scheduleRecovery(
           if (entry.generation !== generation) return;
           for (const image of data.images) {
             if (entry.generation !== generation) return;
-            await cacheImage(id, image, entry, data.lease);
+            await cacheImage(id, image, entry, data.lease, data.images);
           }
           if (entry.generation !== generation) return;
-          await invoke('write_recovery_snapshot', { snapshot: data.snapshot });
+          try {
+            applyCleanup(
+              entry,
+              await invoke<RecoveryCleanup>('write_recovery_snapshot', {
+                snapshot: data.snapshot,
+                retainedKeys: retainedKeys(id, entry, data.images),
+              }),
+            );
+          } catch (error) {
+            entry.cached.clear();
+            throw error;
+          }
           if (entry.generation === generation) onStatus('protected');
         } finally {
           data.lease.release();
@@ -210,8 +258,11 @@ export async function clearRecovery(id: string): Promise<void> {
   entry.timer = undefined;
   releasePendingCapture(entry);
   await enqueue(entry, async () => {
-    await invoke('delete_recovery_snapshot', { id });
-    entry.cached.clear();
+    try {
+      await invoke('delete_recovery_snapshot', { id });
+    } finally {
+      entry.cached.clear();
+    }
   });
 }
 

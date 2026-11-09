@@ -19,6 +19,7 @@ import {
   commitImageMigration,
   finalizeImageMigration,
   getPendingImages,
+  getInFlightImages,
   imageCacheUsage,
   loadImageReferences,
   migratePendingImages,
@@ -219,6 +220,18 @@ describe('disk-backed bounded image cache', () => {
     expect(text).toContain(image.placeholder);
   });
 
+  it('skips reachability roots when the tab has no cached images', async () => {
+    const prepared = await prepareImageReferences('one', 'plain text', 'C:/docs/note.md');
+    expect(prepared.commit()).toBe(true);
+    const root = vi.fn(() => []);
+    const unregister = registerImageReachability('one', root);
+
+    await collectUnusedImages('one');
+
+    expect(root).not.toHaveBeenCalled();
+    unregister();
+  });
+
   it('keeps current/undo/redo roots, then reclaims bytes only after all roots drop them', async () => {
     await load();
     const token = getPendingImages('one')[0].placeholder;
@@ -316,6 +329,20 @@ describe('disk-backed bounded image cache', () => {
     } finally {
       unregister();
     }
+  });
+
+  it('pins recovery duplicates only during insertion or a capture lease, preserving independent undo bytes', async () => {
+    const token = await saveImage(new Blob(['A'], { type: 'image/png' }), 'one');
+    expect(getInFlightImages('one').map((image) => image.placeholder)).toEqual([token]);
+    settleImageInsertion('one', token);
+    expect(getInFlightImages('one')).toEqual([]);
+    const lease = capturePendingImages('one', [token]);
+    expect(getInFlightImages('one').map((image) => image.placeholder)).toEqual([token]);
+    expect(await lease.readDataBase64(token)).toBe('QQ==');
+    lease.release();
+    expect(getInFlightImages('one')).toEqual([]);
+    expect(getPendingImages('one').map((image) => image.placeholder)).toEqual([token]);
+    expect(stashes.size).toBe(1);
   });
 
   it('does not reduce the advertised 64 MiB single-image admission limit', async () => {

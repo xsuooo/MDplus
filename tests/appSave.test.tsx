@@ -80,14 +80,14 @@ vi.mock('../src/components/CloseConfirmModal', () => ({
 }));
 vi.mock('../src/components/EditorTab', () => ({
   EditorTab: (props: {
-    tab: Tab;
+    tabId: string;
     onUpdate: (id: string, update: EditorUpdate, isInitial?: boolean) => void;
     onRegister: (id: string, editor: Editor | null) => void;
   }) => {
-    props.onRegister(props.tab.id, {} as Editor);
-    mocks.notify = (update, isInitial = false) => props.onUpdate(props.tab.id, update, isInitial);
+    props.onRegister(props.tabId, {} as Editor);
+    mocks.notify = (update, isInitial = false) => props.onUpdate(props.tabId, update, isInitial);
     mocks.edit = () =>
-      props.onUpdate(props.tab.id, {
+      props.onUpdate(props.tabId, {
         markdown: 'newer',
         outline: [],
         stats: { chars: 5, words: 1, lines: 1 },

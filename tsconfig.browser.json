@@ -3,6 +3,11 @@
   "compilerOptions": {
     "noEmit": true
   },
-  "include": ["src/vite-env.d.ts", "tests/browser/**/*.ts", "tests/browser/**/*.tsx"],
+  "include": [
+    "src/vite-env.d.ts",
+    "tests/browser/**/*.ts",
+    "tests/browser/**/*.tsx",
+    "tests/perf/**/*.ts"
+  ],
   "references": []
 }

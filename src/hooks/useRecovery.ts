@@ -93,7 +93,9 @@ export function useRecovery(session: DocumentSession) {
         { ...current, markdown: resolveContent(current) },
         (status) => {
           if (tabsRef.current.some((candidate) => candidate.id === current.id)) {
-            setRecoveryStates((previous) => ({ ...previous, [current.id]: status }));
+            setRecoveryStates((previous) =>
+              previous[current.id] === status ? previous : { ...previous, [current.id]: status },
+            );
           }
         },
         prepareCurrentImages(current.id, true),

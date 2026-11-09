@@ -1,5 +1,5 @@
 import { memo, useState, useEffect, useRef } from 'react';
-import { isComposingEvent } from '../lib/shortcuts';
+import { formatActionShortcuts, isComposingEvent, type ShortcutBindings } from '../lib/shortcuts';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { BUILD_LABEL } from '../lib/buildInfo';
 import { Presence } from '../lib/presence';
@@ -9,6 +9,7 @@ import {
   IconNew,
   IconSave,
   IconSaveAs,
+  IconImage,
   IconSearch,
   IconOutline,
   IconCode,
@@ -29,10 +30,13 @@ function appWindow() {
 }
 
 interface ToolbarProps {
+  bindings: ShortcutBindings;
   onOpen: () => void;
   onNew: () => void;
   onSave: () => void;
   onSaveAs: () => void;
+  onInsertImage: () => void;
+  pickingImage: boolean;
   onExportHTML: () => void;
   onExportPDF: () => void;
   hasActiveTab: boolean;
@@ -53,10 +57,13 @@ interface ToolbarProps {
 
 export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
   const {
+    bindings,
     onOpen,
     onNew,
     onSave,
     onSaveAs,
+    onInsertImage,
+    pickingImage,
     onExportHTML,
     onExportPDF,
     hasActiveTab,
@@ -74,6 +81,10 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
     onOpenShortcuts,
     onWindowClose,
   } = props;
+  const newShortcut = formatActionShortcuts(bindings, 'new');
+  const openShortcut = formatActionShortcuts(bindings, 'open');
+  const saveShortcut = formatActionShortcuts(bindings, 'save');
+  const searchShortcut = formatActionShortcuts(bindings, 'search');
 
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
@@ -130,19 +141,23 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
         <button
           className="toolbar-btn toolbar-btn-labeled"
           onClick={onNew}
-          title="新建文档 (Ctrl+N)"
+          title={`新建文档${newShortcut ? ` (${newShortcut})` : ''}`}
         >
           <IconNew size={16} />
           <span className="toolbar-btn-label">新建</span>
         </button>
-        <button className="toolbar-btn toolbar-btn-labeled" onClick={onOpen} title="打开 (Ctrl+O)">
+        <button
+          className="toolbar-btn toolbar-btn-labeled"
+          onClick={onOpen}
+          title={`打开${openShortcut ? ` (${openShortcut})` : ''}`}
+        >
           <IconOpen size={16} />
           <span className="toolbar-btn-label">打开</span>
         </button>
         <button
           className="toolbar-btn toolbar-btn-labeled"
           onClick={onSave}
-          title={activeIsNew ? '保存 (Ctrl+S) — 首次保存时选择位置' : '保存 (Ctrl+S)'}
+          title={`保存${saveShortcut ? ` (${saveShortcut})` : ''}${activeIsNew ? '，首次保存时选择位置' : ''}`}
           disabled={!hasActiveTab || saving}
         >
           <IconSave size={16} />
@@ -154,7 +169,7 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
           title="另存为"
           disabled={!hasActiveTab || saving}
         >
-          <IconSaveAs size={15} />
+          <IconSaveAs size={16} />
           <span className="toolbar-btn-label">另存为</span>
         </button>
         <div className="toolbar-dropdown" ref={exportMenuRef} style={{ pointerEvents: 'auto' }}>
@@ -168,7 +183,7 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
             aria-expanded={exportMenuOpen && hasActiveTab}
             style={{ pointerEvents: 'auto' }}
           >
-            <IconExport size={15} />
+            <IconExport size={16} />
             <span className="toolbar-btn-label">{exporting ? '导出中…' : '导出'}</span>
           </button>
           <Presence present={exportMenuOpen && hasActiveTab}>
@@ -195,6 +210,17 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
             </div>
           </Presence>
         </div>
+        <button
+          className="toolbar-btn toolbar-btn-secondary toolbar-insert-image"
+          onClick={onInsertImage}
+          disabled={!hasActiveTab || pickingImage}
+          title="插入本地图片（PNG / JPEG）"
+          aria-label="插入本地图片"
+          aria-busy={pickingImage}
+        >
+          <IconImage size={16} aria-hidden="true" />
+          <span className="toolbar-btn-label">{pickingImage ? '正在插入…' : '插入图片'}</span>
+        </button>
       </div>
 
       <div className="toolbar-spacer" onDoubleClick={() => void appWindow()?.toggleMaximize()} />
@@ -203,7 +229,7 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
         <button
           className={`toolbar-btn toolbar-btn-icon${searchOpen ? ' active' : ''}`}
           onClick={onSearch}
-          title="当前文档搜索 (Ctrl+F)"
+          title={`当前文档搜索${searchShortcut ? ` (${searchShortcut})` : ''}`}
           aria-label="搜索当前文档"
           aria-pressed={searchOpen}
         >

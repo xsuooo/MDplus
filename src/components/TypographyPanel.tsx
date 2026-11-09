@@ -7,6 +7,7 @@ import {
   type CodeFont,
 } from '../lib/editorFont';
 import { isComposingEvent } from '../lib/shortcuts';
+import { normalizeEditorWidth, type EditorWidth } from '../lib/editorWidth';
 import { Presence } from '../lib/presence';
 import { IconClose } from './icons';
 
@@ -15,11 +16,15 @@ export function TypographyPanel({
   codeFont,
   onBodyFont,
   onCodeFont,
+  editorWidth,
+  onEditorWidth,
 }: {
   bodyFont: BodyFont;
   codeFont: CodeFont;
   onBodyFont: (font: BodyFont) => void;
   onCodeFont: (font: CodeFont) => void;
+  editorWidth: EditorWidth;
+  onEditorWidth: (width: EditorWidth) => void;
 }) {
   const [open, setOpen] = useState(false);
   const wrapper = useRef<HTMLDivElement>(null);
@@ -59,7 +64,7 @@ export function TypographyPanel({
         aria-expanded={open}
         aria-controls={open ? 'typography-panel' : undefined}
         aria-haspopup="dialog"
-        title="设置界面、正文与代码字体"
+        title="设置正文宽度与字体"
         onClick={() => setOpen((value) => !value)}
       >
         <span className="statusbar-typography-mark" aria-hidden="true">
@@ -90,7 +95,7 @@ export function TypographyPanel({
           <div className="typography-head">
             <div>
               <h3 id="typography-title">排版设置</h3>
-              <p>选择界面、正文和代码字体</p>
+              <p>调整正文宽度、界面和代码字体</p>
             </div>
             <button
               className="toolbar-btn toolbar-btn-icon"
@@ -101,6 +106,21 @@ export function TypographyPanel({
             </button>
           </div>
           <div className="typography-content">
+            <fieldset className="typography-group">
+              <legend className="typography-label">正文宽度</legend>
+              <p className="typography-description" id="editor-width-scope">
+                居中保留阅读留白；铺满让独立成段的图片随正文变宽。
+              </p>
+              <select
+                aria-label="正文宽度"
+                aria-describedby="editor-width-scope"
+                value={editorWidth}
+                onChange={(event) => onEditorWidth(normalizeEditorWidth(event.target.value))}
+              >
+                <option value="centered">居中阅读</option>
+                <option value="full">铺满窗口</option>
+              </select>
+            </fieldset>
             <section className="typography-group" aria-labelledby="body-font-label">
               <label id="body-font-label" className="typography-label" htmlFor="body-font">
                 界面与正文字体

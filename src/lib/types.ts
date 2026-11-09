@@ -4,7 +4,7 @@
 export interface OutlineItem {
   level: number;
   text: string;
-  /** 在 ProseMirror doc 中的位置,用于跳转 */
+  /** 当前模式的位置：富文本为 ProseMirror 位置，源码为 UTF-16 原文偏移。 */
   pos: number;
 }
 

@@ -17,6 +17,7 @@ export const appearanceCases = [
   'theme-rapid-toggle',
   'theme-quiet-dialog',
   'theme-pointer-through',
+  'theme-outline-budget',
 ] as const;
 export type AppearanceCase = (typeof appearanceCases)[number];
 
@@ -155,6 +156,62 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
       document.querySelector('.md-mermaid-holder img') &&
       !document.querySelector('.md-mermaid-node.loading');
     await until(ready);
+    if (testCase === 'theme-outline-budget') {
+      const picture =
+        'data:image/svg+xml,' +
+        encodeURIComponent(
+          '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="64"><rect width="80" height="64" fill="teal"/></svg>',
+        );
+      const markdown = Array.from(
+        { length: 400 },
+        (_, i) =>
+          `## Heading ${i}\n\nParagraph ${i}.\n\n${i < 13 ? `![Picture ${i}](${picture})\n\n` : ''}`,
+      ).join('');
+      click('button[aria-label="切换源码模式"]');
+      await until(() => document.querySelector('.source-editor:not([hidden]) .source-textarea'));
+      const source = document.querySelector<HTMLTextAreaElement>(
+        '.source-editor:not([hidden]) .source-textarea',
+      )!;
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
+        source,
+        markdown,
+      );
+      source.dispatchEvent(new Event('input', { bubbles: true }));
+      click('button[aria-label="切换源码模式"]');
+      await until(() => !document.querySelector('.source-editor:not([hidden])'));
+      click('button[aria-label="打开目录"]');
+      await until(() => document.querySelectorAll('.outline-item').length === 400);
+      await settleAnimations();
+      const editor = document.querySelector<HTMLElement>('.editor-tab.active .ProseMirror')!;
+      const initialText = editor.textContent;
+      const scroller = document.querySelector<HTMLElement>(
+        '.editor-tab.active .milkdown-container',
+      )!;
+      scroller.scrollTop = 800;
+      const initialScroll = scroller.scrollTop;
+      click('button[aria-label="切换主题,当前为浅色"]');
+      await until(() => document.documentElement.dataset.theme === 'dark');
+      const itemAnimations = document.getAnimations().filter((animation) => {
+        const element = (animation.effect as KeyframeEffect | null)?.target;
+        return element instanceof Element && element.closest('.outline-body');
+      });
+      check(
+        itemAnimations.length === 0,
+        `Theme queued ${itemAnimations.length} directory row animations`,
+      );
+      check(
+        ![...document.querySelectorAll('.md-image-node .md-media-controls')].some(
+          (controls) => controls.getAnimations({ subtree: true }).length,
+        ),
+        'Theme animated hidden image controls',
+      );
+      await settleAnimations();
+      check(
+        editor.textContent === initialText && scroller.scrollTop === initialScroll,
+        'Theme changed document content or reading position',
+      );
+      return `${testCase}: 400 directory rows, no per-row theme animations, document and scroll preserved`;
+    }
     if (
       [
         'theme-colors',

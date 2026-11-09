@@ -4,6 +4,7 @@ import type { RecentFile, ThemeMode } from './types';
 import type { ShortcutBindings } from './shortcuts';
 import { sanitizeWindowState, type WindowState } from './windowState';
 import { pathKey } from './pathIdentity';
+import { sanitizeDocumentSession, type SavedDocumentSession } from './documentSession';
 import {
   sanitizeRecentFiles,
   sanitizeShortcutBindings,
@@ -17,6 +18,8 @@ const KEY_SOURCE_MODE = 'source-mode';
 const KEY_WINDOW_STATE = 'window-state';
 const KEY_OUTLINE_OPEN = 'outline-open';
 const KEY_SHORTCUTS = 'shortcuts';
+const KEY_SESSION_RESTORE = 'session-restore-enabled';
+const KEY_DOCUMENT_SESSION = 'document-session';
 const MAX_RECENT = LIMITS.recentFiles;
 
 export type { WindowState };
@@ -36,11 +39,21 @@ function getStore(): Promise<Store> {
   return storePromise;
 }
 
-function enqueueStoreWrite(task: (store: Store) => Promise<void>): Promise<void> {
+function enqueueStoreWrite(
+  task: (store: Store) => Promise<void>,
+  rollback?: (store: Store) => Promise<void>,
+): Promise<void> {
   const operation = writeQueue.then(async () => {
     const store = await getStore();
     await task(store);
-    await store.save();
+    try {
+      await store.save();
+    } catch (error) {
+      // The session switch rolls its visible value back on failure. Keep later
+      // unrelated writes from silently persisting the rejected switch value.
+      await rollback?.(store);
+      throw error;
+    }
   });
   writeQueue = operation.catch(() => {});
   return operation;
@@ -73,14 +86,10 @@ export async function loadPreferences(): Promise<UserPreferences> {
 
 /** 最近打开的文件列表 */
 export async function getRecentFiles(): Promise<RecentFile[]> {
-  try {
-    await writeQueue;
-    const store = await getStore();
-    const list = await store.get<RecentFile[]>(KEY_RECENT);
-    return sanitizeRecentFiles(list, MAX_RECENT);
-  } catch {
-    return [];
-  }
+  await writeQueue;
+  const store = await getStore();
+  const list = await store.get<RecentFile[]>(KEY_RECENT);
+  return sanitizeRecentFiles(list, MAX_RECENT);
 }
 
 /** 把一次打开记录写入最近列表 */
@@ -89,35 +98,37 @@ export async function pushRecentFile(
   name: string,
   requestedPath = path,
 ): Promise<void> {
-  try {
-    await enqueueStoreWrite(async (store) => {
+  let previous: RecentFile[] = [];
+  await enqueueStoreWrite(
+    async (store) => {
       const list = await store.get<RecentFile[]>(KEY_RECENT);
+      previous = sanitizeRecentFiles(list, MAX_RECENT);
       const next = [
         { path, name, time: Date.now() },
-        ...sanitizeRecentFiles(list, MAX_RECENT).filter(
+        ...previous.filter(
           (f) => pathKey(f.path) !== pathKey(path) && pathKey(f.path) !== pathKey(requestedPath),
         ),
       ].slice(0, MAX_RECENT);
       await store.set(KEY_RECENT, next);
-    });
-  } catch {
-    // 忽略持久化失败
-  }
+    },
+    (store) => store.set(KEY_RECENT, previous),
+  );
 }
 
 /** 移除一条最近记录 */
 export async function removeRecentFile(path: string): Promise<void> {
-  try {
-    await enqueueStoreWrite(async (store) => {
+  let previous: RecentFile[] = [];
+  await enqueueStoreWrite(
+    async (store) => {
       const list = await store.get<RecentFile[]>(KEY_RECENT);
+      previous = sanitizeRecentFiles(list, MAX_RECENT);
       await store.set(
         KEY_RECENT,
-        sanitizeRecentFiles(list, MAX_RECENT).filter((f) => pathKey(f.path) !== pathKey(path)),
+        previous.filter((f) => pathKey(f.path) !== pathKey(path)),
       );
-    });
-  } catch {
-    // 忽略
-  }
+    },
+    (store) => store.set(KEY_RECENT, previous),
+  );
 }
 
 /** 读取主题偏好(默认浅色) */
@@ -203,4 +214,36 @@ export async function getShortcutBindings(): Promise<ShortcutBindings> {
 /** 写入快捷键绑定 */
 export async function saveShortcutBindings(bindings: ShortcutBindings): Promise<void> {
   await enqueueStoreWrite((store) => store.set(KEY_SHORTCUTS, bindings));
+}
+
+/** A failed session read must stay distinguishable from an empty previous session. */
+export async function loadDocumentSession(): Promise<{
+  enabled: boolean;
+  session: SavedDocumentSession;
+}> {
+  await writeQueue;
+  const store = await getStore();
+  const [enabled, session] = await Promise.all([
+    store.get(KEY_SESSION_RESTORE),
+    store.get(KEY_DOCUMENT_SESSION),
+  ]);
+  return { enabled: enabled !== false, session: sanitizeDocumentSession(session) };
+}
+
+export async function setSessionRestoreEnabled(enabled: boolean): Promise<void> {
+  let previous = true;
+  await enqueueStoreWrite(
+    async (store) => {
+      previous = (await store.get(KEY_SESSION_RESTORE)) !== false;
+      await store.set(KEY_SESSION_RESTORE, enabled);
+    },
+    (store) => store.set(KEY_SESSION_RESTORE, previous),
+  );
+}
+
+/** Only metadata and bounded anchors cross the durable boundary; never document bodies or PM nodes. */
+export async function saveDocumentSession(session: SavedDocumentSession): Promise<void> {
+  await enqueueStoreWrite((store) =>
+    store.set(KEY_DOCUMENT_SESSION, sanitizeDocumentSession(session)),
+  );
 }

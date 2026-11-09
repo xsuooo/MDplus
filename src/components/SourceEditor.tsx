@@ -13,6 +13,15 @@ import { IconCode } from './icons';
 import { mapTextOffset } from '../lib/textPosition';
 import { mapSourceScroll } from '../lib/sourcePosition';
 import {
+  mapSourceEditOffset,
+  prepareSourceEdits,
+  publishSourceEditorChange,
+  registerSourceEditorApi,
+  type SourceEditorApi,
+  type SourceSelection,
+  type SourceTextEdit,
+} from '../lib/sourceEditorApi';
+import {
   getImageUrls,
   mapImageOffset,
   rewriteImageReferences,
@@ -30,11 +39,12 @@ import {
 interface SourceEditorProps {
   tabId: string;
   value: string;
-  onChange: (text: string) => void;
+  onChange: (tabId: string, text: string) => void;
   onClose: () => void;
   onImagePaste?: (tabId: string, file: File) => Promise<string>;
   active?: boolean;
   onRegister?: (tabId: string, input: HTMLTextAreaElement | null) => void;
+  onApi?: (tabId: string, api: SourceEditorApi | null) => void;
   imageRewrites?: PendingImageReference[];
 }
 
@@ -69,6 +79,7 @@ export const SourceEditor = memo(function SourceEditor({
   onImagePaste,
   active = true,
   onRegister,
+  onApi,
   imageRewrites,
 }: SourceEditorProps) {
   const generation = useRef(0);
@@ -78,6 +89,7 @@ export const SourceEditor = memo(function SourceEditor({
   const pushed = useRef(value);
   const history = useRef<Snapshot[]>([]);
   const future = useRef<Snapshot[]>([]);
+  const snapshotImageUrls = useRef(new WeakMap<Snapshot, readonly string[]>());
   const lastPushAt = useRef(0);
   const composing = useRef(false);
   const lastInputType = useRef('');
@@ -87,6 +99,26 @@ export const SourceEditor = memo(function SourceEditor({
   const direction = useRef<'forward' | 'backward' | 'none'>('none');
   const lastRewrites = useRef(imageRewrites);
   const restoreScroll = useRef(false);
+  const apiMethods = useRef<SourceEditorApi | null>(null);
+  const api = useRef<SourceEditorApi | null>(null);
+  if (!api.current) {
+    api.current = {
+      read: () => apiMethods.current!.read(),
+      applyEdits: (edits, selection) => apiMethods.current!.applyEdits(edits, selection),
+      undo: () => apiMethods.current!.undo(),
+      redo: () => apiMethods.current!.redo(),
+    };
+  }
+
+  useLayoutEffect(() => {
+    const input = textareaRef.current;
+    return input ? registerSourceEditorApi(input, api.current!) : undefined;
+  }, [tabId]);
+
+  useLayoutEffect(() => {
+    onApi?.(tabId, api.current);
+    return () => onApi?.(tabId, null);
+  }, [tabId, onApi]);
 
   useLayoutEffect(() => {
     onRegister?.(tabId, textareaRef.current);
@@ -97,8 +129,14 @@ export const SourceEditor = memo(function SourceEditor({
     () =>
       registerImageReachability(tabId, () => {
         const urls = new Set(getImageUrls(pushed.current));
-        for (const snapshot of [...history.current, ...future.current])
-          for (const url of getImageUrls(snapshot.text)) urls.add(url);
+        for (const snapshot of [...history.current, ...future.current]) {
+          let cached = snapshotImageUrls.current.get(snapshot);
+          if (!cached) {
+            cached = getImageUrls(snapshot.text);
+            snapshotImageUrls.current.set(snapshot, cached);
+          }
+          for (const url of cached) urls.add(url);
+        }
         return urls;
       }),
     [tabId],
@@ -147,6 +185,7 @@ export const SourceEditor = memo(function SourceEditor({
       end: map(selection.end),
     };
     pushed.current = value;
+    publishSourceEditorChange(api.current!, before, value, undefined, map);
     setDraft(value);
     if (!references) {
       history.current = [];
@@ -182,17 +221,19 @@ export const SourceEditor = memo(function SourceEditor({
     }
   }, [draft]);
 
-  const currentSnapshot = (): Snapshot =>
-    rewriteSnapshot(
-      { text: draft, start: selectionRef.current.start, end: selectionRef.current.end },
-      imageIdentityReferences(tabId),
-    );
+  const currentSnapshot = (): Snapshot => {
+    const selection = pendingSelection.current ?? selectionRef.current;
+    return rewriteSnapshot({ text: pushed.current, ...selection }, imageIdentityReferences(tabId));
+  };
   const visibleSnapshot = (snapshot: Snapshot): Snapshot =>
     rewriteSnapshot(snapshot, imageSourceReferences(tabId));
 
   const pushHistory = () => {
     const now = Date.now();
-    const coalesce = history.current.length > 0 && now - lastPushAt.current < COALESCE_MS;
+    const coalesce =
+      history.current.length > 0 &&
+      lastPushAt.current !== 0 &&
+      now - lastPushAt.current < COALESCE_MS;
     lastPushAt.current = now;
     if (coalesce) return;
     history.current.push(currentSnapshot());
@@ -201,11 +242,13 @@ export const SourceEditor = memo(function SourceEditor({
 
   const applySnapshot = (snapshot: Snapshot) => {
     const visible = visibleSnapshot(snapshot);
+    const before = pushed.current;
     generation.current += 1;
     pushed.current = visible.text;
     pendingSelection.current = { start: visible.start, end: visible.end };
+    publishSourceEditorChange(api.current!, before, visible.text);
     setDraft(visible.text);
-    onChange(visible.text);
+    onChange(tabId, visible.text);
     imageReferencesChanged(tabId);
   };
 
@@ -228,7 +271,7 @@ export const SourceEditor = memo(function SourceEditor({
     applySnapshot(snapshot);
   };
 
-  const handleChange = (next: string, inputType = '') => {
+  const handleChange = (next: string, inputType = '', edits?: readonly SourceTextEdit[]) => {
     if (next === pushed.current) return;
     if (!composing.current) {
       if (
@@ -241,10 +284,18 @@ export const SourceEditor = memo(function SourceEditor({
     }
     lastInputType.current = inputType;
     future.current = [];
+    const before = pushed.current;
     pushed.current = next;
+    publishSourceEditorChange(
+      api.current!,
+      before,
+      next,
+      edits,
+      edits ? (offset) => mapSourceEditOffset(offset, edits) : undefined,
+    );
     generation.current += 1;
     setDraft(next);
-    onChange(next);
+    onChange(tabId, next);
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -276,6 +327,58 @@ export const SourceEditor = memo(function SourceEditor({
       lastPushAt.current = 0;
       selectionRef.current = { start: el.selectionStart, end: el.selectionEnd };
     }
+  };
+
+  apiMethods.current = {
+    read: () => {
+      const input = textareaRef.current;
+      const selection =
+        input?.value === pushed.current
+          ? { start: input.selectionStart, end: input.selectionEnd }
+          : (pendingSelection.current ?? selectionRef.current);
+      return { text: pushed.current, ...selection };
+    },
+    applyEdits: (edits: readonly SourceTextEdit[], selection?: SourceSelection) => {
+      const input = textareaRef.current;
+      if (!input?.isConnected || composing.current || !edits.length) return false;
+      const before = pushed.current;
+      const prepared = prepareSourceEdits(before, edits);
+      if (!prepared || prepared.text === before) return false;
+      const current = apiMethods.current!.read();
+      const target = selection ?? {
+        start: mapSourceEditOffset(current.start, prepared.edits),
+        end: mapSourceEditOffset(current.end, prepared.edits),
+      };
+      if (
+        !Number.isInteger(target.start) ||
+        !Number.isInteger(target.end) ||
+        target.start < 0 ||
+        target.end < target.start ||
+        target.end > prepared.text.length
+      )
+        return false;
+      if (input.value === before) rememberSelection();
+      lastPushAt.current = 0;
+      lastInputType.current = '';
+      handleChange(prepared.text, 'insertReplacementText', prepared.edits);
+      pendingSelection.current = target;
+      selectionRef.current = target;
+      direction.current = 'none';
+      lastPushAt.current = 0;
+      lastInputType.current = '';
+      imageReferencesChanged(tabId);
+      return true;
+    },
+    undo: () => {
+      if (!textareaRef.current?.isConnected || composing.current) return;
+      if (textareaRef.current?.value === pushed.current) rememberSelection();
+      handleUndo();
+    },
+    redo: () => {
+      if (!textareaRef.current?.isConnected || composing.current) return;
+      if (textareaRef.current?.value === pushed.current) rememberSelection();
+      handleRedo();
+    },
   };
 
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {

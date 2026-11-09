@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { confirmDialog, showMessage } from '../lib/dialog';
 import { needsDocumentProtection } from '../lib/documentProtection';
+import { flushEditorUpdate } from '../lib/editorUpdates';
 import { rebaseSourcePlace, renderedPlace } from '../lib/editorPosition';
 import { errorMessage } from '../lib/errors';
 import { basename, documentRevision, pickSaveFile, writeDocument } from '../lib/fileOps';
@@ -12,6 +13,7 @@ import {
 } from '../lib/imageOps';
 import { getImageUrls, isRelativeImageUrl } from '../lib/imagePaths';
 import { pathKey } from '../lib/pathIdentity';
+import { displayPath } from '../lib/pathDisplay';
 import { computeStats } from '../lib/stats';
 import { getRecentFiles, pushRecentFile } from '../lib/store';
 import type { RecentFile, Tab } from '../lib/types';
@@ -230,7 +232,7 @@ export function useDocumentSave(
           updateTab(tab.id, { dirty: true });
           protectDraft(tabsRef.current.find((candidate) => candidate.id === tab.id)!);
           await showMessage(
-            `副本已写入「${target}」。保存期间又有含相对图片的新编辑，当前标签仍保留原文件位置和新稿，自动保存已暂停。请重新另存为以保存最新内容。`,
+            `副本已写入「${displayPath(target)}」。保存期间又有含相对图片的新编辑，当前标签仍保留原文件位置和新稿，自动保存已暂停。请重新另存为以保存最新内容。`,
             'info',
           );
           return false;
@@ -263,8 +265,12 @@ export function useDocumentSave(
           if (latest && needsDocumentProtection(latest, resolveContent(latest)))
             protectDraft(latest);
         }
-        await pushRecentFile(receipt.path, basename(receipt.path), selected);
-        setRecentFiles(await getRecentFiles());
+        try {
+          await pushRecentFile(receipt.path, basename(receipt.path), selected);
+          setRecentFiles(await getRecentFiles());
+        } catch (error) {
+          await showMessage(`文稿已保存，但最近列表更新失败：${errorMessage(error)}。`, 'error');
+        }
         return true;
       } catch (err) {
         if (!isCurrentSave()) return false;
@@ -309,6 +315,8 @@ export function useDocumentSave(
         tabsRef.current.some((tab) => tab.id === id);
 
       if (!isCurrentSave()) return false;
+      const editor = editorRegistry.current[id];
+      if (editor) flushEditorUpdate(editor);
       const tab = tabsRef.current.find((candidate) => candidate.id === id);
       if (!tab || (!manual && id in blockedExternalMtime.current)) return false;
       if (saveAs || !tab.path) {
@@ -331,7 +339,7 @@ export function useDocumentSave(
             if (blockedExternalMtime.current[id] !== diskMtime) {
               pauseAutoSave(id, diskMtime);
               await showMessage(
-                `「${tab.title}」的磁盘版本已变化，自动保存已暂停。请按 Ctrl+S 确认，或另存为保留两份。`,
+                `「${tab.title}」的磁盘版本已变化，自动保存已暂停。请点击工具栏「保存」确认，或另存为保留两份。`,
                 'error',
               );
             }
@@ -423,6 +431,7 @@ export function useDocumentSave(
     },
     [
       saveGenerations,
+      editorRegistry,
       tabsRef,
       blockedExternalMtime,
       handleSaveAsFor,

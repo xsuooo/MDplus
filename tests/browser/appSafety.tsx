@@ -755,31 +755,63 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
   }
 
   if (windowRestoreCase) {
-    await until(() => restoredBounds.length === 1, 'initial window placement');
+    await until(
+      () => restoredBounds.length === 1 && native.geometry.visible,
+      'initial visible window placement',
+    );
     check(
       JSON.stringify(bounds) === JSON.stringify(savedBounds),
       `Physical bounds scaled at ${scaleFactor} DPI: ${JSON.stringify(bounds)}`,
     );
-    click('button[aria-label="关闭窗口"]');
-    await until(() => destroyed === 1, 'window state persisted');
+    const { persistWindowState } = await import('../../src/services/windowState');
+    await persistWindowState();
     check(
       JSON.stringify(store.get('window-state')) === JSON.stringify(savedBounds),
       'Window bounds drifted on persistence',
     );
+    // A page remount belongs to the existing native window, not a new window.
+    // Move/resize it without updating the saved baseline to catch stale restores.
+    const liveBounds = {
+      width: savedBounds.width + 60,
+      height: savedBounds.height + 40,
+      x: savedBounds.x + 120,
+      y: savedBounds.y + 80,
+      maximized: false,
+    };
+    Object.assign(bounds, liveBounds);
+    const beforeRemount = native.calls.length;
     root.unmount();
     root = createRoot(host);
     root.render(<App />);
     await until(
-      () =>
-        restoredBounds.length === 2 && document.querySelector('.editor-tab.active .ProseMirror'),
-      'second restore',
+      () => document.querySelector('.editor-tab.active .ProseMirror'),
+      'visible window page remount',
+    );
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    check(
+      restoredBounds.length === 1 && JSON.stringify(bounds) === JSON.stringify(liveBounds),
+      'Remounting a visible window replaced its current physical bounds with saved bounds',
     );
     check(
-      JSON.stringify(bounds) === JSON.stringify(savedBounds),
-      'Repeated restore scaled the saved physical bounds again',
+      !native.calls
+        .slice(beforeRemount)
+        .some((call) =>
+          [
+            'plugin:window|set_size',
+            'plugin:window|set_position',
+            'plugin:window|maximize',
+            'plugin:window|show',
+          ].includes(call.command),
+        ),
+      'Remounting a visible window repeated native restoration or reveal',
+    );
+    await persistWindowState();
+    check(
+      JSON.stringify(store.get('window-state')) === JSON.stringify(liveBounds),
+      `Live physical bounds scaled on persistence at ${scaleFactor} DPI`,
     );
     check(unexpected.length === 0, 'Unexpected IPC during window restoration');
-    return `${testCase}: physical dimensions and position survive repeated restore at ${scaleFactor} DPI`;
+    return `${testCase}: physical bounds persist at ${scaleFactor} DPI; page remount retains the moved/resized visible window without another restore`;
   }
 
   if (testCase === 'edit-after-final-close-confirm') {

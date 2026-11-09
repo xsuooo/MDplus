@@ -56,12 +56,12 @@
     },
     "cache_recovery_image": {
       "request": "#/$defs/RecoveryImageRequest",
-      "response": "#/$defs/Void",
+      "response": "#/$defs/RecoveryCleanup",
       "error": "#/$defs/StringError"
     },
     "write_recovery_snapshot": {
       "request": "#/$defs/RecoveryWriteRequest",
-      "response": "#/$defs/Void",
+      "response": "#/$defs/RecoveryCleanup",
       "error": "#/$defs/StringError"
     },
     "list_recovery_snapshots": {
@@ -92,6 +92,11 @@
     "stash_image": {
       "request": "#/$defs/StashImageRequest",
       "response": "#/$defs/StashReceipt",
+      "error": "#/$defs/StringError"
+    },
+    "import_dropped_image": {
+      "request": "#/$defs/DroppedImageRequest",
+      "response": "#/$defs/DroppedImageReceipt",
       "error": "#/$defs/StringError"
     },
     "read_stashed_image": {
@@ -420,7 +425,7 @@
     "RecoveryImageRequest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "key", "dataBase64"],
+      "required": ["id", "key", "stashKey", "retainedKeys"],
       "properties": {
         "id": {
           "type": "string",
@@ -432,11 +437,13 @@
           "type": "string",
           "minLength": 1
         },
-        "dataBase64": {
+        "stashKey": {
           "type": "string",
-          "contentEncoding": "base64",
-          "maxLength": 89478488,
-          "description": "Canonical padded STANDARD base64. Encoded length is checked before allocation, decoded bytes are separately limited to imageFileBytes and type-validated; JSON numeric arrays are not accepted."
+          "pattern": "^[0-9a-f]{32}$",
+          "description": "Key of a pinned process-owned image stash handle; native code copies its immutable bytes without transferring Base64 through the WebView."
+        },
+        "retainedKeys": {
+          "$ref": "#/$defs/RecoveryRetainedKeys"
         }
       }
     },
@@ -492,10 +499,35 @@
     "RecoveryWriteRequest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["snapshot"],
+      "required": ["snapshot", "retainedKeys"],
       "properties": {
         "snapshot": {
           "$ref": "#/$defs/RecoverySnapshot"
+        },
+        "retainedKeys": {
+          "$ref": "#/$defs/RecoveryRetainedKeys"
+        }
+      }
+    },
+    "RecoveryRetainedKeys": {
+      "type": "array",
+      "maxItems": 4096,
+      "description": "In-flight image/capture keys, not a persisted snapshot field. Native code also retains the last complete disk manifest before publication.",
+      "items": {
+        "type": "string",
+        "maxLength": 105,
+        "pattern": "^[A-Za-z0-9-]+\\.(png|jpg|jpeg|gif|webp|svg)$"
+      }
+    },
+    "RecoveryCleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["removedKeys", "cleanupError"],
+      "properties": {
+        "removedKeys": { "$ref": "#/$defs/RecoveryRetainedKeys" },
+        "cleanupError": {
+          "type": ["string", "null"],
+          "description": "Auxiliary cleanup failure. A successful manifest write remains durable; callers invalidate cached-key knowledge and retry cleanup on a later write."
         }
       }
     },
@@ -630,6 +662,31 @@
           "maxLength": 32,
           "pattern": "^[0-9a-f]{32}$"
         }
+      }
+    },
+    "DroppedImageRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Explicit user-dropped absolute PNG/JPG/JPEG regular file. Device paths, leaf links/reparse points, extension/content mismatches, corrupt images and capacity violations are rejected. Source bytes are copied unchanged into process-owned stash; discard never deletes the user's original. This does not widen read_image_file's document-relative boundary."
+        }
+      }
+    },
+    "DroppedImageReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "mime", "previewUrl", "filename", "byteLength", "digest"],
+      "properties": {
+        "key": { "type": "string", "minLength": 32, "maxLength": 32, "pattern": "^[0-9a-f]{32}$" },
+        "mime": { "enum": ["image/png", "image/jpeg"] },
+        "previewUrl": { "type": "string", "minLength": 1 },
+        "filename": { "type": "string", "minLength": 1 },
+        "byteLength": { "type": "integer", "minimum": 1, "maximum": 67108864 },
+        "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
       }
     },
     "StashKeysRequest": {

@@ -11,6 +11,19 @@ describe('source selection rebasing', () => {
   it('leaves an unchanged offset alone', () => {
     expect(mapTextOffset('same', 'same', 3)).toBe(3);
   });
+  it('preserves boundary positions before and after a replacement', () => {
+    for (const [before, after, expected] of [
+      ['abcXYZend', 'abcQend', [0, 1, 2, 3, 4, 4, 4, 5, 6, 7]],
+      ['abcd', 'abXYcd', [0, 1, 2, 5, 6]],
+      ['中文🙂end', '中文🙂', [0, 1, 2, 3, 4, 4, 4, 4]],
+    ] as const) {
+      expect(
+        Array.from({ length: before.length + 1 }, (_, offset) =>
+          mapTextOffset(before, after, offset),
+        ),
+      ).toEqual(expected);
+    }
+  });
   it('rebases a selection between two separate image rewrites', () => {
     const markdown = '![](mdplus-image:one)\n\n选择这里\n\n![](mdplus-image:two)';
     const refs = [

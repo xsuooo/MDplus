@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit",
     "typecheck:browser": "tsc --project tsconfig.browser.json --noEmit",
     "test": "vitest run",
+    "perf": "node tests/perf/run.mjs",
     "test:watch": "vitest",
     "check": "npm run lint && npm run format:check && npm run config:check && npm run typecheck && npm run typecheck:browser && npm run test:coverage",
     "build": "npm run config:check && npm run typecheck && vite build",

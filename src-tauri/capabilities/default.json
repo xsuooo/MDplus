@@ -28,6 +28,7 @@
     "allow-commit-image-assets",
     "allow-discard-image-assets",
     "allow-stash-image",
+    "allow-import-dropped-image",
     "allow-read-stashed-image",
     "allow-discard-stashed-images",
     "allow-export-html",

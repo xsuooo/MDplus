@@ -115,6 +115,8 @@ export async function collectUnusedImages(tabId?: string): Promise<void> {
   const discarded: Promise<void>[] = [];
   for (const [id, cache] of imageCaches) {
     if (tabId !== undefined && tabId !== id) continue;
+    // No native backing can be reclaimed; do not parse the document and its history.
+    if (!cache.images.size) continue;
     const roots = imageRoots.get(id);
     if (!roots?.size) continue;
     const reachable = new Set<string>();
@@ -143,6 +145,18 @@ export function settleImageInsertion(tabId: string, placeholder: string): void {
   const image = imageCaches.get(tabId)?.images.get(placeholder);
   if (image) image.inserting = false;
   imageReferencesChanged(tabId);
+}
+
+/** Failed batches own no editor reference: release them immediately, including
+ * when a recovery queue still holds its independent read lease. */
+export async function cancelImageInsertion(tabId: string, placeholder: string): Promise<void> {
+  const cache = imageCaches.get(tabId);
+  const image = cache?.images.get(placeholder);
+  if (!cache || !image?.inserting) return;
+  cache.images.delete(placeholder);
+  for (const [url, token] of cache.aliases) if (token === placeholder) cache.aliases.delete(url);
+  changed(tabId, cache);
+  await releaseBacking(image.backing);
 }
 
 const IMAGE_EXTENSIONS: Record<string, string> = {
@@ -229,9 +243,19 @@ export function getPendingImages(tabId: string): PendingImage[] {
   const cache = imageCaches.get(tabId);
   return cache ? [...cache.images.values()].map((image) => snapshotImage(cache, image)) : [];
 }
+/** Recovery duplicates need pins for insertion/captures; undo bytes stay in the independent stash. */
+export function getInFlightImages(tabId: string): PendingImage[] {
+  const cache = imageCaches.get(tabId);
+  return cache
+    ? [...cache.images.values()]
+        .filter((image) => image.inserting || image.backing.owners > 1)
+        .map((image) => snapshotImage(cache, image))
+    : [];
+}
 export interface PendingImageLease {
   images: PendingImage[];
   readDataBase64: (placeholder: string) => Promise<string>;
+  withStashKey: <T>(placeholder: string, consume: (stashKey: string) => Promise<T>) => Promise<T>;
   withDataBase64: <T>(
     placeholder: string,
     consume: (dataBase64: string) => Promise<T>,
@@ -253,26 +277,32 @@ export function capturePendingImages(tabId: string, urls?: Iterable<string>): Pe
   const backings = new Map(selected.map((image) => [image.placeholder, image.backing]));
   for (const backing of backings.values()) backing.owners += 1;
   let released = false;
-  const withDataBase64 = <T>(placeholder: string, consume: (dataBase64: string) => Promise<T>) => {
+  const withBacking = <T>(placeholder: string, consume: (backing: ImageBacking) => Promise<T>) => {
     const backing = backings.get(placeholder);
     if (released || !backing) return Promise.reject(new Error('图片读取租约已释放或身份不匹配'));
     // An operation keeps its own pin even if its caller cancels/releases while queued.
     backing.owners += 1;
     return imageIO(async () => {
       try {
-        const data = await invoke<{ dataBase64: string; mime: string }>('read_stashed_image', {
-          key: backing.key,
-        });
-        if (imageByteLength(data.dataBase64) !== backing.byteLength)
-          throw new Error('图片暂存数据已损坏');
-        return await consume(data.dataBase64);
+        return await consume(backing);
       } finally {
         await releaseBacking(backing);
       }
     });
   };
+  const withDataBase64 = <T>(placeholder: string, consume: (dataBase64: string) => Promise<T>) =>
+    withBacking(placeholder, async (backing) => {
+      const data = await invoke<{ dataBase64: string; mime: string }>('read_stashed_image', {
+        key: backing.key,
+      });
+      if (imageByteLength(data.dataBase64) !== backing.byteLength)
+        throw new Error('图片暂存数据已损坏');
+      return consume(data.dataBase64);
+    });
   return {
     images: selected.map((image) => snapshotImage(cache!, image)),
+    withStashKey: (placeholder, consume) =>
+      withBacking(placeholder, (backing) => consume(backing.key)),
     withDataBase64,
     readDataBase64: (placeholder) => withDataBase64(placeholder, async (data) => data),
     release: () => {
@@ -468,7 +498,7 @@ export async function migratePendingImages(
         (url): url is string => !!url && urls.has(url),
       );
       if (image.source) {
-        const resolved = await join(dir, image.source.url.replace(/^\.\//, ''));
+        const resolved = await join(dir, relativeImageFilePath(image.source.url));
         if (isSamePath(resolved, image.source.absolutePath)) {
           for (const placeholder of references)
             migration.references.push({ placeholder, relativePath: image.source.url });
@@ -484,12 +514,13 @@ export async function migratePendingImages(
         }),
       );
       if (asset.allocationId) migration.allocationIds.push(asset.allocationId);
+      const relativePath = imageFilePathUrl(asset.relativePath);
       for (const placeholder of references)
-        migration.references.push({ placeholder, relativePath: asset.relativePath });
+        migration.references.push({ placeholder, relativePath });
       migration.updates.push({
         image,
         filename: asset.filename,
-        source: { url: asset.relativePath, absolutePath: asset.path },
+        source: { url: relativePath, absolutePath: asset.path },
       });
     }
     migration.markdown = rewriteImageReferences(markdown, migration.references);
@@ -506,6 +537,23 @@ export async function migratePendingImages(
 function isSamePath(a: string, b: string): boolean {
   return pathKey(a) === pathKey(b);
 }
+
+/** Decode Markdown URLs once; native validation still owns filesystem boundaries. */
+function relativeImageFilePath(url: string): string {
+  let path = url;
+  try {
+    path = decodeURIComponent(url);
+  } catch {
+    // Existing documents can use a literal, malformed percent escape in a filename.
+  }
+  return path.replace(/^\.\//, '');
+}
+
+/** Native receipts contain filesystem paths, whose percent/hash characters are literal. */
+function imageFilePathUrl(path: string): string {
+  return path.replace(/[%#?]/g, (character) => encodeURIComponent(character));
+}
+
 export interface PreparedImageReferences {
   markdown: string;
   commit: () => boolean;
@@ -536,7 +584,7 @@ export async function prepareImageReferences(
       if (!isRelativeImageUrl(url)) continue;
       const existing = cache.images.get(cache.aliases.get(url) ?? '');
       if (sameDocument && existing && !options.refresh) continue;
-      const relativePath = url.replace(/^\.\//, '');
+      const relativePath = relativeImageFilePath(url);
       // Missing/invalid source observations may retire a live alias. A stash-full
       // error, however, must reject the preparation rather than retire good data.
       const image = await imageIO(async () => {
@@ -636,4 +684,62 @@ export async function saveImage(blob: Blob, tabId: string): Promise<string> {
   });
   changed(tabId, cache);
   return placeholder;
+}
+
+export interface DroppedImageReceipt {
+  key: string;
+  mime: 'image/png' | 'image/jpeg';
+  previewUrl: string;
+  filename: string;
+  byteLength: number;
+  digest: string;
+}
+
+/** An explicit drop command validates/decodes a regular PNG/JPEG and directly
+ * stashes the unchanged native bytes. JS retains only its immutable identity. */
+export async function importDroppedImage(path: string, tabId: string): Promise<string> {
+  const cache = cacheFor(tabId);
+  await collectUnusedImages();
+  const receipt = await imageIO(() =>
+    invoke<DroppedImageReceipt>('import_dropped_image', { path }),
+  );
+  const backing: ImageBacking = {
+    key: receipt.key,
+    mime: receipt.mime,
+    byteLength: receipt.byteLength,
+    digest: receipt.digest,
+    previewUrl: receipt.previewUrl,
+    owners: 1,
+  };
+  try {
+    if (
+      !/^[0-9a-f]{32}$/.test(receipt.key) ||
+      !/^[0-9a-f]{64}$/.test(receipt.digest) ||
+      !Number.isSafeInteger(receipt.byteLength) ||
+      receipt.byteLength <= 0 ||
+      receipt.byteLength > LIMITS.imageFileBytes ||
+      !receipt.previewUrl ||
+      !receipt.filename ||
+      /[\\/]/.test(receipt.filename) ||
+      !/\.(png|jpe?g)$/i.test(receipt.filename) ||
+      (receipt.mime !== 'image/png' && receipt.mime !== 'image/jpeg')
+    )
+      throw new Error('原生图片导入结果无效');
+    if (imageCaches.get(tabId) !== cache) throw new Error('标签已关闭，图片拖入已取消');
+    const placeholder = `mdplus-image:${imageId()}`;
+    cache.images.set(placeholder, {
+      placeholder,
+      filename: receipt.filename,
+      relativePath: `./assets/${receipt.filename}`,
+      mime: backing.mime,
+      byteLength: backing.byteLength,
+      backing,
+      inserting: true,
+    });
+    changed(tabId, cache);
+    return placeholder;
+  } catch (error) {
+    await releaseBacking(backing);
+    throw error;
+  }
 }

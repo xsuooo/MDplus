@@ -5,6 +5,7 @@ import { TextSelection, NodeSelection } from '@milkdown/prose/state';
 import { undoDepth } from '@milkdown/prose/history';
 import { createEditor, getCurrentState, setMarkdown } from '../../src/lib/editor';
 import App from '../../src/App';
+import { toRendered, toSource } from '../../src/lib/editorPosition';
 import '../../src/styles/global.css';
 
 export const continuityCases = [
@@ -26,6 +27,9 @@ export const continuityCases = [
   'rendered-tab-position',
   'mode-formatted-blocks',
   'mode-input-isolation',
+  'mode-range-budget',
+  'zoom-live-view',
+  'zoom-mode-switch',
 ] as const;
 export type ContinuityCase = (typeof continuityCases)[number];
 export const longDocument = Array.from(
@@ -56,6 +60,47 @@ function input(field: HTMLTextAreaElement, text: string) {
 
 export async function runContinuityRegression(testCase: ContinuityCase): Promise<string> {
   createNativeMocks().install();
+  if (testCase.startsWith('zoom-')) localStorage.setItem('mdplus-editor-zoom', '100');
+  if (testCase === 'mode-range-budget') {
+    const host = document.createElement('div');
+    host.className = 'milkdown-container';
+    host.style.cssText = 'width:800px;height:420px';
+    const input = document.createElement('textarea');
+    input.className = 'source-textarea';
+    input.style.cssText = 'width:800px;height:420px';
+    const markdown = longDocument.repeat(8);
+    input.value = markdown;
+    document.body.append(host, input);
+    const editor = createEditor(host, markdown, { onUpdate: () => {} });
+    await editor.create();
+    await document.fonts.ready;
+    const original = Range.prototype.getBoundingClientRect;
+    let reads = 0;
+    Range.prototype.getBoundingClientRect = function () {
+      reads++;
+      return original.call(this);
+    };
+    try {
+      toSource(editor, markdown, input);
+      const at = markdown.indexOf('段落 17', markdown.length / 2);
+      check(at > 0, 'Range budget fixture lacks its middle paragraph');
+      input.setSelectionRange(at, at + 2);
+      input.scrollTop = input.scrollHeight / 2;
+      toRendered(editor, markdown, input);
+      toSource(editor, markdown, input);
+      check(
+        input.value.slice(input.selectionStart, input.selectionEnd) === '段落',
+        'Visible-block mapping lost the selected text',
+      );
+      check(reads < 100, `Mode switching measured the whole document: ${reads} Range reads`);
+      return `${testCase}: ${reads} Range reads for 280 sections with selection preserved`;
+    } finally {
+      Range.prototype.getBoundingClientRect = original;
+      await editor.destroy();
+      host.remove();
+      input.remove();
+    }
+  }
   if (testCase.startsWith('sync-')) {
     const host = document.createElement('div');
     host.className = 'milkdown-container';
@@ -215,6 +260,85 @@ export async function runContinuityRegression(testCase: ContinuityCase): Promise
     input(field, longDocument);
     await until(() => field.value === longDocument);
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    if (testCase.startsWith('zoom-')) {
+      await document.fonts.ready;
+      click('button[aria-label="切换源码模式"]');
+      await until(() => !document.querySelector('.source-editor:not([hidden])'));
+      const rich = document.querySelector<HTMLElement>('.editor-tab.active .milkdown')!;
+      const editor = rich.querySelector<HTMLElement>('.ProseMirror')!;
+      const doc = (editor as HTMLElement & { pmViewDesc?: { node: object } }).pmViewDesc!.node;
+      const scroller = rich.closest<HTMLElement>('.milkdown-container')!;
+      const heading = editor.querySelectorAll<HTMLHeadingElement>('h2')[17];
+      scroller.scrollTop +=
+        heading.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 100;
+      await new Promise(requestAnimationFrame);
+      const rect = heading.getBoundingClientRect();
+      const toolbar = document.querySelector('.toolbar')!.getBoundingClientRect().toJSON();
+      for (let index = 0; index < 2; index++) {
+        const event = new WheelEvent('wheel', {
+          bubbles: true,
+          cancelable: true,
+          ctrlKey: true,
+          deltaY: -40,
+          clientX: rect.left + rect.width / 2,
+          clientY: rect.top + rect.height / 2,
+        });
+        heading.dispatchEvent(event);
+        check(event.defaultPrevented, 'Ctrlwheel escaped into page zoom');
+      }
+      await until(() => document.querySelector('.statusbar-zoom')?.textContent === '120%');
+      check(
+        rich.style.transform === 'scale(1.2)',
+        'Continuous zoom did not use its lightweight preview',
+      );
+      if (testCase === 'zoom-mode-switch') {
+        const mode = document.querySelector<HTMLButtonElement>(
+          'button[aria-label="切换源码模式"]',
+        )!;
+        mode.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+        check(
+          rich.style.getPropertyValue('transform') === '' && rich.style.zoom === '1.2',
+          'Mode interaction read unfinished zoom geometry',
+        );
+        mode.click();
+        await until(() => document.querySelector('.source-editor:not([hidden]) textarea'));
+        const source = document.querySelector<HTMLTextAreaElement>(
+          '.source-editor:not([hidden]) textarea',
+        )!;
+        check(
+          source.style.zoom === '1.2' && source.value === longDocument,
+          'Source mode lost the zoom or source text',
+        );
+        source.dispatchEvent(
+          new WheelEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: true, deltaY: 40 }),
+        );
+        await until(() => document.querySelector('.statusbar-zoom')?.textContent === '110%');
+        mode.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+        mode.click();
+        await until(() => !document.querySelector('.source-editor:not([hidden])'));
+        check(
+          rich.style.getPropertyValue('zoom') === '1.1' && !source.style.transform,
+          'Returning to rich mode left a pending source preview',
+        );
+      } else {
+        await until(() => !rich.style.transform && rich.style.zoom === '1.2');
+        const after = heading.getBoundingClientRect();
+        check(
+          Math.abs(after.top + after.height / 2 - rect.top - rect.height / 2) < 2,
+          'Zoom moved the paragraph under the pointer',
+        );
+      }
+      check(
+        (editor as HTMLElement & { pmViewDesc?: { node: object } }).pmViewDesc!.node === doc,
+        'Zoom changed or recreated the document',
+      );
+      check(
+        JSON.stringify(document.querySelector('.toolbar')!.getBoundingClientRect().toJSON()) ===
+          JSON.stringify(toolbar),
+        'Editor zoom changed the toolbar geometry',
+      );
+      return `${testCase}: coalesced preview, settled geometry, document identity and shared mode zoom passed`;
+    }
     if (testCase.startsWith('font-pending-') || testCase === 'font-source-position')
       await document.fonts.ready;
     const selection = longDocument.indexOf('段落 17') + 5;

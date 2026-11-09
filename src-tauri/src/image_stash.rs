@@ -44,6 +44,47 @@ pub struct StashedImage {
     data_base64: String,
 }
 
+impl ImageStash {
+    /// Copy validated bytes into process-owned storage; callers never acquire
+    /// deletion authority over the original file they selected or dropped.
+    pub(crate) fn insert_bytes(
+        &self,
+        parent: &Path,
+        filename: &str,
+        bytes: &[u8],
+    ) -> Result<StashReceipt, String> {
+        self.0
+            .lock()
+            .map_err(|_| "session image lock failed")?
+            .insert(parent, filename, bytes, MAX_IMAGE_STASH_BYTES)
+    }
+
+    pub(crate) fn read_bytes(&self, key: &str) -> Result<Vec<u8>, String> {
+        if key.len() != 32
+            || !key
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err("invalid session image key".into());
+        }
+        self.0
+            .lock()
+            .map_err(|_| "session image lock failed")?
+            .read_bytes(key)
+            .map(|(_, bytes)| bytes)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn read_for_test(&self, key: &str) -> Result<StashedImage, String> {
+        self.0.lock().unwrap().read(key)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn discard_for_test(&self, keys: Vec<String>) -> Result<(), String> {
+        self.0.lock().unwrap().discard(keys)
+    }
+}
+
 impl Stash {
     fn insert(
         &mut self,
@@ -212,11 +253,7 @@ pub fn stash_image(
         .app_local_data_dir()
         .map_err(|error| error.to_string())?
         .join("session-image-stash-v1");
-    state
-        .0
-        .lock()
-        .map_err(|_| "session image lock failed")?
-        .insert(&parent, &filename, &data, MAX_IMAGE_STASH_BYTES)
+    state.insert_bytes(&parent, &filename, &data)
 }
 
 #[tauri::command]

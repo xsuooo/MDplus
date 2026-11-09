@@ -31,7 +31,7 @@ export const MIN_WINDOW_HEIGHT = 600;
 
 /** 最小化窗口在 Windows 上上报的坐标(窗口本来在 -32000,-32000)。 */
 const SENTINEL_COORDINATE = -30_000;
-/** 标题栏区域至少要有这么多像素落在显示器工作区内,才算窗口可见。 */
+/** 保守保留可抓取的标题区域，薄条交叠不能算作可操作的窗口。 */
 const MIN_VISIBLE = 80;
 
 function isFiniteNumber(value: unknown): value is number {
@@ -72,11 +72,19 @@ function overlapArea(a: Rect, b: Rect): number {
 
 function isVisibleOn(state: WindowState, display: DisplayWorkArea): boolean {
   const titleBar = { x: state.x, y: state.y, width: state.width, height: MIN_VISIBLE };
-  return overlapArea(titleBar, display) > 0;
+  const width =
+    Math.min(titleBar.x + titleBar.width, display.x + display.width) -
+    Math.max(titleBar.x, display.x);
+  const height =
+    Math.min(titleBar.y + titleBar.height, display.y + display.height) -
+    Math.max(titleBar.y, display.y);
+  return (
+    width >= Math.min(MIN_VISIBLE, display.width) && height >= Math.min(MIN_VISIBLE, display.height)
+  );
 }
 
 /**
- * 把完全落在所有显示器工作区之外的窗口拉回可见位置。
+ * 把没有足够可抓取标题区域的窗口拉回可见位置。
  * 有多块显示器时(可能含负坐标),优先保留与窗口重叠最多的那块。
  */
 export function clampToVisibleDisplays(
@@ -87,6 +95,8 @@ export function clampToVisibleDisplays(
     (display) =>
       isFiniteNumber(display.x) &&
       isFiniteNumber(display.y) &&
+      isFiniteNumber(display.width) &&
+      isFiniteNumber(display.height) &&
       display.width > 0 &&
       display.height > 0,
   );
