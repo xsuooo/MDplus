@@ -85,11 +85,20 @@ function input(source: HTMLTextAreaElement, text: string) {
 }
 
 export async function checkTabSwitches(sourceMode: boolean): Promise<string> {
-  await until(() => document.querySelectorAll('.ProseMirror').length === documents.length);
+  await until(() => document.querySelectorAll('[role="tab"]').length === documents.length);
   await until(() => document.querySelectorAll('.source-textarea').length === documents.length);
   await document.fonts.ready;
   await settle();
   const headers = Array.from(document.querySelectorAll<HTMLElement>('[role="tab"]'));
+  for (const header of headers) {
+    header.click();
+    await until(
+      () =>
+        header.classList.contains('active') &&
+        document.querySelector<RenderedDOM>('.editor-tab.active .ProseMirror')?.pmViewDesc?.node,
+    );
+  }
+  await settle();
   const panels = Array.from(document.querySelectorAll<HTMLElement>('.editor-tab'));
   const sources = Array.from(document.querySelectorAll<HTMLTextAreaElement>('.source-textarea'));
   check(headers.length === 12, 'The tab switching fixture must initialize all 12 tabs');

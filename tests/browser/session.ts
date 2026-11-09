@@ -429,6 +429,14 @@ export async function runSessionRegression(testCase: SessionCase): Promise<strin
       );
       return `${testCase}: discarded untitled tab omitted, its journal cleared, independent draft retained`;
     }
+    for (const name of names) {
+      await selectFile(name);
+      await until(
+        () => document.querySelector('.editor-tab.active .ProseMirror'),
+        `initialized session tab: ${name}`,
+      );
+    }
+    await selectFile('a');
     await until(
       () =>
         (settings.get('document-session') as SavedDocumentSession).documents.every(

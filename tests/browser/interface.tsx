@@ -335,6 +335,11 @@ export async function runInterfaceRegression(testCase: InterfaceCase): Promise<s
 
       click('button[aria-label="切换源码模式"]');
       await until(() => !document.querySelector('.source-editor:not([hidden])'));
+      await until(
+        () =>
+          document.querySelector('.search-count')?.textContent === '2 处' &&
+          document.querySelector('.editor-tab.active .md-search-current')?.textContent === 'Needle',
+      );
       await settled();
 
       check(input.value === 'Needle', 'Mode switching cleared the active search query');
@@ -389,6 +394,8 @@ export async function runInterfaceRegression(testCase: InterfaceCase): Promise<s
       const input = document.querySelector<HTMLInputElement>('.search-input')!;
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, query);
       input.dispatchEvent(new Event('input', { bubbles: true }));
+      if (sourceCase)
+        await until(() => document.querySelector('.search-count')?.textContent === '1 处');
       await settled();
       check(
         document.querySelector('.search-count')?.textContent === '1 处',
@@ -411,6 +418,7 @@ export async function runInterfaceRegression(testCase: InterfaceCase): Promise<s
           original.replace(query, 'removed'),
         );
         source.dispatchEvent(new Event('input', { bubbles: true }));
+        await until(() => document.querySelector('.search-count')?.textContent === '无匹配');
         await settled();
         check(
           document.querySelector('.search-count')?.textContent === '无匹配',

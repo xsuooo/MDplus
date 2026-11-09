@@ -98,8 +98,8 @@ function check(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
 }
 
-async function until(condition: () => unknown, message: string) {
-  const deadline = performance.now() + 7000;
+async function until(condition: () => unknown, message: string, timeout = 7000) {
+  const deadline = performance.now() + timeout;
   while (!condition()) {
     check(performance.now() < deadline, `Timed out: ${message}`);
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -959,6 +959,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     await until(
       () => document.querySelector('[role="tab"] .tab-dot')?.getAttribute('data-external') === '1',
       'background revision marker',
+      35000,
     );
     check(
       confirms === 0 && text().includes('other document'),

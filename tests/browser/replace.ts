@@ -144,6 +144,7 @@ async function runRich(testCase: ReplaceCase): Promise<string> {
       const before = view.state.doc;
       const hidden = hiddenNodes(before);
       const field = await configureSearch('hello world', '替换文字');
+      await until(() => control<HTMLElement>('.search-count').textContent === '6 处');
       check(
         control<HTMLElement>('.search-count').textContent === '6 处',
         'Rich search counted hidden diagram/formula source',
@@ -363,7 +364,7 @@ async function runSource(testCase: ReplaceCase): Promise<string> {
       await frame();
       await configureSearch('a+b', 'a+b a+b');
       click('input[aria-label="区分大小写"]');
-      await frame();
+      await until(() => control<HTMLElement>('.search-count').textContent === '3 处');
       check(
         control<HTMLElement>('.search-count').textContent === '3 处',
         'Source case-sensitive count did not use raw Markdown',
