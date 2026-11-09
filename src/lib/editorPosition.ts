@@ -262,11 +262,9 @@ function sourceOffset(block: Block, offset: number, markdown: string, isEnd: boo
       const end = item.positions[item.positions.length - 1] + 1;
       // Inline nodes occupy a gap; only adjacent text can share this boundary.
       return (
-        end >= offset &&
-        (isEnd || end !== offset || segments[index + 1]?.positions[0] !== offset)
+        end >= offset && (isEnd || end !== offset || segments[index + 1]?.positions[0] !== offset)
       );
-    }) ??
-    segments[segments.length - 1];
+    }) ?? segments[segments.length - 1];
   if (!segment) return block.from;
   const index = segment.positions.findIndex((pos) => pos >= offset);
   return (
