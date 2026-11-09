@@ -254,10 +254,11 @@ function textSegments(block: Block, markdown: string) {
   walk(block.source);
   return segments;
 }
-function sourceOffset(block: Block, offset: number, markdown: string): number {
+function sourceOffset(block: Block, offset: number, markdown: string, isEnd: boolean): number {
   const segments = textSegments(block, markdown);
   const segment =
-    segments.find((item) => item.positions[item.positions.length - 1] + 1 >= offset) ??
+    // Selection starts belong to the following text; ends stay before its closing markup.
+    segments.find((item) => item.positions[item.positions.length - 1] + (isEnd ? 1 : 0) >= offset) ??
     segments[segments.length - 1];
   if (!segment) return block.from;
   const index = segment.positions.findIndex((pos) => pos >= offset);
@@ -408,7 +409,9 @@ function renderedSessionAnchors(
   visible?: { pos: number; rect: { top: number; height: number } },
 ): SessionEditorPlace {
   const offset = (at: number) =>
-    items.length ? sourceOffset(items[renderedBlock(items, at)], at, markdown) : 0;
+    items.length
+      ? sourceOffset(items[renderedBlock(items, at)], at, markdown, at === place.selection.to)
+      : 0;
   const anchor = offset(place.selection.anchor);
   // shortcut: persist a caret for disjoint selections, add range anchors if session multi-selection restore is needed.
   const head = place.selection.ranges.length > 1 ? anchor : offset(place.selection.head);
@@ -518,11 +521,13 @@ export function toSource(
     items[renderedBlock(items, current.selection.anchor)],
     current.selection.anchor,
     markdown,
+    current.selection.anchor >= current.selection.head,
   );
   const head = sourceOffset(
     items[renderedBlock(items, current.selection.head)],
     current.selection.head,
     markdown,
+    current.selection.head >= current.selection.anchor,
   );
   restoreSource(
     input,

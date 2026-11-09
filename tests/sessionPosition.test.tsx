@@ -14,6 +14,8 @@ import {
   restoreSessionRendered,
   restoreSessionSource,
   sourceSessionPlace,
+  toRendered,
+  toSource,
 } from '../src/lib/editorPosition';
 import { useDocumentSession } from '../src/hooks/useDocumentSession';
 import { useEditorView } from '../src/hooks/useEditorView';
@@ -79,6 +81,29 @@ function initial(markdown: string): Tab {
     externalChanged: false,
   };
 }
+
+describe('mode selection mapping', () => {
+  it('keeps bold delimiters outside a round-tripped selection after duplicate headings', async () => {
+    const createRange = document.createRange.bind(document);
+    vi.spyOn(document, 'createRange').mockImplementation(() => {
+      const range = createRange();
+      range.getBoundingClientRect = () => new DOMRect(0, 0, 1, 1);
+      return range;
+    });
+    const markdown =
+      '## Same heading\n\nFirst paragraph\n\n## Same heading\n\nSecond **目标文字** with 中文🙂.';
+    const { editor, view } = await fixture(markdown);
+    const field = input(markdown);
+    const start = markdown.indexOf('目标文字');
+    field.setSelectionRange(start, start + '目标文字'.length);
+    toRendered(editor, markdown, field);
+    const { from, to } = view.state.selection;
+    expect(view.state.doc.textBetween(from, to)).toBe('目标文字');
+    toSource(editor, markdown, field);
+    expect(field.value.slice(field.selectionStart, field.selectionEnd)).toBe('目标文字');
+    expect([field.selectionStart, field.selectionEnd]).toEqual([start, start + '目标文字'.length]);
+  });
+});
 
 describe('serialized editor positions', () => {
   it('restores a caret for disjoint image selections without selecting intervening text', async () => {

@@ -132,7 +132,7 @@ try {
         $end = (Get-Date).AddSeconds(60)
         do {
             Start-Sleep -Milliseconds 400
-            $script = '({url:location.href,status:document.querySelector("#regression-result")?.dataset.status,detail:document.querySelector("#regression-result")?.textContent,reducedMotion:matchMedia("(prefers-reduced-motion: reduce)").matches,userAgent:navigator.userAgent})'
+            $script = '({url:location.href,status:document.querySelector("#regression-result")?.dataset.status??"running",detail:document.querySelector("#regression-result")?.textContent,reducedMotion:matchMedia("(prefers-reduced-motion: reduce)").matches,userAgent:navigator.userAgent})'
             $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($script))
             $raw = Invoke-Browser @('eval', "eval(atob('$encoded'))", '--json')
             $report = ($raw | ConvertFrom-Json).data.result
