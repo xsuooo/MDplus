@@ -5,7 +5,7 @@ import { Editor, defaultValueCtx, editorViewCtx, rootCtx } from '@milkdown/kit/c
 import { commonmark } from '@milkdown/kit/preset/commonmark';
 import { gfm } from '@milkdown/kit/preset/gfm';
 import { history } from '@milkdown/kit/plugin/history';
-import { TextSelection } from '@milkdown/prose/state';
+import { NodeSelection, TextSelection } from '@milkdown/prose/state';
 import { undoDepth } from '@milkdown/prose/history';
 import {
   captureRenderedSessionPlace,
@@ -83,6 +83,51 @@ function initial(markdown: string): Tab {
 }
 
 describe('mode selection mapping', () => {
+  it.each(['node', 'forward', 'backward'] as const)(
+    'keeps image source selection and session anchors for a %s selection',
+    async (kind) => {
+      const createRange = document.createRange.bind(document);
+      vi.spyOn(document, 'createRange').mockImplementation(() => {
+        const range = createRange();
+        range.getBoundingClientRect = () => new DOMRect(0, 0, 1, 1);
+        return range;
+      });
+      const markdown =
+        '## Same heading\n\nFirst paragraph\n\n## Same heading\n\nBefore ![pic](x.png "title") After **目标文字** end.';
+      const image = '![pic](x.png "title")';
+      const { editor, view } = await fixture(markdown);
+      let imagePosition = -1;
+      view.state.doc.descendants((node, position) => {
+        if (node.type.name === 'image') imagePosition = position;
+      });
+      expect(imagePosition).toBeGreaterThan(0);
+      const selection =
+        kind === 'node'
+          ? NodeSelection.create(view.state.doc, imagePosition)
+          : TextSelection.create(
+              view.state.doc,
+              kind === 'backward' ? imagePosition + 1 : imagePosition,
+              kind === 'backward' ? imagePosition : imagePosition + 1,
+            );
+      view.dispatch(view.state.tr.setSelection(selection));
+      const saved = renderedSessionPlace(editor, markdown);
+      const field = input(markdown);
+      toSource(editor, markdown, field);
+      const start = markdown.indexOf(image);
+      const end = start + image.length;
+      const direction = kind === 'backward' ? 'backward' : 'forward';
+      expect({
+        source: [field.selectionStart, field.selectionEnd, field.selectionDirection],
+        text: field.value.slice(field.selectionStart, field.selectionEnd),
+        session: [saved.start.offset, saved.end.offset, saved.direction],
+      }).toEqual({
+        source: [start, end, direction],
+        text: image,
+        session: [start, end, direction],
+      });
+    },
+  );
+
   it('keeps bold delimiters outside a round-tripped selection after duplicate headings', async () => {
     const createRange = document.createRange.bind(document);
     vi.spyOn(document, 'createRange').mockImplementation(() => {

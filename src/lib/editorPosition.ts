@@ -258,7 +258,14 @@ function sourceOffset(block: Block, offset: number, markdown: string, isEnd: boo
   const segments = textSegments(block, markdown);
   const segment =
     // Selection starts belong to the following text; ends stay before its closing markup.
-    segments.find((item) => item.positions[item.positions.length - 1] + (isEnd ? 1 : 0) >= offset) ??
+    segments.find((item, index) => {
+      const end = item.positions[item.positions.length - 1] + 1;
+      // Inline nodes occupy a gap; only adjacent text can share this boundary.
+      return (
+        end >= offset &&
+        (isEnd || end !== offset || segments[index + 1]?.positions[0] !== offset)
+      );
+    }) ??
     segments[segments.length - 1];
   if (!segment) return block.from;
   const index = segment.positions.findIndex((pos) => pos >= offset);
