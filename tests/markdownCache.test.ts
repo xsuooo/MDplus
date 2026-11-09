@@ -271,6 +271,13 @@ describe('plain Markdown parser', () => {
     }
   });
 
+  it.each(['#  Heading', '##   Heading'])(
+    'matches remark text and positions for ATX heading %j',
+    (markdown) => {
+      expect(parseSimpleMarkdown(markdown)).toEqual(remark.parse(markdown));
+    },
+  );
+
   it('accepts the long plain performance fixture', () => {
     const markdown = readFileSync('tests/perf/fixtures/long-5000.md', 'utf8');
     expect(parseSimpleMarkdown(markdown)).toBeDefined();

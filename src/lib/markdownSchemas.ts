@@ -81,7 +81,7 @@ export function parseSimpleMarkdown(markdown: string): Root | undefined {
       continue;
     }
     if (line.value !== line.value.trim()) return undefined;
-    const heading = /^(#{1,6}) (.+)$/.exec(line.value);
+    const heading = /^(#{1,6})[ \t]+(.+)$/.exec(line.value);
     if (heading) {
       if (
         simpleInline.test(heading[2]) ||
@@ -90,7 +90,7 @@ export function parseSimpleMarkdown(markdown: string): Root | undefined {
       )
         return undefined;
       flushParagraph();
-      const contentStart = line.start + heading[1].length + 1;
+      const contentStart = line.start + line.value.length - heading[2].length;
       const position = linePosition(line, line);
       children.push({
         type: 'heading',
@@ -100,7 +100,7 @@ export function parseSimpleMarkdown(markdown: string): Root | undefined {
             type: 'text',
             value: heading[2],
             position: {
-              start: point(line.number, heading[1].length + 2, contentStart),
+              start: point(line.number, contentStart - line.start + 1, contentStart),
               end: point(line.number, line.value.length + 1, line.start + line.value.length),
             },
           },
