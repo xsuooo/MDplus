@@ -183,32 +183,9 @@ export async function setWindowState(state: WindowState): Promise<void> {
   }
 }
 
-/** 读取大纲面板状态 */
-export async function getOutlineOpen(): Promise<boolean> {
-  try {
-    const store = await getStore();
-    const v = await store.get<boolean>(KEY_OUTLINE_OPEN);
-    return typeof v === 'boolean' ? v : false;
-  } catch {
-    return false;
-  }
-}
-
 /** 保存大纲面板状态 */
 export async function setOutlineOpen(open: boolean): Promise<void> {
   await enqueueStoreWrite((store) => store.set(KEY_OUTLINE_OPEN, open));
-}
-
-/** 读取快捷键绑定(损坏时回落到默认表) */
-export async function getShortcutBindings(): Promise<ShortcutBindings> {
-  try {
-    await writeQueue;
-    const store = await getStore();
-    const v = await store.get<ShortcutBindings>(KEY_SHORTCUTS);
-    return sanitizeShortcutBindings(v);
-  } catch {
-    return sanitizeShortcutBindings(null);
-  }
 }
 
 /** 写入快捷键绑定 */

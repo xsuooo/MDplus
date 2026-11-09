@@ -401,12 +401,6 @@ summary {
   background: var(--bg-active);
 }
 
-.theme-icon-system {
-  display: inline-flex;
-  position: relative;
-  color: inherit;
-}
-
 /* ---------- 标签页栏 ---------- */
 .tabbar {
   height: var(--tabbar-h);
@@ -1665,9 +1659,6 @@ summary {
     opacity var(--motion-fast) var(--ease-out),
     background var(--motion-fast) var(--ease-out),
     color var(--motion-fast) var(--ease-out);
-}
-.recent-menu-item:hover .recent-menu-remove {
-  opacity: 1;
 }
 .recent-menu-remove:hover {
   background: var(--bg-active);
