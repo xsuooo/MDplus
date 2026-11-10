@@ -1475,7 +1475,8 @@ summary {
   outline: none;
   background: transparent;
   font-family: var(--font-code);
-  font-variant-ligatures: normal;
+  /* Long Base64 solidus runs otherwise block font layout for seconds. */
+  font-variant-ligatures: none;
   font-size: var(--source-size);
   line-height: var(--code-leading);
   padding: 22px clamp(18px, 5vw, 40px) 44px;

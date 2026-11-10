@@ -1,11 +1,12 @@
 import { createRoot } from 'react-dom/client';
-import { createNativeMocks } from './nativeMocks';
+import { createNativeMocks, decodeFixtureBase64, encodeFixtureBytes } from './nativeMocks';
 import { editorViewCtx } from '@milkdown/kit/core';
 import { TextSelection, NodeSelection } from '@milkdown/prose/state';
 import { undoDepth } from '@milkdown/prose/history';
 import { createEditor, getCurrentState, setMarkdown } from '../../src/lib/editor';
 import App from '../../src/App';
 import { toRendered, toSource } from '../../src/lib/editorPosition';
+import { sourceTextLayout } from '../../src/lib/sourcePosition';
 import '../../src/styles/global.css';
 
 export const continuityCases = [
@@ -28,6 +29,7 @@ export const continuityCases = [
   'mode-formatted-blocks',
   'mode-input-isolation',
   'mode-range-budget',
+  'mode-source-data-uri',
   'zoom-live-view',
   'zoom-mode-switch',
 ] as const;
@@ -37,6 +39,26 @@ export const longDocument = Array.from(
   (_, i) =>
     `## Section ${i}\n\n段落 ${i} 中文 Mixed English **bold** and \`code\`. ${'Long paragraph content. '.repeat(8)}\n`,
 ).join('\n');
+
+function sourceImageUri(): string {
+  const image = decodeFixtureBase64('UklGRiQAAABXRUJQVlA4IBgAAAAwAQCdASoIAAgAAUAmJaQAA3AA/vz0AAA=');
+  const payload = new Uint8Array(116000);
+  let random = 20261110;
+  for (let index = 0; index < payload.length - 10536; index++) {
+    random = (Math.imul(random, 1664525) + 1013904223) >>> 0;
+    payload[index] = random >>> 24;
+  }
+  // Valid synthetic WebP with ignored RIFF data; no user image or large checked-in fixture.
+  payload.fill(255, payload.length - 10536);
+  const bytes = new Uint8Array(image.length + 8 + payload.length);
+  bytes.set(image);
+  bytes.set([74, 85, 78, 75], image.length);
+  const header = new DataView(bytes.buffer);
+  header.setUint32(4, bytes.length - 8, true);
+  header.setUint32(image.length + 4, payload.length, true);
+  bytes.set(payload, image.length + 8);
+  return 'data:image/webp;base64,' + encodeFixtureBytes(bytes);
+}
 
 function check(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
@@ -61,6 +83,75 @@ function input(field: HTMLTextAreaElement, text: string) {
 export async function runContinuityRegression(testCase: ContinuityCase): Promise<string> {
   createNativeMocks().install();
   if (testCase.startsWith('zoom-')) localStorage.setItem('mdplus-editor-zoom', '100');
+  if (testCase === 'mode-source-data-uri') {
+    const image = sourceImageUri();
+    const markdown = `# Source layout\n\n![one](${image}) ![two](${image})\n\nKeep **selected marker** here.\n`;
+    const host = document.createElement('div');
+    host.className = 'milkdown-container';
+    host.style.cssText = 'width:960px;height:420px;overflow:auto';
+    const input = document.createElement('textarea');
+    input.className = 'source-textarea';
+    input.style.cssText = 'width:960px;height:420px;display:none';
+    input.value = markdown;
+    document.body.append(host, input);
+    const editor = createEditor(host, markdown, {
+      onUpdate: () => {},
+      resolveImageIdentity: (url) => url,
+      resolveImageReference: (url) => url,
+    });
+    await editor.create();
+    try {
+      await document.fonts.ready;
+      await until(() => {
+        const images = [...host.querySelectorAll<HTMLImageElement>('.md-image-node img')];
+        return (
+          images.length === 2 && images.every((image) => image.complete && image.naturalWidth > 0)
+        );
+      });
+      const view = editor.action((ctx) => ctx.get(editorViewCtx));
+      const original = view.state.doc;
+      let at = -1;
+      original.descendants((node, position) => {
+        if (node.isText && node.text?.includes('selected marker'))
+          at = position + node.text.indexOf('selected marker');
+      });
+      check(at >= 0, 'Long source fixture lost its selected text');
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(original, at + 15, at)));
+      const start = performance.now();
+      input.style.display = '';
+      toSource(editor, markdown, input);
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+      const elapsedMs = performance.now() - start;
+      check(
+        getComputedStyle(input).fontVariantLigatures === 'none',
+        'Source ligatures remain enabled for long embedded-image data',
+      );
+      check(
+        sourceTextLayout(input).properties['font-variant-ligatures'] === 'none',
+        'Source measurement does not capture the disabled ligatures',
+      );
+      check(input.value === markdown, 'Source switching changed embedded image bytes');
+      check(
+        input.value.slice(input.selectionStart, input.selectionEnd) === 'selected marker' &&
+          input.selectionDirection === 'backward',
+        'Long source switching lost selected text or its direction',
+      );
+      toRendered(editor, markdown, input);
+      check(
+        view.state.doc === original &&
+          view.state.doc.textBetween(view.state.selection.from, view.state.selection.to) ===
+            'selected marker' &&
+          view.state.selection.anchor > view.state.selection.head,
+        'Long source round trip changed the document or selection',
+      );
+      return JSON.stringify({ case: testCase, characters: markdown.length, elapsedMs });
+    } finally {
+      await editor.destroy();
+      host.remove();
+      input.remove();
+    }
+  }
   if (testCase === 'mode-range-budget') {
     const host = document.createElement('div');
     host.className = 'milkdown-container';

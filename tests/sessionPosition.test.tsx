@@ -227,6 +227,7 @@ describe('serialized editor positions', () => {
     Object.defineProperty(field, 'clientWidth', { configurable: true, value: 480 });
     field.style.fontSize = '16px';
     field.style.lineHeight = '20px';
+    field.style.fontVariantLigatures = 'none';
     field.setSelectionRange(7, 22, 'backward');
     field.scrollTop = 120;
     field.scrollLeft = 5;
@@ -241,12 +242,14 @@ describe('serialized editor positions', () => {
         const mirror = range.startContainer.parentElement!;
         expect(mirror.style.width).toBe('480px');
         expect(mirror.style.fontSize).toBe('16px');
+        expect(mirror.style.fontVariantLigatures).toBe('none');
         return new DOMRect(0, Math.floor(range.startOffset / 40) * 20, 10, 20);
       };
       return range;
     });
     field.value = 'Background replacement';
     field.style.fontSize = '32px';
+    field.style.fontVariantLigatures = 'normal';
     field.scrollTop = 0;
     field.setSelectionRange(0, 0);
     Object.defineProperty(field, 'clientWidth', { configurable: true, value: 0 });
