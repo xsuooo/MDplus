@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client';
-import { mockIPC, mockWindows } from '@tauri-apps/api/mocks';
+import { createNativeMocks } from './nativeMocks';
 import { emit } from '@tauri-apps/api/event';
 import App from '../../src/App';
 import { getImageUrls } from '../../src/lib/imagePaths';
@@ -51,6 +51,8 @@ export const safetyCases = [
   'disk-during-read-same-mtime',
   'external-change-same-mtime-background',
   'external-change-same-mtime-decline',
+  'external-decline-close-tab',
+  'external-decline-close-window',
   'same-file-path-alias',
   'same-file-relative-path',
   'same-file-extended-path',
@@ -96,8 +98,8 @@ function check(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
 }
 
-async function until(condition: () => unknown, message: string) {
-  const deadline = performance.now() + 7000;
+async function until(condition: () => unknown, message: string, timeout = 7000) {
+  const deadline = performance.now() + timeout;
   while (!condition()) {
     check(performance.now() < deadline, `Timed out: ${message}`);
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -291,11 +293,29 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
   let initialReads = 0;
   let failWrite = testCase === 'source-images-save-failure';
 
-  mockWindows('main');
-  Object.assign(globalThis, { isTauri: true });
-  mockIPC(
-    async (command, payload) => {
-      const args = (payload ?? {}) as Record<string, unknown>;
+  const native = createNativeMocks({
+    settings: store,
+    binaries,
+    // Only this fixture boundary translates legacy byte containers; production
+    // invokes are validated Base64 and all original IO gates still run below.
+    legacyImagePayloads: true,
+    beforeLoadSettings: async () => {
+      storeLoads += 1;
+      if (settingsStartupCase && storeLoads === 1)
+        throw new Error('transient initial settings failure');
+      if (failSettingsRead) throw new Error('settings read unavailable');
+      if (holdSettingsRead) await settingsReadGate.promise;
+      themeOperations.push('get');
+    },
+    beforeSaveSettings: (values, previous) => {
+      for (const [key, value] of Object.entries(values)) {
+        if (JSON.stringify(value) === JSON.stringify(previous.values[key])) continue;
+        settingsWrites.push(key);
+        if (key === 'theme-mode') themeOperations.push('set');
+      }
+      if (failSettingsSave) throw new Error('settings save unavailable');
+    },
+    fallback: async (command, args) => {
       switch (command) {
         case 'list_recovery_snapshots':
           return [];
@@ -321,28 +341,6 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
             : ['C:/notes/a.md'];
         case 'take_pending_open_files':
           return [];
-        case 'load_settings':
-          storeLoads += 1;
-          if (settingsStartupCase && storeLoads === 1)
-            throw new Error('transient initial settings failure');
-          return 1;
-        case 'plugin:store|get':
-          if (failSettingsRead) throw new Error('settings read unavailable');
-          if (holdSettingsRead && args.key === 'theme-mode') {
-            const old = store.get('theme-mode');
-            await settingsReadGate.promise;
-            return [old, true];
-          }
-          if (args.key === 'theme-mode') themeOperations.push('get');
-          return [store.get(String(args.key)), store.has(String(args.key))];
-        case 'plugin:store|set':
-          settingsWrites.push(String(args.key));
-          if (args.key === 'theme-mode') themeOperations.push('set');
-          store.set(String(args.key), args.value);
-          return;
-        case 'plugin:store|save':
-          if (failSettingsSave) throw new Error('settings save unavailable');
-          return;
         case 'plugin:window|is_minimized':
           if (failWindowRead) {
             failWindowRead = false;
@@ -538,13 +536,15 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
           throw new Error(`Unmocked IPC: ${command}`);
       }
     },
-    { shouldMockEvents: true },
-  );
+  });
+  native.install();
 
   if (themeStartupCase) {
-    await getThemeMode(); // A ready native store exposes layout/passive effect ordering.
-    themeOperations.length = 0;
+    // The new store reads one native snapshot, then get() is local. Keep this
+    // successful baseline-read evidence instead of expecting another get IPC.
+    await getThemeMode();
   }
+  const themeWritesBeforeMount = settingsWrites.filter((key) => key === 'theme-mode').length;
   const host = document.createElement('div');
   document.body.append(host);
   let root = createRoot(host);
@@ -555,11 +555,17 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
   if (themeStartupCase) {
     check(
       themeOperations[0] === 'get',
-      'Initial layout overwrote the saved theme before reading it',
+      'Initial layout did not retain the successful settings snapshot read',
     );
     await until(
       () => document.documentElement.dataset.theme === 'dark' && store.get('theme-mode') === 'dark',
       'saved dark theme',
+    );
+    // Whole-map metadata saves may include the theme key without changing it.
+    // Only actual value changes count as theme writes at this native boundary.
+    check(
+      settingsWrites.filter((key) => key === 'theme-mode').length === themeWritesBeforeMount,
+      'Mounting the application changed the stored theme without user intent',
     );
     click('button[aria-label="切换主题,当前为深色"]');
     await until(() => store.get('theme-mode') === 'system', 'explicit system theme persisted');
@@ -613,17 +619,32 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
   if (testCase === 'settings-late-read-user-change') {
     click('button[aria-label^="切换主题"]');
     await until(
-      () => store.get('theme-mode') === 'dark',
-      'explicit preference while startup read is pending',
+      () => document.documentElement.dataset.theme === 'dark',
+      'explicit UI preference while the native settings snapshot is pending',
+    );
+    // Unlike the former per-key Store get, atomic settings cannot safely write
+    // before their complete load establishes a CAS baseline. Intent is visible
+    // immediately, but disk must remain unchanged until this read is released.
+    check(
+      store.get('theme-mode') === 'system',
+      'Preference was written before its baseline was read',
+    );
+    check(
+      !native.calls.some((call) => call.command === 'save_settings'),
+      'A save bypassed the pending settings load',
     );
     holdSettingsRead = false;
     settingsReadGate.resolve();
+    await until(
+      () => document.documentElement.dataset.theme === 'dark' && store.get('theme-mode') === 'dark',
+      'explicit preference persisted after the native baseline became available',
+    );
     await new Promise<void>((resolve) => setTimeout(resolve, 80));
     check(
       document.documentElement.dataset.theme === 'dark' && store.get('theme-mode') === 'dark',
       'Late startup read replaced the user choice',
     );
-    return `${testCase}: explicit preference wins over a late startup result`;
+    return `${testCase}: explicit preference wins over a late startup result without writing an unread baseline`;
   }
   if (
     testCase === 'close-cleanup-failure' ||
@@ -695,56 +716,102 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     )!;
     const label = themeButton.getAttribute('aria-label')!;
     const nextMode = label.includes('浅色') ? 'dark' : label.includes('深色') ? 'system' : 'light';
-    const themeWrites = settingsWrites.filter((key) => key === 'theme-mode').length;
+    // The UI fallback can differ from the already-retried disk snapshot. A user
+    // choice may therefore equal the stored value: verify its explicit save
+    // request, not a value-difference log that intentionally excludes metadata saves.
+    const settingsSaves = () => native.calls.filter((call) => call.command === 'save_settings');
+    const themeWrites = settingsSaves().length;
     themeButton.click();
     await until(
-      () =>
-        settingsWrites.filter((key) => key === 'theme-mode').length > themeWrites &&
-        store.get('theme-mode') === nextMode,
+      () => settingsSaves().length > themeWrites && store.get('theme-mode') === nextMode,
       'explicit theme change persisted after failure',
+    );
+    check(
+      settingsSaves()
+        .slice(themeWrites)
+        .some((call) => (call.args.values as Record<string, unknown>)['theme-mode'] === nextMode),
+      'Explicit theme save omitted the user-selected value',
     );
     const outlineButton = document.querySelector<HTMLButtonElement>(
       'button[aria-label="打开目录"]',
     )!;
     const nextOutline = outlineButton.getAttribute('aria-pressed') !== 'true';
-    const outlineWrites = settingsWrites.filter((key) => key === 'outline-open').length;
+    const outlineWrites = settingsSaves().length;
     outlineButton.click();
     await until(
-      () =>
-        settingsWrites.filter((key) => key === 'outline-open').length > outlineWrites &&
-        store.get('outline-open') === nextOutline,
+      () => settingsSaves().length > outlineWrites && store.get('outline-open') === nextOutline,
       'explicit outline change persisted after failure',
+    );
+    check(
+      settingsSaves()
+        .slice(outlineWrites)
+        .some(
+          (call) => (call.args.values as Record<string, unknown>)['outline-open'] === nextOutline,
+        ),
+      'Explicit outline save omitted the user-selected value',
     );
     check(unexpected.length === 0, 'Unexpected IPC after settings recovery');
     return `${testCase}: retry preserves existing preferences and permits explicit updates`;
   }
 
   if (windowRestoreCase) {
-    await until(() => restoredBounds.length === 1, 'initial window placement');
+    await until(
+      () => restoredBounds.length === 1 && native.geometry.visible,
+      'initial visible window placement',
+    );
     check(
       JSON.stringify(bounds) === JSON.stringify(savedBounds),
       `Physical bounds scaled at ${scaleFactor} DPI: ${JSON.stringify(bounds)}`,
     );
-    click('button[aria-label="关闭窗口"]');
-    await until(() => destroyed === 1, 'window state persisted');
+    const { persistWindowState } = await import('../../src/services/windowState');
+    await persistWindowState();
     check(
       JSON.stringify(store.get('window-state')) === JSON.stringify(savedBounds),
       'Window bounds drifted on persistence',
     );
+    // A page remount belongs to the existing native window, not a new window.
+    // Move/resize it without updating the saved baseline to catch stale restores.
+    const liveBounds = {
+      width: savedBounds.width + 60,
+      height: savedBounds.height + 40,
+      x: savedBounds.x + 120,
+      y: savedBounds.y + 80,
+      maximized: false,
+    };
+    Object.assign(bounds, liveBounds);
+    const beforeRemount = native.calls.length;
     root.unmount();
     root = createRoot(host);
     root.render(<App />);
     await until(
-      () =>
-        restoredBounds.length === 2 && document.querySelector('.editor-tab.active .ProseMirror'),
-      'second restore',
+      () => document.querySelector('.editor-tab.active .ProseMirror'),
+      'visible window page remount',
+    );
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    check(
+      restoredBounds.length === 1 && JSON.stringify(bounds) === JSON.stringify(liveBounds),
+      'Remounting a visible window replaced its current physical bounds with saved bounds',
     );
     check(
-      JSON.stringify(bounds) === JSON.stringify(savedBounds),
-      'Repeated restore scaled the saved physical bounds again',
+      !native.calls
+        .slice(beforeRemount)
+        .some((call) =>
+          [
+            'plugin:window|set_size',
+            'plugin:window|set_position',
+            'plugin:window|maximize',
+            'plugin:window|show',
+          ].includes(call.command),
+        ),
+      'Remounting a visible window repeated native restoration or reveal',
+    );
+    await persistWindowState();
+    check(
+      JSON.stringify(store.get('window-state')) === JSON.stringify(liveBounds),
+      `Live physical bounds scaled on persistence at ${scaleFactor} DPI`,
     );
     check(unexpected.length === 0, 'Unexpected IPC during window restoration');
-    return `${testCase}: physical dimensions and position survive repeated restore at ${scaleFactor} DPI`;
+    return `${testCase}: physical bounds persist at ${scaleFactor} DPI; page remount retains the moved/resized visible window without another restore`;
   }
 
   if (testCase === 'edit-after-final-close-confirm') {
@@ -892,6 +959,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     await until(
       () => document.querySelector('[role="tab"] .tab-dot')?.getAttribute('data-external') === '1',
       'background revision marker',
+      35000,
     );
     check(
       confirms === 0 && text().includes('other document'),
@@ -904,6 +972,66 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     );
     check(!dirty() && writes.length === 0, 'Background reload altered the save baseline');
     return `${testCase}: same-mtime changes are deferred until the affected tab is active`;
+  }
+
+  if (testCase === 'external-decline-close-tab' || testCase === 'external-decline-close-window') {
+    const windowClose = testCase === 'external-decline-close-window';
+    reloadAnswer = 'No';
+    const external = 'external revision must remain on disk\n';
+    files.set('C:/notes/a.md', { content: external, mtime: 100 });
+    await until(
+      () => confirms === 1 && document.querySelector('.status-save-paused'),
+      'declined external version retains the local baseline',
+    );
+    check(
+      !dirty() && text().includes('original'),
+      'H1 fixture accidentally relied on a new keystroke',
+    );
+    if (windowClose) click('button[aria-label="关闭窗口"]');
+    else close();
+    await until(
+      () =>
+        document.querySelector('#close-document-title') ||
+        destroyed > 0 ||
+        !document.querySelector('[role="tab"]'),
+      'immediate close of a retained disk-diverged buffer',
+    );
+    check(
+      document.querySelector('#close-document-title') &&
+        document.querySelector('[role="tab"]') &&
+        destroyed === 0,
+      'H1: direct close silently discarded the retained local version',
+    );
+    check(
+      text().includes('original') &&
+        files.get('C:/notes/a.md')!.content === external &&
+        writes.length === 0,
+      'H1: close confirmation changed either local or external bytes',
+    );
+    const cancel = [...document.querySelectorAll<HTMLButtonElement>('.modal-actions button')].find(
+      (button) => button.textContent?.trim() === '取消',
+    );
+    check(cancel, 'Retained local close has no cancel action');
+    cancel.click();
+    await until(
+      () => !document.querySelector('.presence:not([data-exiting]) #close-document-title'),
+      'close cancellation',
+    );
+    await until(
+      () => recoverySnapshots.some((snapshot) => snapshot.markdown === 'original\n'),
+      'retained local version protected in recovery',
+    );
+    check(
+      document.querySelectorAll('[role="tab"]').length === 1 &&
+        destroyed === 0 &&
+        text().includes('original'),
+      'H1: canceling direct close did not retain the original local buffer',
+    );
+    check(
+      files.get('C:/notes/a.md')!.content === external && writes.length === 0,
+      'H1: recovery overwrote the external document',
+    );
+    return `${testCase}: unchanged-but-retained buffer requires confirmation, survives cancel and keeps independent recovery`;
   }
 
   if (testCase === 'external-change-same-mtime-decline') {
@@ -1827,7 +1955,18 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     if (holdMtime) await until(() => awaitingMtime, 'blocked reload metadata');
     if (testCase === 'close-during-read') {
       close();
-      await until(() => !document.querySelector('[role="tab"]'), 'tab closed');
+      // H1 now protects this old local version while the replacement is pending.
+      // Confirm an explicit discard, then keep the original no-resurrection check.
+      await until(
+        () => document.querySelector('#close-document-title'),
+        'retained version close confirmation',
+      );
+      const discard = [
+        ...document.querySelectorAll<HTMLButtonElement>('.modal-actions button'),
+      ].find((button) => button.textContent?.trim() === '放弃');
+      check(discard, 'Pending reload close skipped the retained-version choice');
+      discard.click();
+      await until(() => !document.querySelector('[role="tab"]'), 'tab explicitly closed');
       readGate.resolve();
       await until(() => completedRead, 'released reload');
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));

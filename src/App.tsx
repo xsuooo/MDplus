@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CloseConfirmModal } from './components/CloseConfirmModal';
 import { EditorTab } from './components/EditorTab';
 import { IconBrand } from './components/icons';
@@ -9,6 +9,8 @@ import { RecentMenu } from './components/RecentMenu';
 import { RecoveryModal } from './components/RecoveryModal';
 import { SearchBar } from './components/SearchBar';
 import { SettingsNotice } from './components/SettingsNotice';
+import { SessionRestoreNotice } from './components/SessionRestoreNotice';
+import { ImageDropNotice } from './components/ImageDropNotice';
 import { ShortcutModal } from './components/ShortcutModal';
 import { SourceEditor } from './components/SourceEditor';
 import { StatusBar } from './components/StatusBar';
@@ -21,12 +23,19 @@ import { useDocumentSave } from './hooks/useDocumentSave';
 import { useDocumentSession } from './hooks/useDocumentSession';
 import { useEditorView } from './hooks/useEditorView';
 import { useExternalChanges } from './hooks/useExternalChanges';
+import { useImageDrop } from './hooks/useImageDrop';
 import { usePreferences } from './hooks/usePreferences';
 import { useRecovery } from './hooks/useRecovery';
 import { useWindowLifecycle } from './hooks/useWindowLifecycle';
 import type { MediaPreview } from './lib/media';
+import type { ImageDropResult } from './lib/imageDrop';
+import type { SourceEditorApi } from './lib/sourceEditorApi';
+import { showMessage } from './lib/dialog';
+import { errorMessage } from './lib/errors';
 import { readOutlineWidth, writeOutlineWidth } from './lib/outlineWidth';
 import { pathKey } from './lib/pathIdentity';
+import { displayPath } from './lib/pathDisplay';
+import { resolveDocumentLink } from './lib/documentLinks';
 import { Presence } from './lib/presence';
 import {
   createShortcutIndex,
@@ -37,14 +46,44 @@ import {
 import { startupView } from './lib/startup';
 import { cycleTabIndex, type TabWheelDirection } from './lib/tabWheel';
 import './styles/global.css';
+import './styles/workflow.css';
 
 export default function App() {
   const session = useDocumentSession();
+  const sourceApis = useRef<Record<string, SourceEditorApi>>({});
+  const imageDropHandler = useRef<
+    | ((paths: readonly string[], position: { x: number; y: number }) => Promise<ImageDropResult>)
+    | null
+  >(null);
+  const [imageDropResult, setImageDropResult] = useState<ImageDropResult | null>(null);
+  const registerSourceApi = useCallback((id: string, api: SourceEditorApi | null) => {
+    if (api) sourceApis.current[id] = api;
+    else delete sourceApis.current[id];
+  }, []);
+  const getSourceApi = useCallback((id: string) => sourceApis.current[id] ?? null, []);
+  const routeImageDrop = useCallback(
+    async (paths: string[], position: { x: number; y: number }) => {
+      const handle = imageDropHandler.current;
+      if (!handle) return;
+      setImageDropResult(null);
+      try {
+        setImageDropResult(await handle(paths, position));
+      } catch (error) {
+        setImageDropResult({
+          attempted: paths.length,
+          inserted: 0,
+          failures: paths.map((path) => ({ path, message: errorMessage(error) })),
+        });
+      }
+    },
+    [],
+  );
   const {
     themeMode,
     outlineOpen,
     shortcuts,
     settingsError,
+    preferencesReady,
     retrySettings,
     changeThemeMode,
     changeOutlineOpen,
@@ -59,7 +98,6 @@ export default function App() {
     setSearchOpen,
     activeTab,
     editorRegistry,
-    tabMirror,
     blockedExternalMtime,
     sourceRegistry,
     sourceRewrites,
@@ -76,18 +114,42 @@ export default function App() {
   const [recentMenuOpen, setRecentMenuOpen] = useState(false);
   // 快捷键表先用默认值渲染,启动后由已保存的绑定覆盖,避免首帧闪断
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const { persistWindowState } = useWindowLifecycle();
   const {
     recentFiles,
+    recentFilesReady,
     setRecentFiles,
     startupResolved,
     openFileFromPath,
     handleOpen,
     handleRemoveRecent,
     createDocument,
-  } = useDocumentFiles(session);
+    sessionRestoreEnabled,
+    changeSessionRestore,
+    sessionFailures,
+    retrySessionFailures,
+    sessionRestoreBusy,
+    sessionController,
+  } = useDocumentFiles(session, { onImageDrop: routeImageDrop });
+  const handleDocumentLink = useCallback(
+    async (tabId: string, href: string) => {
+      const tab = session.tabsRef.current.find((candidate) => candidate.id === tabId);
+      if (!tab) return;
+      try {
+        const link = await resolveDocumentLink(href, tab.path);
+        const opened = await openFileFromPath(link.path);
+        if (opened && link.hasFragment)
+          await showMessage('已打开文稿，未定位到标题；当前暂不支持链接中的标题锚点。');
+      } catch (error) {
+        await showMessage(errorMessage(error), 'error');
+      }
+    },
+    [session.tabsRef, openFileFromPath],
+  );
+  const { persistWindowState, windowReady } = useWindowLifecycle(
+    preferencesReady && recentFilesReady,
+  );
   const recovery = useRecovery(session);
-  useExternalChanges(session);
+  useExternalChanges(session, recovery);
   const { doSave, scheduleAutoSave, handleSave, handleSaveAs, savingId } = useDocumentSave(
     session,
     recovery,
@@ -95,13 +157,14 @@ export default function App() {
   );
   const {
     editorAreaRef,
-    editorZoom,
-    setEditorZoom,
     bodyFont,
     codeFont,
+    editorWidth,
     changeBodyFont,
     changeCodeFont,
+    changeEditorWidth,
     handleTabUpdate,
+    handleEditorActivity,
     registerEditor,
     handleImagePaste,
     handleUndo,
@@ -109,7 +172,34 @@ export default function App() {
     toggleSourceMode,
     handleSourceChange,
     jumpToOutline,
-  } = useEditorView(session, recovery, scheduleAutoSave, changeSourcePreference);
+    outlineItems,
+    outlineStatus,
+  } = useEditorView(session, recovery, scheduleAutoSave, changeSourcePreference, outlineOpen);
+  const {
+    handle: dropImages,
+    pick: pickImages,
+    picking: pickingImage,
+    progress: imageDropProgress,
+  } = useImageDrop(session, getSourceApi);
+  imageDropHandler.current = dropImages;
+  const undoActiveView = useCallback(() => {
+    const current = session.currentView.current;
+    if (current.sourceMode && current.activeId) sourceApis.current[current.activeId]?.undo();
+    else handleUndo();
+  }, [session.currentView, handleUndo]);
+  const redoActiveView = useCallback(() => {
+    const current = session.currentView.current;
+    if (current.sourceMode && current.activeId) sourceApis.current[current.activeId]?.redo();
+    else handleRedo();
+  }, [session.currentView, handleRedo]);
+  const handleSessionRestoreChange = useCallback(
+    (enabled: boolean) => {
+      void changeSessionRestore(enabled).catch((error) => {
+        void showMessage(`无法保存会话恢复设置：${errorMessage(error)}`, 'error');
+      });
+    },
+    [changeSessionRestore],
+  );
   const { exporting, handleExportHTML, handleExportPDF } = useDocumentExport(
     session,
     recovery,
@@ -118,7 +208,7 @@ export default function App() {
   );
   const onClosing = useCallback(() => setMediaPreview(null), []);
   const { pendingCloseTab, closeBusy, closeTabRequest, confirmClose, handleWindowClose } =
-    useDocumentClose(session, recovery, doSave, persistWindowState, onClosing);
+    useDocumentClose(session, recovery, doSave, persistWindowState, onClosing, sessionController);
   const {
     refreshRecovery,
     handleRestore,
@@ -241,8 +331,8 @@ export default function App() {
           (target.isContentEditable || target.tagName === 'TEXTAREA' || target.tagName === 'INPUT');
         if (inEditable) return;
         e.preventDefault();
-        if (key === 'y' || e.shiftKey) handleRedo();
-        else handleUndo();
+        if (key === 'y' || e.shiftKey) redoActiveView();
+        else undoActiveView();
         return;
       }
 
@@ -257,8 +347,8 @@ export default function App() {
     pendingCloseTab,
     recoveryOpen,
     mediaPreview,
-    handleUndo,
-    handleRedo,
+    undoActiveView,
+    redoActiveView,
     runShortcut,
   ]);
 
@@ -280,17 +370,32 @@ export default function App() {
           : activeTab.dirty
             ? 'dirty'
             : 'saved';
-  const view = startupView(startupResolved, tabs.length);
+  const view = startupView(startupResolved && (tabs.length > 0 || recentFilesReady), tabs.length);
 
   return (
-    <div className="app" data-body-font={bodyFont}>
+    <div className="app" data-body-font={bodyFont} data-starting={!windowReady}>
       <SettingsNotice error={settingsError} onRetry={retrySettings} />
+      <SessionRestoreNotice
+        failures={sessionFailures}
+        busy={sessionRestoreBusy}
+        onRetry={() => void retrySessionFailures()}
+      />
       <Toolbar
+        bindings={shortcuts}
         exporting={exporting}
         onOpen={() => void handleOpen()}
         onNew={() => setNewModalOpen(true)}
         onSave={() => void handleSave()}
         onSaveAs={() => void handleSaveAs()}
+        onInsertImage={() => {
+          setImageDropResult(null);
+          void pickImages()
+            .then((result) => {
+              if (result) setImageDropResult(result);
+            })
+            .catch((error) => showMessage(`无法插入本地图片：${errorMessage(error)}`, 'error'));
+        }}
+        pickingImage={pickingImage || imageDropProgress !== null}
         onExportHTML={() => void handleExportHTML()}
         onExportPDF={() => void handleExportPDF()}
         hasActiveTab={Boolean(activeTab)}
@@ -309,12 +414,19 @@ export default function App() {
       />
 
       <TabBar
+        bindings={shortcuts}
         tabs={tabs}
         activeId={activeId}
         onSelect={selectTab}
         onClose={closeTabRequest}
         onNew={() => setNewModalOpen(true)}
         onWheelSwitch={cycleTab}
+      />
+
+      <ImageDropNotice
+        result={imageDropResult}
+        progress={imageDropProgress}
+        onDismiss={() => setImageDropResult(null)}
       />
 
       <div className="app-body">
@@ -331,15 +443,16 @@ export default function App() {
           onToggle={() => changeOutlineOpen((v) => !v)}
           width={outlineWidth}
           onWidthChange={setOutlineWidth}
-          items={activeTab ? (tabMirror.current[activeId ?? '']?.outline ?? []) : []}
+          items={activeTab ? outlineItems : []}
+          status={outlineStatus}
           onJump={jumpToOutline}
         />
 
         <main
           className="editor-area"
           data-source-mode={sourceMode}
+          data-editor-width={editorWidth}
           ref={editorAreaRef}
-          style={{ '--editor-zoom': editorZoom / 100 } as CSSProperties}
         >
           {view === 'loading' ? (
             <div className="startup-placeholder" aria-hidden="true" />
@@ -366,9 +479,14 @@ export default function App() {
                     <button
                       key={f.path}
                       className="welcome-recent-item"
+                      title={displayPath(f.path)}
+                      aria-label={`${f.name}，${displayPath(f.path)}`}
                       onClick={() => void openFileFromPath(f.path)}
                     >
-                      {f.name}
+                      <span>{f.name}</span>
+                      <span className="welcome-recent-path">
+                        {displayPath(f.path).replace(/[^\\/]+$/, '')}
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -379,25 +497,30 @@ export default function App() {
             tabs.map((tab) => (
               <EditorTab
                 key={tab.id}
-                tab={tab}
+                tabId={tab.id}
+                initialContent={tab.initialContent}
                 active={tab.id === activeId}
-                sourceMode={sourceMode}
+                sourceMode={tab.id === activeId && sourceMode}
                 onUpdate={handleTabUpdate}
+                onActivity={handleEditorActivity}
                 onRegister={registerEditor}
                 onImagePaste={handleImagePaste}
                 onMediaPreview={setMediaPreview}
+                onDocumentLink={handleDocumentLink}
               />
             ))
           )}
 
           <Presence key={activeId} present={Boolean(activeTab) && searchOpen}>
             <SearchBar
+              documentId={activeId ?? undefined}
               editor={!sourceMode && activeId ? (editorRegistry.current[activeId] ?? null) : null}
               source={
                 sourceMode && activeTab
                   ? {
                       input: sourceRegistry.current[activeTab.id] ?? null,
                       text: resolveContent(activeTab),
+                      api: getSourceApi(activeTab.id),
                     }
                   : undefined
               }
@@ -412,8 +535,9 @@ export default function App() {
               active={tab.id === activeId && sourceMode}
               value={resolveContent(tab)}
               onRegister={registerSource}
+              onApi={registerSourceApi}
               imageRewrites={sourceRewrites.current[tab.id]}
-              onChange={(text) => handleSourceChange(tab.id, text)}
+              onChange={handleSourceChange}
               onClose={toggleSourceMode}
               onImagePaste={handleImagePaste}
             />
@@ -422,17 +546,19 @@ export default function App() {
       </div>
 
       <StatusBar
+        bindings={shortcuts}
         tab={activeTab}
         themeMode={themeMode}
         onThemeMode={changeThemeMode}
         sourceMode={sourceMode}
         saveState={activeSaveState}
-        zoom={editorZoom}
-        onResetZoom={() => setEditorZoom(100)}
+        editorAreaRef={editorAreaRef}
         bodyFont={bodyFont}
         codeFont={codeFont}
         onBodyFont={changeBodyFont}
         onCodeFont={changeCodeFont}
+        editorWidth={editorWidth}
+        onEditorWidth={changeEditorWidth}
         recoveryStatus={activeId ? recoveryStates[activeId] : undefined}
         onRecovery={() => {
           setRecoveryOpen(true);
@@ -487,6 +613,11 @@ export default function App() {
             void openFileFromPath(path);
           }}
           onRemove={(path) => void handleRemoveRecent(path)}
+          restoreSessionEnabled={sessionRestoreEnabled}
+          onRestoreSessionChange={handleSessionRestoreChange}
+          sessionRestoreBusy={sessionRestoreBusy}
+          sessionFailureCount={sessionFailures.length}
+          onRetrySession={() => void retrySessionFailures()}
           onClose={() => setRecentMenuOpen(false)}
         />
       </Presence>

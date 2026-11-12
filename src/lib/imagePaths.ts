@@ -8,7 +8,7 @@ import type { Token } from 'micromark-util-types';
 
 // Keep the document-directory dependency policy identical for cache reads and SaveAs.
 export function isRelativeImageUrl(url: string): boolean {
-  return !/^(?:mdplus-image:|https?:|data:|file:|[a-zA-Z]:[\\/]|\/|\/\/)/.test(url);
+  return !/^(?:mdplus-image:|https?:|data:|file:|[a-zA-Z]:[\\/]|\/|\/\/)/i.test(url);
 }
 
 export interface PendingImageReference {

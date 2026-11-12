@@ -21,13 +21,16 @@
     "dialog:allow-open",
     "dialog:allow-save",
     "dialog:allow-message",
-    "store:allow-get",
-    "store:allow-set",
-    "store:allow-save",
     "allow-read-document",
     "allow-document-revision",
     "allow-write-document",
     "allow-save-image-asset",
+    "allow-commit-image-assets",
+    "allow-discard-image-assets",
+    "allow-stash-image",
+    "allow-import-dropped-image",
+    "allow-read-stashed-image",
+    "allow-discard-stashed-images",
     "allow-export-html",
     "allow-read-image-file",
     "allow-take-startup-files",
@@ -37,6 +40,7 @@
     "allow-list-recovery-snapshots",
     "allow-read-recovery-snapshot",
     "allow-delete-recovery-snapshot",
-    "allow-load-settings"
+    "allow-load-settings",
+    "allow-save-settings"
   ]
 }

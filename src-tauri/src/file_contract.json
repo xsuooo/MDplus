@@ -36,7 +36,12 @@
     },
     "load_settings": {
       "request": "#/$defs/EmptyRequest",
-      "response": "#/$defs/StoreResource",
+      "response": "#/$defs/SettingsSnapshot",
+      "error": "#/$defs/StringError"
+    },
+    "save_settings": {
+      "request": "#/$defs/SettingsWriteRequest",
+      "response": "#/$defs/SettingsReceipt",
       "error": "#/$defs/StringError"
     },
     "take_startup_files": {
@@ -51,12 +56,12 @@
     },
     "cache_recovery_image": {
       "request": "#/$defs/RecoveryImageRequest",
-      "response": "#/$defs/Void",
+      "response": "#/$defs/RecoveryCleanup",
       "error": "#/$defs/StringError"
     },
     "write_recovery_snapshot": {
       "request": "#/$defs/RecoveryWriteRequest",
-      "response": "#/$defs/Void",
+      "response": "#/$defs/RecoveryCleanup",
       "error": "#/$defs/StringError"
     },
     "list_recovery_snapshots": {
@@ -71,6 +76,36 @@
     },
     "delete_recovery_snapshot": {
       "request": "#/$defs/RecoveryIdRequest",
+      "response": "#/$defs/Void",
+      "error": "#/$defs/StringError"
+    },
+    "commit_image_assets": {
+      "request": "#/$defs/AllocationIdsRequest",
+      "response": "#/$defs/Void",
+      "error": "#/$defs/StringError"
+    },
+    "discard_image_assets": {
+      "request": "#/$defs/AllocationIdsRequest",
+      "response": "#/$defs/Void",
+      "error": "#/$defs/StringError"
+    },
+    "stash_image": {
+      "request": "#/$defs/StashImageRequest",
+      "response": "#/$defs/StashReceipt",
+      "error": "#/$defs/StringError"
+    },
+    "import_dropped_image": {
+      "request": "#/$defs/DroppedImageRequest",
+      "response": "#/$defs/DroppedImageReceipt",
+      "error": "#/$defs/StringError"
+    },
+    "read_stashed_image": {
+      "request": "#/$defs/StashKeyRequest",
+      "response": "#/$defs/StashedImage",
+      "error": "#/$defs/StringError"
+    },
+    "discard_stashed_images": {
+      "request": "#/$defs/StashKeysRequest",
       "response": "#/$defs/Void",
       "error": "#/$defs/StringError"
     }
@@ -98,7 +133,8 @@
           "description": "Validated absolute document target. The native canonical parent resolves relative paths and dot segments; Windows consumers compare case, separators and extended prefixes equivalently."
         },
         "content": {
-          "type": "string"
+          "type": "string",
+          "description": "Decoded lossless text, with no U+0000 (NUL); its UTF-8 byte length also fits textFileBytes so it can be saved and reopened."
         },
         "revision": {
           "type": "string",
@@ -140,7 +176,8 @@
           "minLength": 1
         },
         "content": {
-          "type": "string"
+          "type": "string",
+          "description": "UTF-8 byte length must fit textFileBytes; NUL is rejected before creating staging files or modifying the target."
         },
         "expectedRevision": {
           "type": ["string", "null"],
@@ -175,8 +212,8 @@
     "ImageRequest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["docPath", "filename", "data"],
-      "description": "docPath may be a not-yet-created document in an existing directory. Backend validates basename and supported image bytes, creates only under sibling assets, and allocates the name exclusively. Only AlreadyExists retries.",
+      "required": ["docPath", "filename", "dataBase64"],
+      "description": "Validate basename, supported image and capacity; create only under sibling assets with an opaque allocation token. An identical completed image may be reused without any deletion authority. New allocations must be finalized by commit or discard.",
       "properties": {
         "docPath": {
           "type": "string",
@@ -186,21 +223,18 @@
           "type": "string",
           "minLength": 1
         },
-        "data": {
-          "type": "array",
-          "items": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 255
-          },
-          "maxItems": 67108864
+        "dataBase64": {
+          "type": "string",
+          "contentEncoding": "base64",
+          "maxLength": 89478488,
+          "description": "Canonical padded STANDARD base64. Encoded length is checked before allocation, decoded bytes are separately limited to imageFileBytes and type-validated; JSON numeric arrays are not accepted."
         }
       }
     },
     "ImageReceipt": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["filename", "relativePath", "path"],
+      "required": ["filename", "relativePath", "path", "allocationId"],
       "properties": {
         "filename": {
           "type": "string",
@@ -213,6 +247,10 @@
         "path": {
           "type": "string",
           "minLength": 1
+        },
+        "allocationId": {
+          "type": ["string", "null"],
+          "description": "Opaque process-owned deletion lease for a newly-created image; null for reused existing bytes. Only unchanged document outcomes permit discard; unknown/committed outcomes must commit (retain)."
         }
       }
     },
@@ -275,9 +313,43 @@
     "StringError": {
       "type": "string"
     },
-    "StoreResource": {
-      "type": "integer",
-      "minimum": 0
+    "SettingsSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["values", "revision"],
+      "properties": {
+        "values": {
+          "type": "object"
+        },
+        "revision": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "SettingsWriteRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["values", "expectedRevision"],
+      "description": "Fixed native settings path only. Complete JSON must fit settingsFileBytes; the exact loaded revision is required. No implicit exit save exists.",
+      "properties": {
+        "values": {
+          "type": "object"
+        },
+        "expectedRevision": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "SettingsReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision"],
+      "properties": {
+        "revision": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     },
     "Paths": {
       "type": "array",
@@ -298,7 +370,7 @@
         },
         "content": {
           "type": "string",
-          "description": "UTF-8 bytes must fit config/application.json textFileBytes."
+          "description": "UTF-8 bytes must fit config/application.json htmlExportBytes (512 MiB), independently of the 32 MiB Markdown limit. The same export budget applies to all revision/backup checks."
         }
       }
     },
@@ -321,7 +393,7 @@
     "ImageFile": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["path", "mime", "data"],
+      "required": ["path", "mime", "dataBase64"],
       "properties": {
         "path": {
           "type": "string"
@@ -329,14 +401,11 @@
         "mime": {
           "type": "string"
         },
-        "data": {
-          "type": "array",
-          "items": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 255
-          },
-          "maxItems": 67108864
+        "dataBase64": {
+          "type": "string",
+          "contentEncoding": "base64",
+          "maxLength": 89478488,
+          "description": "Canonical padded STANDARD base64. Encoded length is checked before allocation, decoded bytes are separately limited to imageFileBytes and type-validated; JSON numeric arrays are not accepted."
         }
       }
     },
@@ -356,7 +425,7 @@
     "RecoveryImageRequest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "key", "data"],
+      "required": ["id", "key", "stashKey", "retainedKeys"],
       "properties": {
         "id": {
           "type": "string",
@@ -368,14 +437,13 @@
           "type": "string",
           "minLength": 1
         },
-        "data": {
-          "type": "array",
-          "items": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 255
-          },
-          "maxItems": 67108864
+        "stashKey": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$",
+          "description": "Key of a pinned process-owned image stash handle; native code copies its immutable bytes without transferring Base64 through the WebView."
+        },
+        "retainedKeys": {
+          "$ref": "#/$defs/RecoveryRetainedKeys"
         }
       }
     },
@@ -431,10 +499,35 @@
     "RecoveryWriteRequest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["snapshot"],
+      "required": ["snapshot", "retainedKeys"],
       "properties": {
         "snapshot": {
           "$ref": "#/$defs/RecoverySnapshot"
+        },
+        "retainedKeys": {
+          "$ref": "#/$defs/RecoveryRetainedKeys"
+        }
+      }
+    },
+    "RecoveryRetainedKeys": {
+      "type": "array",
+      "maxItems": 4096,
+      "description": "In-flight image/capture keys, not a persisted snapshot field. Native code also retains the last complete disk manifest before publication.",
+      "items": {
+        "type": "string",
+        "maxLength": 105,
+        "pattern": "^[A-Za-z0-9-]+\\.(png|jpg|jpeg|gif|webp|svg)$"
+      }
+    },
+    "RecoveryCleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["removedKeys", "cleanupError"],
+      "properties": {
+        "removedKeys": { "$ref": "#/$defs/RecoveryRetainedKeys" },
+        "cleanupError": {
+          "type": ["string", "null"],
+          "description": "Auxiliary cleanup failure. A successful manifest write remains durable; callers invalidate cached-key knowledge and retry cleanup on a later write."
         }
       }
     },
@@ -486,7 +579,7 @@
     "RestoredImage": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["placeholder", "filename", "key", "data", "mime"],
+      "required": ["placeholder", "filename", "key", "dataBase64", "mime"],
       "properties": {
         "placeholder": {
           "type": "string"
@@ -497,17 +590,14 @@
         "key": {
           "type": "string"
         },
-        "data": {
-          "type": "array",
-          "items": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 255
-          },
-          "maxItems": 67108864
-        },
         "mime": {
           "type": "string"
+        },
+        "dataBase64": {
+          "type": "string",
+          "contentEncoding": "base64",
+          "maxLength": 89478488,
+          "description": "Canonical padded STANDARD base64. Encoded length is checked before allocation, decoded bytes are separately limited to imageFileBytes and type-validated; JSON numeric arrays are not accepted."
         }
       }
     },
@@ -524,6 +614,124 @@
           "items": {
             "$ref": "#/$defs/RestoredImage"
           }
+        }
+      }
+    },
+    "AllocationIdsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allocationIds"],
+      "properties": {
+        "allocationIds": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[0-9a-f]{32}$"
+          }
+        }
+      }
+    },
+    "StashImageRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["filename", "dataBase64"],
+      "properties": {
+        "filename": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dataBase64": {
+          "type": "string",
+          "contentEncoding": "base64",
+          "maxLength": 89478488,
+          "description": "Canonical padded STANDARD base64. Encoded length is checked before allocation, decoded bytes are separately limited to imageFileBytes and type-validated; JSON numeric arrays are not accepted."
+        }
+      }
+    },
+    "StashKeyRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 32,
+          "pattern": "^[0-9a-f]{32}$"
+        }
+      }
+    },
+    "DroppedImageRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Explicit user-dropped absolute PNG/JPG/JPEG regular file. Device paths, leaf links/reparse points, extension/content mismatches, corrupt images and capacity violations are rejected. Source bytes are copied unchanged into process-owned stash; discard never deletes the user's original. This does not widen read_image_file's document-relative boundary."
+        }
+      }
+    },
+    "DroppedImageReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "mime", "previewUrl", "filename", "byteLength", "digest"],
+      "properties": {
+        "key": { "type": "string", "minLength": 32, "maxLength": 32, "pattern": "^[0-9a-f]{32}$" },
+        "mime": { "enum": ["image/png", "image/jpeg"] },
+        "previewUrl": { "type": "string", "minLength": 1 },
+        "filename": { "type": "string", "minLength": 1 },
+        "byteLength": { "type": "integer", "minimum": 1, "maximum": 67108864 },
+        "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "StashKeysRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["keys"],
+      "properties": {
+        "keys": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[0-9a-f]{32}$"
+          }
+        }
+      }
+    },
+    "StashReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "mime", "previewUrl"],
+      "properties": {
+        "key": { "type": "string", "minLength": 32, "maxLength": 32, "pattern": "^[0-9a-f]{32}$" },
+        "mime": { "type": "string" },
+        "previewUrl": {
+          "type": "string",
+          "description": "Process-local read-only mdplus-image-stash URL; Windows uses http://mdplus-image-stash.localhost/<key>. Preview only: exported standalone documents must inline bytes, not retain this URL."
+        }
+      }
+    },
+    "StashedImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mime", "dataBase64"],
+      "properties": {
+        "mime": {
+          "type": "string"
+        },
+        "dataBase64": {
+          "type": "string",
+          "contentEncoding": "base64",
+          "maxLength": 89478488,
+          "description": "Canonical padded STANDARD base64. Encoded length is checked before allocation, decoded bytes are separately limited to imageFileBytes and type-validated; JSON numeric arrays are not accepted."
         }
       }
     }

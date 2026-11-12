@@ -1,7 +1,7 @@
 import { createEditor, getCurrentState, setMarkdown } from '../../src/lib/editor';
 import { captureExport, buildExport, exportHTML, exportPDF } from '../../src/lib/export';
 import { renderDiagramMedia } from '../../src/lib/diagramRender';
-import { mockIPC } from '@tauri-apps/api/mocks';
+import { createNativeMocks } from './nativeMocks';
 import '../../src/styles/global.css';
 
 export const exportCases = [
@@ -63,6 +63,7 @@ A[中文起点]-->B[English endpoint]
 `;
 
 export async function runExportRegression(testCase: ExportCase): Promise<string> {
+  createNativeMocks().install();
   document.documentElement.dataset.theme = 'dark';
   const host = document.createElement('div');
   host.className = 'milkdown-container';
@@ -139,14 +140,20 @@ export async function runExportRegression(testCase: ExportCase): Promise<string>
         'Export modified the live editor',
       );
     } else if (testCase === 'export-cancel') {
-      mockIPC((command) => {
-        if (command === 'plugin:dialog|message') {
-          confirmations++;
-          return 'Yes';
-        }
-        if (command === 'plugin:dialog|save') return null;
-        if (command === 'export_html') writes++;
-      });
+      createNativeMocks({
+        fallback: (command) => {
+          if (command === 'plugin:dialog|message') {
+            confirmations++;
+            return 'Yes';
+          }
+          if (command === 'plugin:dialog|save') return null;
+          if (command === 'export_html') {
+            writes++;
+            throw new Error('Cancelled export reached the native write boundary');
+          }
+          throw new Error(`Unmocked export IPC: ${command}`);
+        },
+      }).install();
       check(
         (await exportHTML(snapshot)) === false && writes === 0 && confirmations === 1,
         'Cancelled export reported success or wrote a file',

@@ -1,11 +1,35 @@
 import { describe, expect, it } from 'vitest';
 import { micromark } from 'micromark';
 import { gfm, gfmHtml } from 'micromark-extension-gfm';
-import { getImageUrls, rewriteImageReferences } from '../src/lib/imagePaths';
+import { getImageUrls, isRelativeImageUrl, rewriteImageReferences } from '../src/lib/imagePaths';
 
 function renderGfm(markdown: string) {
   return micromark(markdown, { extensions: [gfm()], htmlExtensions: [gfmHtml()] });
 }
+
+describe('relative image scheme allowlist', () => {
+  it.each([
+    'HTTPS://example.com/image.png',
+    'HtTp://example.com/image.png',
+    'DATA:image/png;base64,QQ==',
+    'FiLe:///C:/notes/image.png',
+    'MDPLUS-IMAGE:stable-token',
+    'C:\\image.png',
+    '/absolute/image.png',
+    '//example.com/image.png',
+  ])('does not send a legal case-insensitive scheme to relative recovery: %s', (url) => {
+    expect(isRelativeImageUrl(url)).toBe(false);
+  });
+
+  it.each([
+    './img/photo.png',
+    'img/photo.png',
+    'ftp://example.com/image.png',
+    'javascript:alert(1)',
+  ])('preserves the existing allowlist instead of admitting an arbitrary scheme: %s', (url) => {
+    expect(isRelativeImageUrl(url)).toBe(true);
+  });
+});
 
 describe('rewriteImageReferences', () => {
   it('replaces every occurrence of a pending image placeholder', () => {

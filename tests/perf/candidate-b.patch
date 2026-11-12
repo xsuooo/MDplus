@@ -1,0 +1,14 @@
+diff --git a/src-tauri/src/safe_files.rs b/src-tauri/src/safe_files.rs
+index 5b748e4..dd5f2d5 100644
+--- a/src-tauri/src/safe_files.rs
++++ b/src-tauri/src/safe_files.rs
+@@ -232,6 +232,9 @@ fn raw_snapshot(path: &Path, limit: u64) -> Result<RawSnapshot, Box<FileError>>
+     #[cfg(test)]
+     hooks::run(hooks::Checkpoint::ReadLocked, path);
+     let mut bytes = Vec::new();
++    bytes
++        .try_reserve_exact(metadata.len() as usize)
++        .map_err(|error| FileError::io(path, error.into()))?;
+     (&mut file)
+         .take(limit + 1)
+         .read_to_end(&mut bytes)

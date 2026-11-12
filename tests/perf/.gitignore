@@ -1,0 +1,4 @@
+.runs/
+.rollback/
+/fixtures/
+/report*.json

@@ -20,6 +20,27 @@ function fakeStore() {
 }
 
 describe('settings store load and write recovery', () => {
+  it('reports recent-list read failures instead of presenting them as an empty list', async () => {
+    load.mockRejectedValueOnce(new Error('settings unavailable'));
+    const settings = await import('../src/lib/store');
+    await expect(settings.getRecentFiles()).rejects.toThrow('settings unavailable');
+  });
+
+  it('rejects failed recent writes, restores the prior list and permits retry', async () => {
+    const store = fakeStore();
+    const original = [{ path: 'C:/notes/a.md', name: 'a.md', time: 1 }];
+    await store.set('recent-files', original);
+    store.save
+      .mockRejectedValueOnce(new Error('disk full'))
+      .mockRejectedValueOnce(new Error('disk full'));
+    load.mockResolvedValue(store);
+    const settings = await import('../src/lib/store');
+    await expect(settings.pushRecentFile('C:/notes/b.md', 'b.md')).rejects.toThrow('disk full');
+    await expect(settings.removeRecentFile('C:/notes/a.md')).rejects.toThrow('disk full');
+    expect(await settings.getRecentFiles()).toEqual(original);
+    await settings.removeRecentFile('C:/notes/a.md');
+    expect(await settings.getRecentFiles()).toEqual([]);
+  });
   it('retries a transient first-load failure on a later write', async () => {
     const store = fakeStore();
     load.mockRejectedValueOnce(new Error('temporary sharing violation')).mockResolvedValue(store);

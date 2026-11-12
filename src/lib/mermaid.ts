@@ -153,9 +153,13 @@ const mermaidView =
     let isDestroyed = false;
     let isEditing = false;
     let renderToken = 0;
+    let pendingRender: AbortController | undefined;
     let finishPendingLoad: (() => void) | undefined;
     let media: MediaPreview | undefined;
     let layout: { identity: string; width: number; height: number } | undefined;
+    let previewIdentity: string | undefined;
+    let displayedPreview: HTMLDivElement | undefined;
+    const previews = new Map<'light' | 'dark', { preview: HTMLDivElement; media: MediaPreview }>();
     let sourceInput: HTMLTextAreaElement | undefined;
     const select = () => {
       const pos = getPos();
@@ -186,26 +190,52 @@ const mermaidView =
     }
 
     /** 异步渲染图表 */
-    async function renderDiagram(code: string, fade = false): Promise<void> {
+    async function renderDiagram(code: string): Promise<void> {
       const token = ++renderToken;
+      pendingRender?.abort();
+      const controller = new AbortController();
+      pendingRender = controller;
       finishPendingLoad?.();
       if (isDestroyed) return;
       dom.classList.add('loading');
+      enlarge.disabled = true;
       let preview: HTMLDivElement | undefined;
 
       try {
         // The constructor starts rendering before ProseMirror attaches this node.
         // Read inherited font settings only after it belongs to its actual tab.
-        await Promise.resolve();
+        if (!dom.isConnected) await Promise.resolve();
         if (isDestroyed || token !== renderToken) return;
         const font = normalizeBodyFont(
           dom.closest<HTMLElement>('[data-body-font]')?.dataset.bodyFont,
         );
-        const nextMedia = await renderDiagramMedia(code, diagramTheme(), font);
+        const theme = diagramTheme();
+        const identity = `${font}\0${code}`;
+        const cached = previewIdentity === identity ? previews.get(theme) : undefined;
+        if (cached) {
+          // Editing only detaches the decoded preview. An unchanged blur or a
+          // return to this theme can restore it synchronously, without encoding.
+          holder.className = 'md-mermaid-holder';
+          if (holder.firstElementChild !== cached.preview || holder.childElementCount !== 1)
+            holder.replaceChildren(cached.preview);
+          displayedPreview = cached.preview;
+          media = cached.media;
+          enlarge.disabled = !onPreview;
+          dom.classList.remove('loading');
+          return;
+        }
+        holder.className = 'md-mermaid-holder';
+        if (displayedPreview) {
+          if (holder.firstElementChild !== displayedPreview || holder.childElementCount !== 1)
+            holder.replaceChildren(displayedPreview);
+        } else holder.replaceChildren();
+        const nextMedia = await renderDiagramMedia(code, theme, font, {
+          signal: controller.signal,
+          reuse: true,
+        });
         if (isDestroyed || token !== renderToken) return;
         // Mermaid themes can differ by a few border pixels. Only content/font
         // changes may resize the document; a color change retains its layout box.
-        const identity = `${font}\0${code}`;
         if (layout?.identity === identity) {
           nextMedia.width = layout.width;
           nextMedia.height = layout.height;
@@ -244,29 +274,16 @@ const mermaidView =
           preview.remove();
           return;
         }
-        if (
-          fade &&
-          holder.querySelector('.md-mermaid-preview:not(.md-mermaid-preview-pending)') &&
-          !window.matchMedia('(prefers-reduced-motion: reduce)').matches
-        ) {
-          preview.classList.add('md-mermaid-preview-revealing');
-          const motion = getComputedStyle(dom);
-          await preview
-            .animate([{ opacity: 0 }, { opacity: 1 }], {
-              duration: parseFloat(motion.getPropertyValue('--motion-enter')) || 220,
-              easing: motion.getPropertyValue('--ease-out').trim() || 'ease-out',
-              fill: 'forwards',
-            })
-            .finished.catch(() => {});
-          if (isDestroyed || token !== renderToken) {
-            preview.remove();
-            return;
-          }
-          preview.classList.remove('md-mermaid-preview-revealing');
-        }
         preview.classList.remove('md-mermaid-preview-pending');
         holder.className = 'md-mermaid-holder';
         holder.replaceChildren(preview);
+        // Retain only the current source/font's two decoded theme variants.
+        if (previewIdentity !== identity) {
+          previews.clear();
+          previewIdentity = identity;
+        }
+        previews.set(theme, { preview, media: nextMedia });
+        displayedPreview = preview;
         media = nextMedia;
         enlarge.disabled = !onPreview;
         dom.classList.remove('loading');
@@ -274,10 +291,13 @@ const mermaidView =
         preview?.remove();
         if (isDestroyed || token !== renderToken) return;
         media = undefined;
+        displayedPreview = undefined;
         enlarge.disabled = true;
         holder.textContent = `图表无法预览。请点击“编辑图表”修正源码。\n${errorMessage(err)}`;
         holder.className = 'md-mermaid-holder md-mermaid-error';
         dom.classList.remove('loading');
+      } finally {
+        if (pendingRender === controller) pendingRender = undefined;
       }
     }
 
@@ -286,6 +306,7 @@ const mermaidView =
       isEditing = true;
       controls.hidden = true;
       renderToken += 1;
+      pendingRender?.abort();
       finishPendingLoad?.();
       dom.classList.remove('loading');
       holder.className = 'md-mermaid-holder md-mermaid-editing';
@@ -298,16 +319,14 @@ const mermaidView =
       bar.className = 'md-mermaid-bar';
       const hint = document.createElement('span');
       hint.className = 'md-mermaid-hint';
-      hint.textContent = '编辑 Mermaid 源码,失焦或点击预览生效';
+      hint.textContent = 'Mermaid 源码 · 失焦后自动预览';
       const btn = document.createElement('button');
       btn.className = 'md-mermaid-commit';
       btn.textContent = '预览';
       bar.appendChild(hint);
       bar.appendChild(btn);
 
-      holder.innerHTML = '';
-      holder.appendChild(bar);
-      holder.appendChild(ta);
+      holder.replaceChildren(bar, ta);
 
       const write = (): void => {
         if (isDestroyed || !isEditing) return;
@@ -335,7 +354,7 @@ const mermaidView =
         isEditing = false;
         sourceInput = undefined;
         controls.hidden = false;
-        // 无论内容是否变化,都退出编辑态并重新渲染
+        // The matching decoded preview is restored immediately when unchanged.
         void renderDiagram(currentCode);
       };
       // Save/recovery must see the draft even when Ctrl+S never blurs this textarea.
@@ -355,7 +374,7 @@ const mermaidView =
     void renderDiagram(currentCode);
 
     // 注册到主题刷新集合,销毁时移除
-    const renderer = () => (isEditing ? Promise.resolve() : renderDiagram(currentCode, true));
+    const renderer = () => (isEditing ? Promise.resolve() : renderDiagram(currentCode));
     activeRenderers.add(renderer);
 
     return {
@@ -377,7 +396,10 @@ const mermaidView =
         !!event.target.closest('.md-media-controls, .md-mermaid-textarea, .md-mermaid-bar'),
       destroy: () => {
         isDestroyed = true;
+        pendingRender?.abort();
         finishPendingLoad?.();
+        previews.clear();
+        displayedPreview = undefined;
         activeRenderers.delete(renderer);
       },
     };

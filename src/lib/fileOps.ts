@@ -29,6 +29,8 @@ export interface ImageReceipt {
   filename: string;
   relativePath: string;
   path: string;
+  /** Native ownership of a newly created asset; null means an existing asset was reused. */
+  allocationId: string | null;
 }
 
 export async function readDocument(path: string): Promise<DocumentSnapshot> {
@@ -54,7 +56,7 @@ export async function readImageFile(
 ): Promise<{
   path: string;
   mime: string;
-  data: number[];
+  dataBase64: string;
 }> {
   return invoke('read_image_file', { docPath, relativePath });
 }
@@ -74,6 +76,16 @@ export async function pickOpenFile(): Promise<string | null> {
   });
   if (typeof selected === 'string') return selected;
   return null;
+}
+
+export async function pickImageFiles(): Promise<string[]> {
+  const selected = await open({
+    multiple: true,
+    directory: false,
+    filters: [{ name: 'PNG / JPEG 图片', extensions: ['png', 'jpg', 'jpeg'] }],
+    title: '插入本地图片',
+  });
+  return selected === null ? [] : typeof selected === 'string' ? [selected] : selected;
 }
 
 /** 弹出另存为对话框,返回路径或 null */

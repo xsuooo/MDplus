@@ -1,4 +1,4 @@
-import { PRINT_LOAD_TIMEOUT_MS } from '../config/constants';
+import { LIMITS, PRINT_LOAD_TIMEOUT_MS } from '../config/constants';
 import { save } from '@tauri-apps/plugin-dialog';
 import { DOMSerializer } from '@milkdown/prose/model';
 import { parserCtx, type Editor } from '@milkdown/kit/core';
@@ -29,7 +29,35 @@ export interface ExportSnapshot {
   codeFont: CodeFont;
 }
 
-/** Capture parser/model data and image bytes synchronously, before any dialog/await. */
+/** Count UTF-8 without allocating another export-sized byte buffer. */
+export function exportByteLength(text: string): number {
+  let bytes = 0;
+  for (let at = 0; at < text.length; at += 1) {
+    const code = text.charCodeAt(at);
+    if (code <= 0x7f) bytes += 1;
+    else if (code <= 0x7ff) bytes += 2;
+    else if (
+      code >= 0xd800 &&
+      code <= 0xdbff &&
+      at + 1 < text.length &&
+      text.charCodeAt(at + 1) >= 0xdc00 &&
+      text.charCodeAt(at + 1) <= 0xdfff
+    ) {
+      bytes += 4;
+      at += 1;
+    } else bytes += 3;
+  }
+  return bytes;
+}
+
+export function assertExportBytes(bytes: number, limit = LIMITS.htmlExportBytes): void {
+  if (!Number.isFinite(bytes) || bytes < 0 || bytes > limit)
+    throw new Error(
+      `导出内容超过 ${(limit / 1024 / 1024).toFixed(0)} MiB 上限，请减少图片或拆分文档后重试。`,
+    );
+}
+
+/** Capture parser/model data and frozen image references before any dialog/await. */
 export function captureExport(
   editor: Editor,
   markdown: string,
@@ -121,10 +149,22 @@ async function mathCSS(): Promise<string> {
 }
 
 export async function buildExport(snapshot: ExportSnapshot): Promise<string> {
+  // Check repeated large resources before outerHTML can create an enormous string.
+  let imageBytes = 0;
+  for (const image of snapshot.content.querySelectorAll('img, image')) {
+    imageBytes += exportByteLength(
+      image.getAttribute('src') ??
+        image.getAttribute('href') ??
+        image.getAttribute('xlink:href') ??
+        '',
+    );
+    assertExportBytes(imageBytes);
+  }
   const content = snapshot.content.cloneNode(true) as HTMLElement;
   const body = BODY_FONTS.find((font) => font.id === snapshot.bodyFont)!;
   const code = CODE_FONTS.find((font) => font.id === snapshot.codeFont)!;
   const fonts = await embeddedFonts(snapshot.bodyFont, snapshot.codeFont);
+  assertExportBytes(imageBytes + exportByteLength(fonts.css));
   for (const block of content.querySelectorAll<HTMLElement>('pre > code[data-language]')) {
     const language = block.dataset.language!.toLowerCase();
     if (language === 'mermaid') {
@@ -206,17 +246,19 @@ export async function buildExport(snapshot: ExportSnapshot): Promise<string> {
       .milkdown .ProseMirror img, .export-diagram svg { max-height:245mm; object-fit:contain; }
       * { print-color-adjust:exact; -webkit-print-color-adjust:exact; } }
   `;
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8">
+  const html = `<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'">
     <title>${escapeHTML(snapshot.title)}</title><style>${css.replace(/<\/style/gi, '<\\/style')}</style></head>
     <body><main class="milkdown">${content.outerHTML}</main><details class="export-notices"><summary>内嵌字体许可</summary>${notices.join('\n')}</details></body></html>`;
+  assertExportBytes(exportByteLength(html));
+  return html;
 }
 
 /** Returns false on cancellation; callers must not announce a successful write. */
 export async function exportHTML(snapshot: ExportSnapshot): Promise<boolean> {
   const html = await buildExport(snapshot);
-  const mb = new Blob([html]).size / 1024 / 1024;
+  const mb = exportByteLength(html) / 1024 / 1024;
   if (
     !(await confirmDialog(
       `将导出可离线打开的单文件 HTML，包含字体、图片、公式和图表，约 ${mb.toFixed(1)} MB。继续？`,

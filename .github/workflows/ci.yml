@@ -130,5 +130,18 @@ jobs:
           path: .audit/rust-coverage.json
           include-hidden-files: true
           if-no-files-found: error
+      - name: Run real Windows file symlink regressions
+        id: real_symlinks
+        shell: pwsh
+        run: ./scripts/windows/test-real-symlinks.ps1
       - name: Run Clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+      - name: Preserve real symlink test outcomes and diagnostics
+        if: always() && steps.real_symlinks.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-real-symlinks
+          path: .audit/real-symlinks-*/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14

@@ -1,4 +1,5 @@
 import { editorViewCtx } from '@milkdown/kit/core';
+import { createNativeMocks } from './nativeMocks';
 import { undoDepth, redoDepth } from '@milkdown/prose/history';
 import { TextSelection } from '@milkdown/prose/state';
 import { createEditor, getCurrentState, setMarkdown, undo } from '../../src/lib/editor';
@@ -36,6 +37,7 @@ async function until(condition: () => unknown): Promise<void> {
 
 /** Real Milkdown view/model/DOM; only the OS clipboard transport is stubbed. */
 export async function runCodeBlockRegression(testCase: CodeBlockCase): Promise<string> {
+  createNativeMocks().install();
   // Navigation can focus the initial editor; selection checks start after page loading.
   await until(() => document.readyState === 'complete');
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));

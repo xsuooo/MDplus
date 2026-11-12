@@ -63,7 +63,7 @@ export function isEditorZoomTarget(root: HTMLElement, target: EventTarget | null
 
 export function bindEditorZoomControls(
   root: HTMLElement,
-  onZoom: (action: EditorZoomAction) => void,
+  onZoom: (action: EditorZoomAction, event: WheelEvent | KeyboardEvent) => void,
 ): () => void {
   const doc = root.ownerDocument;
   const view = doc.defaultView;
@@ -79,7 +79,7 @@ export function bindEditorZoomControls(
       return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    onZoom(event.deltaY < 0 ? 'increase' : 'decrease');
+    onZoom(event.deltaY < 0 ? 'increase' : 'decrease', event);
   };
   const onKey = (event: KeyboardEvent) => {
     if (isComposingEvent(event)) return;
@@ -88,7 +88,7 @@ export function bindEditorZoomControls(
     if (!action || event.defaultPrevented || !isEditorZoomTarget(root, target)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    onZoom(action);
+    onZoom(action, event);
   };
   root.addEventListener('wheel', onWheel, { passive: false, capture: true });
   view?.addEventListener('keydown', onKey, true);

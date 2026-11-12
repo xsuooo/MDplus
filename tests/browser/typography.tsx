@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client';
+import { createNativeMocks } from './nativeMocks';
 import App from '../../src/App';
 import { ErrorBoundary } from '../../src/components/ErrorBoundary';
 import { CODE_FONTS } from '../../src/lib/editorFont';
@@ -8,6 +9,8 @@ export const typographyCases = [
   'typography-defaults',
   'typography-independent-fonts',
   'typography-layout',
+  'typography-layout-1100-800',
+  'typography-layout-800-600',
   'typography-panel-keyboard',
   'typography-persistence',
   'typography-long-document',
@@ -15,6 +18,11 @@ export const typographyCases = [
   'typography-shortcut-fonts',
   'typography-error-font',
   'typography-comparison',
+  'typography-width',
+  'typography-width-persistence',
+  'typography-width-layout-1440-900',
+  'typography-width-layout-800-600',
+  'typography-width-layout-320-640',
 ] as const;
 export type TypographyCase = (typeof typographyCases)[number];
 
@@ -137,8 +145,11 @@ async function openDocument(text = typographyDocument) {
 }
 
 export async function runTypographyRegression(testCase: TypographyCase): Promise<string> {
+  createNativeMocks().install();
   localStorage.removeItem('mdplus-body-font');
   localStorage.removeItem('mdplus-editor-font');
+  localStorage.removeItem('mdplus-editor-width');
+  localStorage.removeItem('mdplus-editor-zoom');
   if (testCase === 'typography-persistence')
     localStorage.setItem('mdplus-editor-font', 'fira-wenkai');
   const host = document.createElement('div');
@@ -153,12 +164,90 @@ export async function runTypographyRegression(testCase: TypographyCase): Promise
             (_, i) =>
               `## 长文 ${i}\n\n${'中文 English 阅读段落。'.repeat(20)}\n\n\`\`\`js\nconst n = ${i};\n\`\`\`\n`,
           ).join('\n')
-        : typographyDocument,
+        : testCase.startsWith('typography-width')
+          ? `${typographyDocument}\n\n![width](data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="600"><rect width="100%" height="100%" fill="teal"/></svg>')})\n\nBefore ![inline](data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="18"/>')}) after\n`
+          : typographyDocument,
     );
     const editor = document.querySelector<HTMLElement>('.editor-tab.active .ProseMirror')!;
     const code = editor.querySelector<HTMLElement>('pre code')!;
     const source = document.querySelector<HTMLTextAreaElement>('.source-textarea')!;
-    if (testCase === 'typography-defaults') {
+    if (testCase.startsWith('typography-width')) {
+      const original = source.value;
+      const area = document.querySelector<HTMLElement>('.editor-area')!;
+      const doc = (editor as HTMLElement & { pmViewDesc?: { node: object } }).pmViewDesc?.node;
+      const images = [...editor.querySelectorAll<HTMLImageElement>('.md-image-node > img')];
+      await until(() => images.every((image) => image.naturalWidth));
+      check(area.getAttribute('data-editor-width') === 'centered', 'Default width changed');
+      const centeredWidth = editor.getBoundingClientRect().width;
+      click('button[aria-label="排版设置"]');
+      await until(() => document.querySelector('.typography-panel'));
+      await change('正文宽度', 'full');
+      check(
+        area.getAttribute('data-editor-width') === 'full',
+        'Full width selection did not apply',
+      );
+      if (innerWidth > 1000)
+        check(
+          editor.getBoundingClientRect().width > centeredWidth + 200,
+          'Full width still leaves the reading column narrow',
+        );
+      if (testCase.startsWith('typography-width-layout')) {
+        const [width, height] = testCase.split('-').slice(-2).map(Number);
+        check(
+          innerWidth === width && innerHeight === height,
+          'Width regression must use the real responsive viewport',
+        );
+      }
+      for (const zoom of [1, 1.2, 2]) {
+        editor.closest<HTMLElement>('.milkdown')!.style.zoom = String(zoom);
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const image = images[0].getBoundingClientRect();
+        const paragraph = images[0].closest('p')!.getBoundingClientRect();
+        check(Math.abs(image.width / image.height - 3) < 0.01, 'Full width cropped the image');
+        check(
+          Math.abs(image.width - paragraph.width) < 1,
+          'Standalone image did not fill the prose width',
+        );
+        check(
+          Math.abs(images[1].getBoundingClientRect().width - 24 * zoom) < 1,
+          'Full width stretched an inline image',
+        );
+        check(
+          area.scrollWidth <= area.clientWidth + 1 && host.scrollWidth <= innerWidth + 1,
+          'Full width overflowed the app',
+        );
+      }
+      editor.closest<HTMLElement>('.milkdown')!.style.zoom = '1';
+      check(source.value === original, 'Width selection modified Markdown');
+      check(
+        (editor as HTMLElement & { pmViewDesc?: { node: object } }).pmViewDesc?.node === doc,
+        'Width selection recreated the editor',
+      );
+      if (testCase === 'typography-width-persistence') {
+        root.unmount();
+        root = createRoot(host);
+        root.render(<App />);
+        await until(
+          () =>
+            document.querySelector('.editor-area')?.getAttribute('data-editor-width') === 'full',
+        );
+      } else {
+        await change('正文宽度', 'centered');
+        check(
+          Math.abs(editor.getBoundingClientRect().width - centeredWidth) < 1,
+          'Centered reading width was not restored',
+        );
+        const panel = document.querySelector('.typography-panel')!;
+        panel.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+        );
+        await until(() => !document.querySelector('.typography-panel'));
+        check(
+          document.activeElement?.getAttribute('aria-label') === '排版设置',
+          'Width panel lost keyboard focus on Escape',
+        );
+      }
+    } else if (testCase === 'typography-defaults') {
       check(
         getComputedStyle(editor).fontFamily.startsWith('"MDPlus MiSans"'),
         'Body is not using proportional MiSans',
@@ -281,49 +370,56 @@ export async function runTypographyRegression(testCase: TypographyCase): Promise
         'Error fallback ignores the selected UI font',
       );
       sameFont('button', host.querySelector('h2')!);
-    } else if (testCase === 'typography-layout') {
-      for (const width of [1100, 800]) {
-        host.style.width = `${width}px`;
-        for (const zoom of [1, 1.2, 2]) {
-          document
-            .querySelector<HTMLElement>('.editor-area')!
-            .style.setProperty('--editor-zoom', String(zoom));
-          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-          const computed = getComputedStyle(editor);
-          const wrapper = editor.closest<HTMLElement>('.milkdown')!;
-          const effectiveZoom = parseFloat(getComputedStyle(wrapper).zoom);
-          check(effectiveZoom === zoom, `Reading zoom did not settle: ${effectiveZoom} vs ${zoom}`);
-          const readingWidth = editor.getBoundingClientRect().width / effectiveZoom;
-          check(
-            readingWidth <= 721,
-            `Reading measure exceeds 720px before zoom: container=${width}, zoom=${zoom}/${effectiveZoom}, computed=${computed.width}, normalized=${readingWidth}`,
-          );
-          const text = editor.querySelector('p')!;
-          check(
-            text.getBoundingClientRect().width <= editor.getBoundingClientRect().width + 1,
-            'Body overflows its reading column',
-          );
-          check(
-            editor.querySelector('pre')!.scrollWidth > editor.querySelector('pre')!.clientWidth,
-            'Long code is not horizontally scrollable',
-          );
-          const table =
-            editor.querySelector('.tableWrapper') ?? editor.querySelector('table')!.parentElement!;
-          check(
-            table.getBoundingClientRect().width <= editor.getBoundingClientRect().width + 1,
-            'Table is clipped outside its scrolling wrapper',
-          );
-          check(host.scrollWidth <= width + 1, 'Document content forces application overflow');
-        }
+    } else if (testCase.startsWith('typography-layout')) {
+      const width = innerWidth;
+      if (testCase !== 'typography-layout') {
+        const [expectedWidth, expectedHeight] = testCase.split('-').slice(-2).map(Number);
+        check(
+          width === expectedWidth && innerHeight === expectedHeight,
+          `Runner viewport mismatch: ${width}x${innerHeight}`,
+        );
+      }
+      for (const zoom of [1, 1.2, 2]) {
+        document.querySelector<HTMLElement>('.editor-tab.active .milkdown')!.style.zoom =
+          String(zoom);
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const computed = getComputedStyle(editor);
+        const wrapper = editor.closest<HTMLElement>('.milkdown')!;
+        const effectiveZoom = parseFloat(getComputedStyle(wrapper).zoom);
+        check(effectiveZoom === zoom, `Reading zoom did not settle: ${effectiveZoom} vs ${zoom}`);
+        const readingWidth = editor.getBoundingClientRect().width / effectiveZoom;
+        check(
+          readingWidth <= 721,
+          `Reading measure exceeds 720px before zoom: container=${width}, zoom=${zoom}/${effectiveZoom}, computed=${computed.width}, normalized=${readingWidth}`,
+        );
+        const text = editor.querySelector('p')!;
+        check(
+          text.getBoundingClientRect().width <= editor.getBoundingClientRect().width + 1,
+          'Body overflows its reading column',
+        );
+        check(
+          editor.querySelector('pre')!.scrollWidth > editor.querySelector('pre')!.clientWidth,
+          'Long code is not horizontally scrollable',
+        );
+        const table =
+          editor.querySelector('.tableWrapper') ?? editor.querySelector('table')!.parentElement!;
+        check(
+          table.getBoundingClientRect().width <= editor.getBoundingClientRect().width + 1,
+          'Table is clipped outside its scrolling wrapper',
+        );
+        check(
+          host.scrollWidth <= width + 1,
+          `Document content forces application overflow: width=${width}, zoom=${zoom}, scrollWidth=${host.scrollWidth}`,
+        );
       }
     } else if (testCase === 'typography-panel-keyboard') {
       click('button[aria-label="排版设置"]');
       await until(() => document.querySelector('.typography-panel'));
       const panel = document.querySelector<HTMLElement>('.typography-panel')!;
       check(
-        panel.querySelectorAll('select').length === 1 &&
+        panel.querySelectorAll('select').length === 2 &&
           panel.querySelectorAll('input[type="radio"]').length === 3,
-        'Panel must expose a body selector and three code specimens',
+        'Panel must expose width/body selectors and three code specimens',
       );
       check(
         document.activeElement === panel.querySelector('select'),

@@ -1,5 +1,11 @@
 // MDPlus - Tauri backend commands
 mod config;
+#[cfg(test)]
+mod image_asset_tests;
+mod image_data;
+mod image_import;
+mod image_stash;
+mod owned_file;
 mod recovery;
 mod safe_files;
 #[cfg(test)]
@@ -13,7 +19,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State};
 
-use config::{MAX_IMAGE_FILE_BYTES, MAX_TEXT_FILE_BYTES};
+use config::{MAX_HTML_EXPORT_BYTES, MAX_IMAGE_FILE_BYTES, MAX_TEXT_FILE_BYTES};
 
 #[derive(Default)]
 struct StartupFiles(Mutex<Vec<String>>);
@@ -191,29 +197,37 @@ fn write_file_atomic(path: &Path, content: &[u8]) -> io::Result<()> {
     result
 }
 
-/// Export HTML only. Document saves use the conditional document command.
-#[tauri::command]
-fn export_html(path: String, content: String) -> Result<(), String> {
-    if !Path::new(&path)
+fn validate_html_export(path: &Path, byte_length: u64) -> Result<(), String> {
+    if !path
         .extension()
         .is_some_and(|extension| extension.eq_ignore_ascii_case("html"))
     {
         return Err("HTML export requires an .html target".into());
     }
-    if content.len() as u64 > MAX_TEXT_FILE_BYTES {
-        return Err("HTML export exceeds the configured text-file limit".into());
+    if byte_length > MAX_HTML_EXPORT_BYTES {
+        return Err("HTML export exceeds the configured HTML-export limit".into());
     }
-    let target = safe_files::document_revision(path).map_err(|error| error.message)?;
-    safe_files::write_document(target.path, content, target.revision)
+    Ok(())
+}
+
+/// HTML includes bundled fonts and base64 images; its independent budget must
+/// apply to revision reads and backup verification as well as to input bytes.
+#[tauri::command]
+fn export_html(path: String, content: String) -> Result<(), String> {
+    validate_html_export(Path::new(&path), content.len() as u64)?;
+    let target = safe_files::revision_with_limit(path, MAX_HTML_EXPORT_BYTES)
+        .map_err(|error| error.message)?;
+    safe_files::write_text_with_limit(target.path, content, target.revision, MAX_HTML_EXPORT_BYTES)
         .map(|_| ())
         .map_err(|error| error.message)
 }
 
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ImageFile {
     path: String,
     mime: &'static str,
-    data: Vec<u8>,
+    data_base64: String,
 }
 
 fn document_image_path(doc_path: &Path, relative_path: &Path) -> Result<PathBuf, String> {
@@ -329,11 +343,11 @@ fn read_image_file(doc_path: String, relative_path: String) -> Result<ImageFile,
     Ok(ImageFile {
         mime: image_mime(&path, &data)?,
         path: path.to_string_lossy().into_owned(),
-        data,
+        data_base64: image_data::encode_image(&data),
     })
 }
 
-fn markdown_files_from_args<I, F>(args: I, path_exists: F) -> Vec<String>
+fn markdown_files_from_args<I, F>(args: I, cwd: &Path, path_is_file: F) -> Vec<String>
 where
     I: IntoIterator<Item = String>,
     F: Fn(&str) -> bool,
@@ -342,8 +356,51 @@ where
         .skip(1)
         .filter_map(|arg| {
             let lower = arg.to_lowercase();
-            let is_markdown = lower.ends_with(".md") || lower.ends_with(".markdown");
-            (is_markdown && path_exists(&arg)).then_some(arg)
+            if !(lower.ends_with(".md") || lower.ends_with(".markdown")) {
+                return None;
+            }
+            let path = Path::new(&arg);
+            let resolved = if path.is_absolute() {
+                path.to_owned()
+            } else {
+                // A second process can have a different cwd from the primary
+                // instance. Never resolve its relative files against our cwd or
+                // call set_current_dir, which would race other document work.
+                if !cwd.is_absolute() {
+                    return None;
+                }
+                #[cfg(windows)]
+                {
+                    let mut components = path.components();
+                    if let Some(Component::Prefix(prefix)) = components.next() {
+                        use std::path::Prefix;
+                        let Prefix::Disk(drive) = prefix.kind() else {
+                            return None;
+                        };
+                        let sender_drive = match cwd.components().next() {
+                            Some(Component::Prefix(p)) => match p.kind() {
+                                Prefix::Disk(d) | Prefix::VerbatimDisk(d) => d,
+                                _ => return None,
+                            },
+                            _ => return None,
+                        };
+                        if !drive.eq_ignore_ascii_case(&sender_drive) {
+                            return None;
+                        }
+                        let resolved = cwd
+                            .join(components.as_path())
+                            .to_string_lossy()
+                            .into_owned();
+                        return path_is_file(&resolved).then_some(resolved);
+                    }
+                }
+                cwd.join(path)
+            };
+            if !resolved.is_absolute() {
+                return None;
+            }
+            let resolved = resolved.to_string_lossy().into_owned();
+            path_is_file(&resolved).then_some(resolved)
         })
         .collect()
 }
@@ -385,14 +442,18 @@ pub fn run() {
     // Parse arguments before creating the webview so the hidden-window startup path has
     // the file list available before React mounts.
     let args: Vec<String> = std::env::args().collect();
-    let startup_files = markdown_files_from_args(args, |path| Path::new(path).exists());
+    let startup_cwd = std::env::current_dir().unwrap_or_default();
+    let startup_files =
+        markdown_files_from_args(args, &startup_cwd, |path| Path::new(path).is_file());
 
     tauri::Builder::default()
         .manage(StartupFiles::new(startup_files))
         .manage(PendingOpenFiles::default())
-        .manage(settings::SettingsResource::default())
+        .manage(image_stash::ImageStash::default())
+        .register_uri_scheme_protocol("mdplus-image-stash", |context, request| {
+            image_stash::preview(context.app_handle(), request)
+        })
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
             // 窗口在 setup 之前已由 tauri.conf.json 创建,这里把 WebView2 的宿主层
             // 加速键关掉,前端才能收到 F11 这类裸功能键(详见函数注释)。
@@ -404,41 +465,45 @@ pub fn run() {
             }
             Ok(())
         })
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            // 当尝试启动第二个实例时，将参数发送给第一个实例
-            let md_files = markdown_files_from_args(args, |path| Path::new(path).exists());
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            // Resolve against the sending process before filtering or queueing.
+            let md_files =
+                markdown_files_from_args(args, Path::new(&cwd), |path| Path::new(path).is_file());
+            let has_files = !md_files.is_empty();
+            if has_files {
+                app.state::<PendingOpenFiles>().push(md_files);
+            }
 
             if let Some(window) = app.get_webview_window("main") {
-                // 确保窗口可见并获得焦点
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
+                // 初次显现由前端在恢复位置与布局后完成,第二实例不抢先显示隐藏窗口。
+                if window.is_visible().unwrap_or(false) {
+                    if window.is_minimized().unwrap_or(false) {
+                        let _ = window.unminimize();
+                    }
+                    let _ = window.set_focus();
+                }
 
                 // 如果有文件，传递给前端
-                if !md_files.is_empty() {
-                    app.state::<PendingOpenFiles>().push(md_files);
+                if has_files {
                     let _ = window.emit("open-files", ());
                 }
             }
         }))
-        .on_page_load(|webview, payload| {
-            // 页面一开始加载就显示窗口,避免用户双击后长时间看不到任何反馈。
-            // 窗口配置了 backgroundColor(#f6f5f1),配合前端的 startup-placeholder,
-            // 在内容渲染完成前不会闪白或闪欢迎页。
-            if payload.event() == tauri::webview::PageLoadEvent::Started {
-                let window = webview.window();
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-        })
         .invoke_handler(tauri::generate_handler![
             safe_files::read_document,
             safe_files::document_revision,
             safe_files::write_document,
             safe_files::save_image_asset,
+            safe_files::commit_image_assets,
+            safe_files::discard_image_assets,
+            image_stash::stash_image,
+            image_import::import_dropped_image,
+            image_stash::read_stashed_image,
+            image_stash::discard_stashed_images,
             read_image_file,
             export_html,
             settings::load_settings,
+            settings::save_settings,
             take_startup_files,
             take_pending_open_files,
             recovery::cache_recovery_image,

@@ -32,12 +32,19 @@ describe('IPC allowlist and contract synchronization', () => {
   });
 
   it('keeps each native request parameter aligned with the JSON contract', () => {
-    const source = ['lib.rs', 'safe_files.rs', 'recovery.rs', 'settings.rs']
+    const source = [
+      'lib.rs',
+      'safe_files.rs',
+      'recovery.rs',
+      'settings.rs',
+      'image_stash.rs',
+      'image_import.rs',
+    ]
       .map((file) => read(`../src-tauri/src/${file}`))
       .join('\n');
     const native = [
       ...source.matchAll(
-        /#\[tauri::command\]\s+(?:pub\s+)?(?:async\s+)?fn\s+(\w+)\s*\(([\s\S]*?)\)\s*->/g,
+        /#\[tauri::command(?:\(async\))?\]\s+(?:pub\s+)?(?:async\s+)?fn\s+(\w+)\s*\(([\s\S]*?)\)\s*->/g,
       ),
     ];
     expect(native).toHaveLength(commands.length);
@@ -77,9 +84,34 @@ describe('IPC allowlist and contract synchronization', () => {
 
   it('keeps generated port and IPC capacities aligned with shared configuration', () => {
     expect(tauri.build.devUrl).toBe(`http://${config.development.host}:${config.development.port}`);
-    expect(contract.$defs.ImageRequest.properties.data.maxItems).toBe(config.limits.imageFileBytes);
+    for (const name of [
+      'ImageRequest',
+      'ImageFile',
+      'RestoredImage',
+      'StashImageRequest',
+      'StashedImage',
+    ] as const) {
+      const schema = contract.$defs[name];
+      expect(schema.properties).not.toHaveProperty('data');
+      expect(schema.properties.dataBase64.type).toBe('string');
+      expect(schema.properties.dataBase64.maxLength).toBe(
+        Math.ceil(config.limits.imageFileBytes / 3) * 4,
+      );
+    }
+    expect(config.limits.textFileBytes).toBe(32 * 1024 * 1024);
+    expect(contract.$defs.RecoveryImageRequest.required).toEqual([
+      'id',
+      'key',
+      'stashKey',
+      'retainedKeys',
+    ]);
+    expect(contract.$defs.RecoveryImageRequest.properties).not.toHaveProperty('dataBase64');
+    expect(contract.$defs.RecoveryImageRequest.properties.stashKey.pattern).toBe('^[0-9a-f]{32}$');
+    expect(config.limits.htmlExportBytes).toBeGreaterThan(35_891_148);
     expect(contract.$defs.RecoverySnapshot.properties.images.maxItems).toBe(
       config.limits.recoveryImages,
     );
+    expect(contract.$defs.RecoveryRetainedKeys.maxItems).toBe(config.limits.imageStashEntries);
+    expect(contract.$defs.RecoverySnapshot.properties).not.toHaveProperty('retainedKeys');
   });
 });

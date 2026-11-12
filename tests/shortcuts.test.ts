@@ -9,6 +9,7 @@ import {
   findConflicts,
   findOwners,
   formatShortcut,
+  formatActionShortcuts,
   matchesShortcut,
   removeShortcut,
   sanitizeShortcuts,
@@ -192,6 +193,16 @@ describe('matchesShortcut', () => {
 });
 
 describe('formatShortcut', () => {
+  it('advertises only effective, distinct bindings for an action', () => {
+    const bindings = {
+      ...DEFAULT_SHORTCUTS,
+      new: ['ctrl+s'],
+      save: ['ctrl+s', 'f8', 'F8', 'invalid'],
+    };
+    expect(formatActionShortcuts(bindings, 'save')).toBe('F8');
+    expect(formatActionShortcuts(bindings, 'new')).toBe('Ctrl+S');
+    expect(formatActionShortcuts({ ...bindings, save: [] }, 'save')).toBe('');
+  });
   it('renders readable labels and falls back for unbound entries', () => {
     expect(formatShortcut('ctrl+shift+s')).toBe('Ctrl+Shift+S');
     expect(formatShortcut('ctrl+tab')).toBe('Ctrl+Tab');
