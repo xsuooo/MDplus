@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { generateFixtures } from './perf/generate.mjs';
 import {
   Editor,
   rootCtx,
@@ -233,6 +234,10 @@ describe('Markdown block cache', () => {
 
 describe('plain Markdown parser', () => {
   const remark = unified().use(remarkParse).use(remarkGfm).use(remarkMath);
+
+  beforeAll(async () => {
+    await generateFixtures();
+  });
 
   it('uses a JSON default document for plain content', async () => {
     const host = document.createElement('div');

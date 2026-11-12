@@ -1,18 +1,18 @@
 # 0.2.6 发布收尾记录（2026-11-13）
 
-状态：**本地质量检查与生产覆盖率通过，依赖兼容性与原生验收受阻，尚未达到公开发布标准。** 当前正式版本仍为 [v0.2.5](https://github.com/xsuooo/MDplus/releases/tag/v0.2.5)。最终候选的 CI 和打包继续准备；本记录不表示原生验收已通过或 Issue #2 已完成。
+状态：**依赖兼容性与原生验收受阻，尚未达到公开发布标准。** 当前正式版本仍为 [v0.2.5](https://github.com/xsuooo/MDplus/releases/tag/v0.2.5)。本文件保留依赖诊断和各轮检查范围；最终候选的 CI 与包身份以 [PR #4](https://github.com/xsuooo/MDplus/pull/4) 和文末本地续跑结果为准。本记录不表示原生验收已通过或 Issue #2 已完成。
 
 ## 已确认范围与源码
 
 维护者已确认冻结新功能，按 Windows 10/11 x64 公开发布标准准备 0.2.6；最终源码、安装包摘要、CI 和原生证据必须对应同一候选。依赖维护遵循 [Issue #2 Agent Brief](https://github.com/xsuooo/MDplus/issues/2#issuecomment-6810103965)：先验证 Tokio 同 minor 补丁，再验证仅更新 tauri-utils 的最小路线；失败后停止扩围，交由维护者重新裁定。
 
-| 项目                | 本轮状态                                                                                                        |
-| ------------------- | --------------------------------------------------------------------------------------------------------------- |
-| 本地准备分支        | `codex/release-0.2.6-closeout`                                                                                  |
-| 实施前基线          | `af59d1a9ff9c7bdcddb11dcbfd72b03dbcfbe715`，原分支 `converge/0.2.6`                                             |
-| 已提交的 Tokio 更新 | `9a5bc5c5bff349a4e17ac96e7d5736e39c1071e1`，只修改 Cargo.lock 的版本和 checksum 两行                            |
-| 当前采用版本        | Tokio 1.53.3、tauri-utils 2.9.3、urlpattern 0.3.0；Tauri 2.11.5、单实例插件 2.4.3 保持原版本                    |
-| 远端候选            | [PR #4](https://github.com/xsuooo/MDplus/pull/4) 仍为 draft，head 为 `8b9d98429ccf76f486d873b37cac8d79ea472202` |
+| 项目                | 本轮状态                                                                                                                                                   |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 本地准备分支        | `codex/release-0.2.6-closeout`                                                                                                                             |
+| 实施前基线          | `af59d1a9ff9c7bdcddb11dcbfd72b03dbcfbe715`，原分支 `converge/0.2.6`                                                                                        |
+| 已提交的 Tokio 更新 | `9a5bc5c5bff349a4e17ac96e7d5736e39c1071e1`，只修改 Cargo.lock 的版本和 checksum 两行                                                                       |
+| 当前采用版本        | Tokio 1.53.3、tauri-utils 2.9.3、urlpattern 0.3.0；Tauri 2.11.5、单实例插件 2.4.3 保持原版本                                                               |
+| 远端候选            | [PR #4](https://github.com/xsuooo/MDplus/pull/4) 保持 draft；实施前 head 为 `8b9d98429ccf76f486d873b37cac8d79ea472202`，本轮已同步源码并修正 CI 缺夹具问题 |
 
 当前 Cargo.lock SHA-256：
 
@@ -24,17 +24,17 @@ Cargo.toml 未修改，SHA-256 为 `41f49b47baf5b17cc65d3dae9f57df16e974ddd9926c
 
 ## 实际检查结果
 
-| 检查                         | 结果                                                                 | 证据范围                                                                              |
-| ---------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| 普通 Rust 测试               | 108 passed、0 failed、4 ignored                                      | 使用采用的 Tokio-only 锁文件；忽略项为三个真实符号链接回归和一个性能基线              |
-| 真实 Windows 符号链接        | 3 passed、0 failed、0 ignored                                        | 在恢复 Tokio-only 锁文件后重新编译并运行原有三个断言，不复用 af59 基线结论            |
-| Clippy                       | exit 0，`--all-targets -- -D warnings`                               | 使用采用的 Tokio-only 锁文件                                                          |
-| 前端质量检查                 | 78 文件、836 测试通过                                                | `npm run check`；lint、格式、配置同步检查、两套 TypeScript 与覆盖率门槛通过           |
-| 前端构建与 npm 审计          | `npm run build` 和 `npm run audit:deps` 均 exit 0；0 vulnerabilities | 前端源码和 npm 锁文件未修改                                                           |
-| 完整浏览器回归               | 269 项通过，native IPC mocked                                        | 沿用仓内完整入口；本机 agent-browser 0.41.1，当前 CI 固定 0.41.0                      |
-| Rust 生产覆盖率              | 行 73.16%、函数 55.27%，原门槛 69% / 51% 通过                        | 续跑安装任务专用 cargo-llvm-cov 0.9.1；采用 Tokio-only 锁文件，108 passed / 4 ignored |
-| Windows 交付脚本自检         | 20 项通过                                                            | 当前 PowerShell 7；只使用合成数据，没有在宿主机安装应用                               |
-| 最终 release/NSIS 与安装验收 | 未执行                                                               | 当前没有新安装包摘要和对应 Windows 10/11 原生证据                                     |
+| 检查                    | 结果                                                                 | 证据范围                                                                              |
+| ----------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| 普通 Rust 测试          | 108 passed、0 failed、4 ignored                                      | 使用采用的 Tokio-only 锁文件；忽略项为三个真实符号链接回归和一个性能基线              |
+| 真实 Windows 符号链接   | 3 passed、0 failed、0 ignored                                        | 在恢复 Tokio-only 锁文件后重新编译并运行原有三个断言，不复用 af59 基线结论            |
+| Clippy                  | exit 0，`--all-targets -- -D warnings`                               | 使用采用的 Tokio-only 锁文件                                                          |
+| 前端质量检查            | 78 文件、836 测试通过                                                | `npm run check`；lint、格式、配置同步检查、两套 TypeScript 与覆盖率门槛通过           |
+| 前端构建与 npm 审计     | `npm run build` 和 `npm run audit:deps` 均 exit 0；0 vulnerabilities | 前端源码和 npm 锁文件未修改                                                           |
+| 完整浏览器回归          | 269 项通过，native IPC mocked                                        | 沿用仓内完整入口；本机 agent-browser 0.41.1，当前 CI 固定 0.41.0                      |
+| Rust 生产覆盖率         | 行 73.16%、函数 55.27%，原门槛 69% / 51% 通过                        | 续跑安装任务专用 cargo-llvm-cov 0.9.1；采用 Tokio-only 锁文件，108 passed / 4 ignored |
+| Windows 交付脚本自检    | 20 项通过                                                            | 当前 PowerShell 7；只使用合成数据，没有在宿主机安装应用                               |
+| release/NSIS 与安装验收 | 首轮 02a442c 已构建，但 CI 失败，不能作为最终通过候选                | 后续最终包身份以续跑结果为准；Windows 10/11 原生验收仍未通过                          |
 
 前端覆盖率为语句 71.79%、分支 63.97%、函数 73.53%、行 73.63%。前端检查和构建开始时采用的是后来被拒绝的 utils 组合锁文件；浏览器也以该组合锁文件开始，运行期间锁文件恢复为 Tokio-only。相关前端、npm 锁文件和测试输入始终未修改，结束后与 `9a5bc5c` 的这些输入核对一致。因此这些结果证明本轮前端回归通过，不能充当新 utils 的 Rust 兼容性证据，也不冒充最终候选的完整 CI 和原生验收。
 
@@ -84,13 +84,13 @@ Tauri 2.11.5 的 `src/test/mod.rs:117` 初始化 `AppConfig` 时，未设置 tau
 
 ## 发布门槛与当前阻塞
 
-| 门槛                           | 当前缺口                                                                                             |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| 最终源码与安装包一致           | 9a5bc5c 尚未生成独立来源清单、release/NSIS 与包内 EXE 摘要；本记录的后续文档改动也需纳入最终候选     |
-| 当前提交 CI 与生产覆盖率       | 本轮本地生产覆盖率已通过；PR #4 的绿色 CI 只对应旧 head 8b9d984，仍须同步候选后检查当前提交          |
-| Windows 10/11 x64 安装生命周期 | 全新安装、0.2.5 升级、回滚、再次升级和文件锁拒绝尚无本轮最终候选证据                                 |
-| WebView2 原生文稿与系统交互    | 保存/恢复、中文 IME、100%/125%/150% DPI、真实图片剪贴板、离线 HTML 和系统 PDF 待集中验收             |
-| 干净验收环境与原问题复测       | 当前 Hyper-V 无已注册 VM；续跑通过官方 wsb CLI 重试 Sandbox，仍返回 0x80370106；原问题仍待安装版复测 |
+| 门槛                           | 当前缺口                                                                                                   |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| 最终源码与安装包一致           | 首轮 02a442c 已取得来源清单和包摘要，但缺夹具修复改变了测试输入；最终包必须重新绑定来源，详见续跑结果      |
+| 当前提交 CI 与生产覆盖率       | 本地生产覆盖率已通过；首轮 02a442c 的前端 CI 因两个缺失夹具失败，修复后必须确认新候选 CI，不沿用旧绿色结果 |
+| Windows 10/11 x64 安装生命周期 | 全新安装、0.2.5 升级、回滚、再次升级和文件锁拒绝尚无本轮最终候选证据                                       |
+| WebView2 原生文稿与系统交互    | 保存/恢复、中文 IME、100%/125%/150% DPI、真实图片剪贴板、离线 HTML 和系统 PDF 待集中验收                   |
+| 干净验收环境与原问题复测       | 当前 Hyper-V 无已注册 VM；续跑通过官方 wsb CLI 重试 Sandbox，仍返回 0x80370106；原问题仍待安装版复测       |
 
 本机仍安装先前 af59 修复 payload：`D:\Program Files\MDPlus\mdplus.exe`，版本 0.2.6，SHA-256 为 `bca382c9de76e0171fd38a6d75b5c7649d2b46d1474396cc47e1b3b22992aded`。这不是本轮 Tokio 更新后的安装包，原始文稿问题的安装版复测也未确认。
 
@@ -133,3 +133,11 @@ D:\My Project\MDplus\.audit\release-closeout-resume-20261113-1b3e9d44
 `rust-coverage.json`、`rust-coverage.log`、`rust-coverage-thresholds.log` 和 `rust-coverage-receipt.json` 记录 Tokio-only 源码的实际生产覆盖率。工具固定为 CI 使用的 0.9.1，安装在本次证据目录，没有加入项目依赖或修改全局 PATH。沿用 CI 的排除规则与原门槛，没有删除断言或将忽略的实链用例计入普通覆盖率运行。
 
 `delivery-selftest.log` 记录 20 项交付自检；`environment.json`、`sandbox-before.json`、`sandbox-start.log`、`sandbox-start-receipt.json` 和 `sandbox-after.json` 记录本轮隔离环境核查与启动尝试。Sandbox 重试没有映射宿主机目录，返回“虚拟机或容器意外退出。 (0x80370106)”，没有执行候选安装器。系统设置未修改。最终 CI 和安装包证据随当前候选另行核对，不沿用旧候选结论。
+
+### 干净检出后的测试夹具修复
+
+首轮同步提交 `02a442c` 的 Push / PR 前端 CI 均报告 `tests/perf/fixtures/long-5000.md` 和 `table-1200.md` 缺失。这两个文件由性能夹具生成器产生并被 Git 忽略；本地已有文件，所以本地完整检查没有发现干净检出问题。首轮包已成功构建，但 CI 失败，不作为最终通过的候选，也没有安装或发布。
+
+`tests/markdownCache.test.ts` 现在在该解析器测试组的 `beforeAll` 中调用现有 `generateFixtures()`，先生成合成夹具再读取。没有提交生成物、新增依赖、删断言或修改生产解析器。独立干净检出在没有夹具时复现 2 failed / 15 passed；仅带入修复后的测试文件后为 17 passed。原始记录为 `fixture-red.log`、`fixture-green.log` 和 `fixture-regression.json`。
+
+最终候选的源码提交、输入摘要、安装包 / 包内 EXE 摘要和当前 CI 结果集中记录在本机续跑目录的 `closeout-result.md`、`closeout-result.json` 及交付 manifest 中；远端可公开核对的结果写入现有 PR #4。这里保留首轮失败，不将其改写成成功。
