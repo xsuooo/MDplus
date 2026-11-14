@@ -135,7 +135,8 @@ export const SearchBar = memo(function SearchBar({
 
   const step = (dir: 1 | -1) => {
     if (!keyword) return;
-    const fresh = flushSearch();
+    // Re-running a settled rendered search would reset the current match to the first one.
+    const fresh = source || searchTimer.current !== undefined ? flushSearch() : null;
     if (source) {
       const input = source.input;
       const text = source.api?.read().text ?? source.text;

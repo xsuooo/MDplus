@@ -164,6 +164,52 @@ describe('search across editor changes', () => {
   });
 });
 
+describe('rendered search navigation', () => {
+  const selections = (view: EditorView) => [view.state.selection.from, view.state.selection.to];
+
+  it('walks through every match and wraps in both directions', () => {
+    const { editor, view } = createSearchEditor('aa bb aa cc aa dd aa');
+    render(<SearchBar editor={editor} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索关键词' }), {
+      target: { value: 'aa' },
+    });
+    flushSearch();
+    expect(screen.getByText('4 处')).toBeTruthy();
+    const next = screen.getByRole('button', { name: '下一条匹配' });
+    const visited: number[][] = [];
+    for (let press = 0; press < 4; press += 1) {
+      fireEvent.click(next);
+      visited.push(selections(view));
+    }
+    expect(visited).toEqual([
+      [7, 9],
+      [13, 15],
+      [19, 21],
+      [1, 3],
+    ]);
+    fireEvent.keyDown(screen.getByRole('textbox', { name: '搜索关键词' }), { key: 'Enter' });
+    expect(selections(view)).toEqual([7, 9]);
+    const previous = screen.getByRole('button', { name: '上一条匹配' });
+    fireEvent.click(previous);
+    fireEvent.click(previous);
+    expect(selections(view)).toEqual([19, 21]);
+  });
+
+  it('still flushes a pending query before the first step', () => {
+    const { editor, view } = createSearchEditor('aa bb aa cc aa');
+    render(<SearchBar editor={editor} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索关键词' }), {
+      target: { value: 'aa' },
+    });
+    const next = screen.getByRole('button', { name: '下一条匹配' });
+    fireEvent.click(next);
+    expect(searchPluginKey.getState(view.state)!.count).toBe(3);
+    expect(selections(view)).toEqual([7, 9]);
+    fireEvent.click(next);
+    expect(selections(view)).toEqual([13, 15]);
+  });
+});
+
 describe('search focus restoration', () => {
   it('restores the selected occurrence through the rendered editor focus API', () => {
     const { editor, view } = createSearchEditor('prefix needle suffix');
