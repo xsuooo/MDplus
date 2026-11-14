@@ -113,7 +113,12 @@ export function useDocumentClose(
         if (offerDirtyTab()) return;
         await persistWindowState();
         if (!isCurrent() || offerDirtyTab()) return;
-        await sessionController?.commitClosingSession();
+        try {
+          await sessionController?.commitClosingSession();
+        } catch (err) {
+          // Documents are already protected here; a lost session list must not trap the window.
+          console.error('保存会话失败，仍继续关闭窗口', err);
+        }
         if (!isCurrent() || offerDirtyTab()) return;
         await getCurrentWindow().destroy();
         if (isCurrent()) pendingWindowClose.current = false;
