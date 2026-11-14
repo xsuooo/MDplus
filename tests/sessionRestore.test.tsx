@@ -602,6 +602,22 @@ describe('window-close session transaction', () => {
     expect(mocks.message).toHaveBeenCalled();
   });
 
+  it('still closes the window when the session cannot be written during exit', async () => {
+    const hook = setup([tab('a'), tab('b')]);
+    await act(flush);
+    await act(() => vi.advanceTimersByTimeAsync(501));
+    mocks.persist.mockClear();
+    mocks.message.mockClear();
+    mocks.persist.mockRejectedValue(new Error('settings revision conflict'));
+    await act(async () => {
+      hook.result.current.close.handleWindowClose();
+      await flush();
+    });
+    expect(mocks.persist).toHaveBeenCalled();
+    expect(mocks.destroy).toHaveBeenCalledOnce();
+    expect(mocks.message).not.toHaveBeenCalled();
+  });
+
   it('retains the captured complete list even if native destruction fails after committing', async () => {
     mocks.destroy.mockRejectedValueOnce(new Error('native destruction failed'));
     const hook = setup([tab('a', true), tab('b')]);
