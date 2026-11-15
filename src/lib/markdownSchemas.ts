@@ -296,7 +296,12 @@ export const cachedDocSchema = $node('doc', () => {
         state.openNode('root');
         node.forEach((block) => {
           // shortcut: cache only top-level text blocks/tables without images, extend after validating context and URL invalidation.
-          if (!['paragraph', 'heading', 'table'].includes(block.type.name) || block.marks.length) {
+          // An empty paragraph serializes differently depending on whether it is the last block.
+          if (
+            !['paragraph', 'heading', 'table'].includes(block.type.name) ||
+            block.marks.length ||
+            !block.content.size
+          ) {
             state.next(block);
             return;
           }
