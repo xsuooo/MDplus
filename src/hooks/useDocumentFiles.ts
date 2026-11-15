@@ -204,14 +204,25 @@ export function useDocumentFiles(session: DocumentSession, options: DocumentFile
           return result;
         } catch (err) {
           console.error('打开文件失败', err);
-          let recentRemoved = false;
+          // Only a file confirmed absent loses its recent entry; a locked or
+          // unreachable one may open fine next time.
+          let recentNote = '最近列表中的记录已保留。';
+          let missing = false;
           try {
-            await removeRecentFile(path);
-            const recent = await getRecentFiles();
-            if (alive.current) setRecentFiles(recent);
-            recentRemoved = true;
-          } catch (recentError) {
-            console.warn('最近文件清理暂不可用', recentError);
+            missing = (await documentRevision(path)).revision === null;
+          } catch (probeError) {
+            console.warn('无法确认文件是否仍存在', probeError);
+          }
+          if (missing) {
+            try {
+              await removeRecentFile(path);
+              const recent = await getRecentFiles();
+              if (alive.current) setRecentFiles(recent);
+              recentNote = '如果该文件来自最近列表，已将失效记录移除。';
+            } catch (recentError) {
+              console.warn('最近文件清理暂不可用', recentError);
+              recentNote = '最近列表更新失败，失效记录可能仍会显示。';
+            }
           }
           if (!alive.current) return;
           if (openOptions.silent) {
@@ -219,10 +230,7 @@ export function useDocumentFiles(session: DocumentSession, options: DocumentFile
             return;
           }
           await waitForWindowReady();
-          await showMessage(
-            `无法打开文件:${errorMessage(err)}\n\n${recentRemoved ? '如果该文件来自最近列表，已将失效记录移除。' : '最近列表更新失败，失效记录可能仍会显示。'}`,
-            'error',
-          );
+          await showMessage(`无法打开文件:${errorMessage(err)}\n\n${recentNote}`, 'error');
         } finally {
           for (const ownedKey of ownedKeys) openingPaths.current.delete(ownedKey);
         }
