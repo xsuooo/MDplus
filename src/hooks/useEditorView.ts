@@ -422,6 +422,16 @@ export function useEditorView(
     },
     [setTabs, tabMirror, tabRenderTimers, tabsRef],
   );
+  // 卸载后定时器不能再触发 setTabs。同时删除条目，StrictMode 重放清理后才能重新排入。
+  useEffect(() => {
+    const timers = tabRenderTimers.current;
+    return () => {
+      for (const id of Object.keys(timers)) {
+        clearTimeout(timers[id]);
+        delete timers[id];
+      }
+    };
+  }, [tabRenderTimers]);
 
   const handleEditorActivity = useCallback(
     (id: string, activity: Pick<EditorUpdate, 'canUndo' | 'canRedo'>) => {

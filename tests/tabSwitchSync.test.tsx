@@ -147,6 +147,20 @@ describe('tab activation synchronization', () => {
       vi.useRealTimers();
     }
   });
+  it('cancels a queued tab render when the hook unmounts', () => {
+    vi.useFakeTimers();
+    try {
+      const hook = setup([initialTab('a', 'Original source.\n')]);
+      vi.mocked(computeStats).mockClear();
+      act(() => hook.result.current.view.handleSourceChange('a', 'Latest source.\n'));
+      hook.unmount();
+      expect(vi.getTimerCount()).toBe(0);
+      vi.advanceTimersByTime(TAB_RENDER_MS);
+      expect(computeStats).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it('uses existing source for initial metadata without serializing again', async () => {
     const fixture = await createFixture('# Original\n');
     fixture.serialize.mockClear();
