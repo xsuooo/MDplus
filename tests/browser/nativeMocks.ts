@@ -345,9 +345,17 @@ export function createNativeMocks(options: NativeMockOptions = {}) {
     if (options.settingsMode !== 'delegate' && command === 'save_settings') {
       const next = jsonValues(args.values);
       const previous = settingsSnapshot();
-      check(args.expectedRevision === previous.revision, 'settings revision conflict');
+      // Same shape as the native SettingsError for a rejection that wrote nothing.
+      const stale = (message: string) =>
+        Object.assign(new Error(`Native fixture: ${message}`), {
+          code: 'CONFLICT',
+          writeState: 'unchanged',
+        });
+      if (args.expectedRevision !== previous.revision) throw stale('settings revision conflict');
       await options.beforeSaveSettings?.(structuredClone(next), structuredClone(previous));
-      check(args.expectedRevision === settingsSnapshot().revision, 'settings changed during save');
+      if (args.expectedRevision !== settingsSnapshot().revision) {
+        throw stale('settings changed during save');
+      }
       settings.clear();
       for (const [key, value] of Object.entries(next)) settings.set(key, value);
       settingsExists = true;

@@ -29,9 +29,9 @@
 
 ## 设置持久化
 
-`load_settings()` 返回 `{ values, revision }`，文件不存在时为 `{ values: {}, revision: null }`。`save_settings({ values, expectedRevision })` 只在完整 JSON 原子提交并核验后返回 `{ revision }`，外部修改产生冲突，不能盲覆盖。
+`load_settings()` 返回 `{ values, revision }`，文件不存在时为 `{ values: {}, revision: null }`。`save_settings({ values, expectedRevision })` 只在完整 JSON 原子提交并核验后返回 `{ revision }`，外部修改产生冲突，不能盲覆盖。`save_settings` 失败时返回 `{ code, message, writeState }`；确认未写入的冲突（`code: "CONFLICT"`、`writeState: "unchanged"`）不保留 `.mdplus-save-*` 副本目录，因为调用方仍持有这些值并会重试，副本目录删除失败时仍在 message 中给出其位置。
 
-[设置适配器](../src/services/settingsStore.ts)继续提供 `get/set/save`：get/set 隔离对象引用，set 在发布内存候选前检查 JSON 可序列化性与容量；save 串行提交其调用时的快照，仅在成功时推进 revision。读取失败允许重新加载，写入失败保留待保存值供重试。原生不再注册或依赖 Store 插件，能力列表也不含 `store:*`；因此不存在插件退出时无条件 `fs::write` 截断设置的旁路，也没有新增的退出隐式保存。
+[设置适配器](../src/services/settingsStore.ts)继续提供 `get/set/save`：get/set 隔离对象引用，set 在发布内存候选前检查 JSON 可序列化性与容量；save 串行提交其调用时的快照，仅在成功时推进 revision。每次保存写出的是「已知磁盘内容 + 尚未落盘的本地改动」。仅当保存因确认未写入的冲突被拒绝时，适配器才重新读取设置：若磁盘 revision 已变化，则以磁盘内容为底叠加尚未落盘的本地改动并重试一次，排队中的后续保存也基于新的磁盘内容；磁盘未变化、无法读取或其他任何失败（含已提交或结果不明的写入）都不自动重写，按原错误失败。读取失败允许重新加载，写入失败保留待保存值供重试。原生不再注册或依赖 Store 插件，能力列表也不含 `store:*`；因此不存在插件退出时无条件 `fs::write` 截断设置的旁路，也没有新增的退出隐式保存。
 
 ## 图片传输、预览与历史缓存
 
