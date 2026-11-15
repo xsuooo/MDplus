@@ -85,9 +85,24 @@ export function useExternalChanges(
             await cancelReload();
             return;
           }
-          images = await prepareImageReferences(tabId, snapshot.content, tab.path, {
-            refresh: true,
-          });
+          try {
+            images = await prepareImageReferences(tabId, snapshot.content, tab.path, {
+              refresh: true,
+            });
+          } catch (error) {
+            // The document was just read, so this is not a missing file: keep the local
+            // version exactly as if the reload had been declined.
+            console.warn('准备磁盘版本的图片失败', error);
+            pauseAutoSave(tabId, detectedMtime);
+            const active = tabId === currentView.current.activeId;
+            updateTab(tabId, { externalMtime: detectedMtime, externalChanged: !active });
+            if (active)
+              await showMessage(
+                `无法载入「${tab.title}」磁盘版本中的图片,本次未重新加载,已保留本地内容。磁盘上的文件没有被改动。`,
+                'error',
+              );
+            return;
+          }
           if (!canApply()) {
             await cancelReload();
             return;
