@@ -98,8 +98,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-      - name: Use Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Use Rust 1.99.1
+        uses: dtolnay/rust-toolchain@1.99.1
         with:
           components: rustfmt, clippy, llvm-tools-preview
       - name: Use Node.js for coverage validation
