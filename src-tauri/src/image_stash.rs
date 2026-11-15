@@ -104,7 +104,7 @@ impl Stash {
         if length > limit.saturating_sub(self.total_bytes)
             || self.files.len() >= MAX_IMAGE_STASH_ENTRIES
         {
-            return Err("session image stash is full; existing undo images were retained".into());
+            return Err("图片暂存空间已满，已有图片未受影响。请关闭其他含图片的文稿后重试".into());
         }
         if self.directory.is_none() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
