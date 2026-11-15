@@ -179,6 +179,24 @@ describe('Markdown block cache', () => {
     expect(paragraph).toHaveBeenCalledTimes(1);
     expect(serialize(original)).not.toContain('Latest');
   });
+  it('keeps an empty paragraph that stops being the last block', async () => {
+    const outputs = [];
+    for (const cached of [false, true]) {
+      const { view, serialize } = await fixture(cached);
+      const { paragraph } = view.state.schema.nodes;
+      view.dispatch(view.state.tr.insert(view.state.doc.content.size, paragraph.create()));
+      const whileLast = serialize(view.state.doc);
+      view.dispatch(
+        view.state.tr.insert(
+          view.state.doc.content.size,
+          paragraph.create(null, view.state.schema.text('After')),
+        ),
+      );
+      outputs.push([whileLast, serialize(view.state.doc)]);
+    }
+    expect(outputs[1]).toEqual(outputs[0]);
+    expect(outputs[1][1]).toContain('<br />');
+  });
   it('does not cache image URLs that change without a document edit', async () => {
     let directory = './one/';
     const { parse, serialize } = await fixture(true, (src) => directory + src);
