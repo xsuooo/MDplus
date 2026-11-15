@@ -190,6 +190,27 @@ describe('saved-file startup restoration', () => {
     expect(hook.result.current.files.startupResolved).toBe(true);
     expect(mocks.message).not.toHaveBeenCalled();
   });
+  it('removes the recent entry only for a file confirmed missing', async () => {
+    mocks.waitWindow.mockResolvedValue(undefined);
+    const hook = setup();
+    await act(flush);
+    await act(() => hook.result.current.files.openFileFromPath(path('gone')));
+    expect(mocks.removeRecent).toHaveBeenCalledWith(path('gone'));
+    expect(mocks.message.mock.calls.at(-1)?.[0]).toContain('已将失效记录移除');
+
+    mocks.removeRecent.mockClear();
+    file('locked');
+    mocks.read.mockRejectedValueOnce(new Error('sharing violation'));
+    await act(() => hook.result.current.files.openFileFromPath(path('locked')));
+    expect(mocks.removeRecent).not.toHaveBeenCalled();
+    expect(mocks.message.mock.calls.at(-1)?.[0]).toContain('记录已保留');
+
+    mocks.read.mockRejectedValueOnce(new Error('network path unavailable'));
+    mocks.revision.mockRejectedValueOnce(new Error('network path unavailable'));
+    await act(() => hook.result.current.files.openFileFromPath(path('offline')));
+    expect(mocks.removeRecent).not.toHaveBeenCalled();
+    expect(mocks.message.mock.calls.at(-1)?.[0]).toContain('记录已保留');
+  });
   it('reads current disk bodies in saved order and restores active tab/mode without touching drafts', async () => {
     const saved = snapshot('a', 'b', 'c');
     const oldBody = '# Old disk body\n\nSelected paragraph.\n';
