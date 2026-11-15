@@ -165,7 +165,7 @@ describe('local versions without a matching disk copy', () => {
   it('keeps the local version without reporting a missing file when reload images fail', async () => {
     mocks.confirm.mockResolvedValue(true);
     vi.mocked(prepareImageReferences).mockRejectedValueOnce(
-      new Error('session image stash is full; existing undo images were retained'),
+      new Error('图片暂存空间已满，已有图片未受影响。请关闭其他含图片的文稿后重试'),
     );
     const hook = setup();
     await poll();
