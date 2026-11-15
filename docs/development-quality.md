@@ -31,7 +31,7 @@
 
 ## 本地入口与 CI
 
-需要 Node 22.13+（CI 使用 Node 22 / 浏览器使用 26.13）、Rust stable、rustfmt、Clippy 和 `llvm-tools-preview`。项目格式由 Prettier、EditorConfig 和 Git LF 规则统一；Rust 使用 rustfmt。
+需要 Node 22.13+（CI 使用 Node 22 / 浏览器使用 26.13）、Rust stable、rustfmt、Clippy 和 `llvm-tools-preview`。项目格式由 Prettier、EditorConfig 和 Git LF 规则统一；Rust 使用 rustfmt。CI 的 Rust 任务固定为 1.99.1（见 [ci.yml](../.github/workflows/ci.yml)），不随 stable 自动更新；升级时修改该处的版本号，并确认覆盖率门槛仍然通过。
 
 ```powershell
 npm ci
