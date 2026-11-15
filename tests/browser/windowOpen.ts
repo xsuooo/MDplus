@@ -154,8 +154,11 @@ export async function runWindowOpenRegression(testCase: WindowOpenCase): Promise
         fileReadFinished = true;
         return { path: filePath, content: markdown, revision: 'window-open:initial', mtime: 1 };
       }
+      // The failed fixture is a file that is gone: only then is its recent entry dropped.
       if (command === 'document_revision')
-        return { path: filePath, revision: 'window-open:initial', mtime: 1 };
+        return failedFile
+          ? { path: filePath, revision: null, mtime: null }
+          : { path: filePath, revision: 'window-open:initial', mtime: 1 };
       return defaults.invoke(command, args);
     },
   });
