@@ -6,6 +6,7 @@ import { useDocumentSession } from '../src/hooks/useDocumentSession';
 import { useDocumentClose } from '../src/hooks/useDocumentClose';
 import { useExternalChanges } from '../src/hooks/useExternalChanges';
 import { useRecovery } from '../src/hooks/useRecovery';
+import { prepareImageReferences } from '../src/lib/imageOps';
 import type { Tab } from '../src/lib/types';
 
 const mocks = vi.hoisted(() => ({
@@ -159,6 +160,23 @@ describe('local versions without a matching disk copy', () => {
     await act(async () => hook.result.current.close.closeTabRequest('a'));
     expect(hook.result.current.session.tabsRef.current).toHaveLength(0);
     expect(hook.result.current.close.pendingCloseTab).toBeNull();
+  });
+
+  it('keeps the local version without reporting a missing file when reload images fail', async () => {
+    mocks.confirm.mockResolvedValue(true);
+    vi.mocked(prepareImageReferences).mockRejectedValueOnce(
+      new Error('session image stash is full; existing undo images were retained'),
+    );
+    const hook = setup();
+    await poll();
+    const { session } = hook.result.current;
+    expect(session.tabsRef.current[0].markdown).toBe('local original A');
+    // The detected disk mtime, not -1: the file is known to exist.
+    expect(session.blockedExternalMtime.current.a).toBe(2);
+    const shown = mocks.message.mock.calls.map(([text]) => String(text));
+    expect(shown).toHaveLength(1);
+    expect(shown[0]).toContain('图片');
+    expect(shown[0]).not.toContain('已被删除');
   });
 
   it('rechecks disk-only protection that appears while clean-close cleanup is pending', async () => {
