@@ -78,6 +78,34 @@ fn review_m3_stale_or_missing_revision_cannot_replace_external_or_damaged_settin
     assert_eq!(fs::read_to_string(path).unwrap(), "{damaged original");
 }
 
+#[test]
+fn rejected_stale_saves_leave_no_retained_copies_beside_the_settings() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("settings.json");
+    fs::write(&path, r#"{"theme-mode":"light"}"#).unwrap();
+    let stale = read_settings(&path).unwrap().revision;
+    fs::write(&path, r#"{"theme-mode":"external"}"#).unwrap();
+    for _ in 0..3 {
+        let error = persist_settings(&path, values("local"), stale.clone()).unwrap_err();
+        assert_eq!((error.code, error.write_state), ("CONFLICT", "unchanged"));
+        assert!(!error.message.contains("本地副本"));
+        // The frontend reads exactly these field names.
+        assert_eq!(
+            serde_json::to_value(&error).unwrap(),
+            serde_json::json!({
+                "code": "CONFLICT",
+                "message": "settings changed on disk; the file was not overwritten",
+                "writeState": "unchanged",
+            })
+        );
+    }
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+    assert_eq!(
+        read_settings(&path).unwrap().values["theme-mode"],
+        "external"
+    );
+}
+
 #[cfg(windows)]
 #[test]
 fn review_m3_interrupted_replacement_keeps_complete_old_settings_and_allows_retry() {
@@ -96,7 +124,8 @@ fn review_m3_interrupted_replacement_keeps_complete_old_settings_and_allows_retr
         .open(&path)
         .unwrap();
     let error = persist_settings(&path, values("dark"), expected.clone()).unwrap_err();
-    assert!(error.contains("本地副本"));
+    assert_ne!(error.code, "CONFLICT");
+    assert!(error.message.contains("本地副本"));
     assert_eq!(fs::read_to_string(&path).unwrap(), original);
     drop(held);
     let receipt = persist_settings(&path, values("dark"), expected).unwrap();
