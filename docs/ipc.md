@@ -4,20 +4,21 @@
 
 `tauri-build::AppManifest` 将目录中的命令纳入 Tauri 权限检查；仅本地主窗口 `main` 获准使用，不配置远程来源或窗口通配符。[契约测试](../tests/ipcContract.test.ts)核对这些声明、原生参数及容量配置；Rust 测试核对真实序列化响应。请求类型、路径、容量及内容版本由原生校验，前端检查不能替代原生边界。
 
-| 命令                                                                            | 用途与边界                                                                                                                               |
-| ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `read_document`、`document_revision`                                            | 返回绑定字节版本的快照或版本，以及校验后的绝对路径；拒绝设备命名空间、控制字符、非法文件名、目录、链接和过大文件                         |
-| `write_document`                                                                | 必须提交当前版本；`expectedRevision: null` 只创建不存在的目标；冲突或替换不确定时保留独立本地稿件及可取得的替换前副本                    |
-| `save_image_asset`                                                              | 校验 basename、图片类型和 64 MiB 上限；只在文稿旁的 `assets` 中排他创建，或复用完整的相同内容；返回 `allocationId`                       |
-| `commit_image_assets`、`discard_image_assets`                                   | 仅接受本进程分配的随机 token，不接受文件路径；完成或放弃本轮图片迁移，详见下文                                                           |
-| `read_image_file`                                                               | 文稿必须是常规文件；图片只能在规范化后的文稿目录以内，并校验扩展名、内容类型及容量                                                       |
-| `import_dropped_image`                                                          | 接受拖入或选择的绝对 PNG/JPG/JPEG 常规文件路径；检查格式、容量并实际解码，将原始字节复制到本进程图片 stash，返回元数据，不修改来源文件   |
-| `stash_image`、`read_stashed_image`、`discard_stashed_images`                   | 独立的本进程图片历史缓存；随机 key 只索引持有的文件句柄，与恢复快照目录和清理生命周期完全隔离                                            |
-| `export_html`                                                                   | 只接受 `.html` 常规文件目标；独立 512 MiB 输出预算覆盖字体和 Base64 图片，修订探测、原子提交、备份校验都使用同一预算                     |
-| `load_settings`、`save_settings`                                                | 无路径参数；固定应用数据目录的设置文件。损坏 JSON、非普通文件、重解析点或超过 1 MiB 的文件拒绝读取并保留；保存以已加载 revision 原子提交 |
-| `take_startup_files`、`take_pending_open_files`                                 | 消费经过原生 Markdown 参数筛选的启动／单实例队列；相对路径先绑定发送进程 cwd，再筛选常规文件，绝不修改全局 cwd                           |
-| `cache_recovery_image`、`write_recovery_snapshot`                               | 恢复 ID、图片键、图片类型和容量均校验；请求包含在途 `retainedKeys`，返回附件回收回执；仅操作应用恢复目录                                 |
-| `list_recovery_snapshots`、`read_recovery_snapshot`、`delete_recovery_snapshot` | 仅访问合法恢复 ID；拒绝目录逃逸与重解析点；不删除独立 session stash 中仍可 Undo 的图片                                                   |
+| 命令                                                                            | 用途与边界                                                                                                                                          |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `read_document`、`document_revision`                                            | 返回绑定字节版本的快照或版本，以及校验后的绝对路径；拒绝设备命名空间、控制字符、非法文件名、目录、链接和过大文件                                    |
+| `write_document`                                                                | 必须提交当前版本；`expectedRevision: null` 只创建不存在的目标；冲突或替换不确定时保留独立本地稿件及可取得的替换前副本                               |
+| `save_image_asset`                                                              | 校验 basename、图片类型和 64 MiB 上限；只在文稿旁的 `assets` 中排他创建，或复用完整的相同内容；返回 `allocationId`                                  |
+| `commit_image_assets`、`discard_image_assets`                                   | 仅接受本进程分配的随机 token，不接受文件路径；完成或放弃本轮图片迁移，详见下文                                                                      |
+| `read_image_file`                                                               | 文稿必须是常规文件；图片只能在规范化后的文稿目录以内，并校验扩展名、内容类型及容量                                                                  |
+| `import_dropped_image`                                                          | 接受拖入或选择的绝对 PNG/JPG/JPEG 常规文件路径；检查格式、容量并实际解码，将原始字节复制到本进程图片 stash，返回元数据，不修改来源文件              |
+| `stash_image`、`read_stashed_image`、`discard_stashed_images`                   | 独立的本进程图片历史缓存；随机 key 只索引持有的文件句柄，与恢复快照目录和清理生命周期完全隔离                                                       |
+| `export_html`                                                                   | 只接受 `.html` 常规文件目标；独立 512 MiB 输出预算覆盖字体和 Base64 图片，修订探测、原子提交、备份校验都使用同一预算                                |
+| `load_settings`、`save_settings`                                                | 无路径参数；固定应用数据目录的设置文件。损坏 JSON、非普通文件、重解析点或超过 1 MiB 的文件拒绝读取并保留；保存以已加载 revision 原子提交            |
+| `take_startup_files`、`take_pending_open_files`                                 | 消费经过原生 Markdown 参数筛选的启动／单实例队列；相对路径先绑定发送进程 cwd，再筛选常规文件，绝不修改全局 cwd                                      |
+| `cache_recovery_image`、`write_recovery_snapshot`                               | 恢复 ID、图片键、图片类型和容量均校验；请求包含在途 `retainedKeys`，返回附件回收回执；仅操作应用恢复目录                                            |
+| `cache_recovery_document_image`                                                 | 图片 stash 已满时，把仍以文稿旁文件为准的图片直接复制进恢复目录；读取边界同 `read_image_file`，文件的 SHA-256 必须等于请求中的 `digest`，否则不写入 |
+| `list_recovery_snapshots`、`read_recovery_snapshot`、`delete_recovery_snapshot` | 仅访问合法恢复 ID；拒绝目录逃逸与重解析点；不删除独立 session stash 中仍可 Undo 的图片                                                              |
 
 已移除 `read_file`、`write_file`、`file_mtime`、`create_directory`、`save_binary_file` 等旧入口。内部恢复写入辅助函数不暴露给 WebView。
 
@@ -43,6 +44,8 @@
 
 `stash_image({ filename, dataBase64 })` 返回 `{ key, mime, previewUrl }`；`read_stashed_image({ key })` 返回 `{ mime, dataBase64 }`；`discard_stashed_images({ keys })` 只关闭本进程登记的句柄。缓存总磁盘预算为 1 GiB，最多 4096 项；达到上限会明确失败，不驱逐既有 Undo 数据。只有成功 stash 后前端才可释放唯一内存副本。
 
+`stash_image` 失败时返回 `{ code, message }`。只有总容量或条目数用尽时 `code` 为 `"STASH_FULL"`，此时既有条目均未改动；文件名、编码、图片类型、单图容量及 I/O 等其他失败为 `"STASH_FAILED"`。前端只按 `code` 判断，不匹配 message 文本。编辑、保存和草稿保护之前的图片准备（非刷新）读到文稿旁的图片却遇到 `STASH_FULL` 时，不再整体失败：该图片不进入 stash、没有 `previewUrl`，继续以文稿旁的文件为准，前端只记录读取时的长度和 SHA-256，因此文字保存、自动保存和草稿保护不被阻塞；之后每次准备都会重新读取该文件并再次尝试进入 stash。另存到其他目录时，这类图片从原文件重新读取，长度和 SHA-256 与记录一致才写入新的 `assets`，不一致则拒绝。打开文稿、外部修改后重新加载、恢复草稿、粘贴图片仍在 stash 已满时失败；`import_dropped_image` 的容量失败仍是字符串错误。
+
 Windows stash 文件在发布 key 前就设置 delete-pending，读取始终通过保留句柄并在互斥锁内 seek/read；释放 key 或进程终止会关闭句柄并释放图片字节。会话目录和恢复快照不共用，因此正常保存清理 recovery 不会破坏 Undo。
 
 `previewUrl` 是进程内只读 `mdplus-image-stash` 资源地址；Windows 使用 `http://mdplus-image-stash.localhost/<key>`。协议只接受随机 key，不解释路径、目录跳转或外部 URL；只允许 GET，读取与 IPC 共用串行锁和单图上限。响应包含校验后的 MIME、`nosniff`、`no-store` 及禁止脚本/外链的沙箱 CSP，不开放通用 CORS。主 CSP 仅在 `img-src` 精确放行这些源，不扩大脚本或网络权限。**独立 HTML 导出必须内嵌图片数据，不能保留临时 previewUrl。**
@@ -55,11 +58,13 @@ Windows 原生在 `create_new` 时取得 DELETE 权限并保留只共享读取�
 
 前端只在正文确定 `writeState: unchanged`（包括尚未发出写请求）时 discard。请求已经发出但结果不明、取消时写入仍可能继续，或者结果为 `unknown`/`committed`，必须 commit 并保守保留资产。不能把异常字符串误当作“正文未写入”。图片清理失败应展示，不能掩盖主保存错误。
 
-文稿命令以 `FileError` 拒绝 Promise。调用者必须保留 dirty 状态，展示已保留的恢复／备份路径，不自动覆盖目标“回滚”。其他命令以字符串错误拒绝。关闭协调器核对异步操作后的请求代次和内容版本；取消关闭不会撤销已经发出的磁盘保存。
+文稿命令以 `FileError` 拒绝 Promise。调用者必须保留 dirty 状态，展示已保留的恢复／备份路径，不自动覆盖目标“回滚”。`save_settings` 以 `{ code, message, writeState }`、`stash_image` 以 `{ code, message }` 拒绝，其余命令以字符串错误拒绝。关闭协调器核对异步操作后的请求代次和内容版本；取消关闭不会撤销已经发出的磁盘保存。
 
 ## 恢复附件回收
 
 `cache_recovery_image({ id, key, stashKey, retainedKeys })` 和 `write_recovery_snapshot({ snapshot, retainedKeys })` 都返回 `{ removedKeys: string[], cleanupError: string | null }`。`stashKey` 只索引本进程持有的图片句柄，不接受路径或 Base64；原生在线程池内将已校验的原始字节复制到恢复目录，继续校验恢复图片类型、键和容量。前端沿用串行图片 I/O 队列，并在缓存完成前保留独立租约，因此关闭标签或取消插入不会释放在途副本，也不会同时积累多个大图工作缓冲。
+
+`cache_recovery_document_image({ id, key, docPath, relativePath, digest, retainedKeys })` 用于未能进入 stash 的文稿图片，返回同样的回收回执。原生在恢复锁内按 `read_image_file` 的同一边界（常规文稿、规范化后的文稿目录以内、扩展名、内容类型及容量）读取文件，要求其 SHA-256 等于 `digest`（64 位小写十六进制）；不一致时以 `image changed after it was prepared` 拒绝且不写入，一致时把这些已核对的字节复制进恢复目录，此后快照不再依赖原文件。该命令不接受 Base64 或 stash key。同一图片键不能改写为不同内容：文件变化后前端重新准备图片并使用新的键。
 
 `retainedKeys` 最多 4096 项，只允许合法恢复图片键；不接受路径。前端提交当前冻结快照、待写快照和在途图片的键，并根据 `removedKeys` 失效已缓存标记。快照文件格式不变，既有恢复副本仍可读取。
 

@@ -5,6 +5,7 @@ import {
   getInFlightImages,
   restorePendingImages,
   stagePendingImages,
+  type PendingImageFile,
   type PendingImageLease,
 } from './imageOps';
 import { getImageUrls, isRelativeImageUrl, rewriteImageReferences } from './imagePaths';
@@ -94,7 +95,7 @@ function applyCleanup(entry: Journal, cleanup: RecoveryCleanup): void {
 
 async function cacheImage(
   id: string,
-  image: { placeholder: string; filename: string },
+  image: { placeholder: string; filename: string; file?: PendingImageFile },
   entry: Journal,
   lease: PendingImageLease,
   images: readonly { placeholder: string; filename: string }[],
@@ -102,14 +103,28 @@ async function cacheImage(
   const key = imageKey(image);
   if (!entry.cached.has(key)) {
     try {
-      const cleanup = await lease.withStashKey(image.placeholder, (stashKey) =>
-        invoke<RecoveryCleanup>('cache_recovery_image', {
-          id,
-          key,
-          stashKey,
-          retainedKeys: retainedKeys(id, entry, images),
-        }),
-      );
+      // An image the full stash could not admit is copied from its own file. The copy
+      // is refused unless the file still has the digest recorded when it was prepared,
+      // so the snapshot never reports protection for bytes nobody checked.
+      const cleanup = image.file
+        ? await lease.withFile(image.placeholder, (file) =>
+            invoke<RecoveryCleanup>('cache_recovery_document_image', {
+              id,
+              key,
+              docPath: file.docPath,
+              relativePath: file.relativePath,
+              digest: file.digest,
+              retainedKeys: retainedKeys(id, entry, images),
+            }),
+          )
+        : await lease.withStashKey(image.placeholder, (stashKey) =>
+            invoke<RecoveryCleanup>('cache_recovery_image', {
+              id,
+              key,
+              stashKey,
+              retainedKeys: retainedKeys(id, entry, images),
+            }),
+          );
       applyCleanup(entry, cleanup);
       entry.cached.add(key);
     } catch (error) {
@@ -150,6 +165,7 @@ function capture(tab: Pick<Tab, 'id' | 'title' | 'path' | 'markdown'>) {
       key: imageKey(image),
       sourceUrl: image.source?.url,
       byteLength: image.byteLength,
+      file: image.file,
     }));
     for (const url of urls) {
       if (

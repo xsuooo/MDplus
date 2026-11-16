@@ -36,6 +36,7 @@
     "allow-take-startup-files",
     "allow-take-pending-open-files",
     "allow-cache-recovery-image",
+    "allow-cache-recovery-document-image",
     "allow-write-recovery-snapshot",
     "allow-list-recovery-snapshots",
     "allow-read-recovery-snapshot",

@@ -11,6 +11,7 @@ import { SearchBar } from './components/SearchBar';
 import { SettingsNotice } from './components/SettingsNotice';
 import { SessionRestoreNotice } from './components/SessionRestoreNotice';
 import { ImageDropNotice } from './components/ImageDropNotice';
+import { ImageStashNotice } from './components/ImageStashNotice';
 import { ShortcutModal } from './components/ShortcutModal';
 import { SourceEditor } from './components/SourceEditor';
 import { StatusBar } from './components/StatusBar';
@@ -428,6 +429,8 @@ export default function App() {
         progress={imageDropProgress}
         onDismiss={() => setImageDropResult(null)}
       />
+
+      <ImageStashNotice tabId={activeId} />
 
       <div className="app-body">
         <Presence present={outlineOpen}>

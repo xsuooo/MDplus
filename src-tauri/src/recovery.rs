@@ -1,3 +1,4 @@
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -6,8 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 
 use crate::{
-    image_mime, image_stash::ImageStash, write_file_atomic, MAX_IMAGE_FILE_BYTES,
-    MAX_TEXT_FILE_BYTES,
+    image_mime, image_stash::ImageStash, read_document_image, write_file_atomic,
+    MAX_IMAGE_FILE_BYTES, MAX_TEXT_FILE_BYTES,
 };
 
 use crate::config::{
@@ -454,6 +455,63 @@ pub async fn cache_recovery_image(
             &id,
             &key,
             &stash_key,
+            &retained_keys,
+        )
+    })
+    .await
+    .map_err(|error| format!("恢复图片缓存任务失败：{error}"))?
+}
+
+/// Copy an image the full session stash could not admit straight from its
+/// file beside the document. The copy is refused unless the file still has the
+/// digest recorded when the image was prepared, so a snapshot never owns
+/// bytes other than the ones the document was showing.
+fn cache_document_image(
+    root: &Path,
+    id: &str,
+    key: &str,
+    doc_path: &Path,
+    relative_path: &Path,
+    digest: &str,
+    retained_keys: &[String],
+) -> Result<Cleanup, String> {
+    identifier(id)?;
+    image_path(Path::new(""), key)?;
+    validate_retained_keys(retained_keys)?;
+    if digest.len() != 64
+        || !digest
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err("invalid image digest".into());
+    }
+    let _lock = IO_LOCK.lock().map_err(|_| "recovery storage lock failed")?;
+    // Read under the recovery lock so simultaneous IPC cannot multiply image buffers.
+    let (_, _, data) = read_document_image(doc_path, relative_path)?;
+    if format!("{:x}", Sha256::digest(&data)) != digest {
+        return Err("image changed after it was prepared".into());
+    }
+    cache_image(root, id, key, &data, retained_keys)
+}
+
+#[tauri::command]
+pub async fn cache_recovery_document_image(
+    app: tauri::AppHandle,
+    id: String,
+    key: String,
+    doc_path: String,
+    relative_path: String,
+    digest: String,
+    retained_keys: Vec<String>,
+) -> Result<Cleanup, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        cache_document_image(
+            &root(&app)?,
+            &id,
+            &key,
+            Path::new(&doc_path),
+            Path::new(&relative_path),
+            &digest,
             &retained_keys,
         )
     })

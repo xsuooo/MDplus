@@ -315,10 +315,13 @@ fn image_mime(path: &Path, bytes: &[u8]) -> Result<&'static str, String> {
     }
 }
 
-/// Only read supported images inside the directory of the user-opened document.
-#[tauri::command]
-fn read_image_file(doc_path: String, relative_path: String) -> Result<ImageFile, String> {
-    let path = document_image_path(Path::new(&doc_path), Path::new(&relative_path))?;
+/// Only read supported images inside the directory of the user-opened document,
+/// and never more than the image size limit.
+fn read_document_image(
+    doc_path: &Path,
+    relative_path: &Path,
+) -> Result<(PathBuf, &'static str, Vec<u8>), String> {
+    let path = document_image_path(doc_path, relative_path)?;
     let file = File::open(&path).map_err(|e| e.to_string())?;
     let metadata = file.metadata().map_err(|e| e.to_string())?;
     if !metadata.is_file() {
@@ -340,8 +343,15 @@ fn read_image_file(doc_path: String, relative_path: String) -> Result<ImageFile,
             MAX_IMAGE_FILE_BYTES
         ));
     }
+    let mime = image_mime(&path, &data)?;
+    Ok((path, mime, data))
+}
+
+#[tauri::command]
+fn read_image_file(doc_path: String, relative_path: String) -> Result<ImageFile, String> {
+    let (path, mime, data) = read_document_image(Path::new(&doc_path), Path::new(&relative_path))?;
     Ok(ImageFile {
-        mime: image_mime(&path, &data)?,
+        mime,
         path: path.to_string_lossy().into_owned(),
         data_base64: image_data::encode_image(&data),
     })
@@ -507,6 +517,7 @@ pub fn run() {
             take_startup_files,
             take_pending_open_files,
             recovery::cache_recovery_image,
+            recovery::cache_recovery_document_image,
             recovery::write_recovery_snapshot,
             recovery::list_recovery_snapshots,
             recovery::read_recovery_snapshot,

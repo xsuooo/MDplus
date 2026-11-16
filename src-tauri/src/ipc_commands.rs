@@ -18,6 +18,7 @@ pub const COMMANDS: &[&str] = &[
     "take_startup_files",
     "take_pending_open_files",
     "cache_recovery_image",
+    "cache_recovery_document_image",
     "write_recovery_snapshot",
     "list_recovery_snapshots",
     "read_recovery_snapshot",
