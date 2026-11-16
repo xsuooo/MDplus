@@ -82,6 +82,7 @@ pub struct ImageReceipt {
     pub filename: String,
     pub relative_path: String,
     pub path: String,
+    pub allocation_id: Option<String>,
 }
 
 fn display(path: &Path) -> String {
@@ -91,7 +92,7 @@ fn revision(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
-fn valid_basename(name: &str) -> bool {
+pub(crate) fn valid_basename(name: &str) -> bool {
     if name.is_empty()
         || name == "."
         || name == ".."
@@ -122,7 +123,7 @@ fn valid_basename(name: &str) -> bool {
     true
 }
 
-fn is_link(metadata: &fs::Metadata) -> bool {
+pub(crate) fn is_link(metadata: &fs::Metadata) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
@@ -187,23 +188,31 @@ pub(crate) fn target_path(path: &Path) -> Result<PathBuf, Box<FileError>> {
     }
 }
 
-struct RawSnapshot {
+pub(crate) struct RawSnapshot {
     // Keeping this handle alive denies in-place writers/deletion on Windows.
     _file: File,
-    bytes: Vec<u8>,
-    revision: String,
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) revision: String,
     mtime: u64,
 }
 
-fn raw_snapshot(path: &Path) -> Result<RawSnapshot, Box<FileError>> {
+fn raw_snapshot(path: &Path, limit: u64) -> Result<RawSnapshot, Box<FileError>> {
     let mut options = OpenOptions::new();
     options.read(true);
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
-        use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
-        options.share_mode(FILE_SHARE_READ);
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
+        };
+        // Inspect the opened leaf itself: a preflight check cannot prevent a
+        // file from being replaced with a reparse point before this open.
+        options
+            .share_mode(FILE_SHARE_READ)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
     }
+    #[cfg(test)]
+    hooks::run(hooks::Checkpoint::BeforeReadOpen, path);
     let mut file = options
         .open(path)
         .map_err(|error| FileError::io(path, error))?;
@@ -213,25 +222,25 @@ fn raw_snapshot(path: &Path) -> Result<RawSnapshot, Box<FileError>> {
     if !metadata.is_file() || is_link(&metadata) {
         return Err(FileError::new("INVALID_PATH", path, "不是常规文件"));
     }
-    if metadata.len() > MAX_TEXT_FILE_BYTES {
+    if metadata.len() > limit {
         return Err(FileError::new(
             "TOO_LARGE",
             path,
-            format!("文稿超过 {} 字节上限", MAX_TEXT_FILE_BYTES),
+            format!("文件超过 {limit} 字节上限"),
         ));
     }
     #[cfg(test)]
     hooks::run(hooks::Checkpoint::ReadLocked, path);
     let mut bytes = Vec::new();
     (&mut file)
-        .take(MAX_TEXT_FILE_BYTES + 1)
+        .take(limit + 1)
         .read_to_end(&mut bytes)
         .map_err(|error| FileError::io(path, error))?;
-    if bytes.len() as u64 > MAX_TEXT_FILE_BYTES {
+    if bytes.len() as u64 > limit {
         return Err(FileError::new(
             "TOO_LARGE",
             path,
-            format!("文稿超过 {} 字节上限", MAX_TEXT_FILE_BYTES),
+            format!("文件超过 {limit} 字节上限"),
         ));
     }
     let after = file
@@ -258,7 +267,10 @@ fn raw_snapshot(path: &Path) -> Result<RawSnapshot, Box<FileError>> {
     })
 }
 
-fn optional_snapshot(path: &Path) -> Result<Option<RawSnapshot>, Box<FileError>> {
+pub(crate) fn optional_snapshot(
+    path: &Path,
+    limit: u64,
+) -> Result<Option<RawSnapshot>, Box<FileError>> {
     // Preserve the actual NotFound kind, rather than interpreting an error string.
     match fs::symlink_metadata(path) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -269,13 +281,34 @@ fn optional_snapshot(path: &Path) -> Result<Option<RawSnapshot>, Box<FileError>>
         Ok(_) => {}
     }
     // If it disappears between metadata and opening, fail closed; the caller retries.
-    raw_snapshot(path).map(Some)
+    raw_snapshot(path, limit).map(Some)
 }
 
-#[tauri::command]
+fn validate_text(path: &Path, content: &str, limit: u64) -> Result<(), Box<FileError>> {
+    if content.len() as u64 > limit {
+        return Err(FileError::new(
+            "TOO_LARGE",
+            path,
+            format!("UTF-8 文本超过 {limit} 字节上限"),
+        ));
+    }
+    // Check the complete decoded domain, not only the first raw-byte sample.
+    // UTF-16 legitimately contains zero bytes but a decoded U+0000 cannot be
+    // saved as UTF-8 and reopened as a document. Never silently delete it.
+    if content.contains('\0') {
+        return Err(FileError::new(
+            "INVALID_ENCODING",
+            path,
+            "文稿包含 NUL 字符，已拒绝读取或写入并保留原文件",
+        ));
+    }
+    Ok(())
+}
+
+#[tauri::command(async)]
 pub fn read_document(path: String) -> Result<DocumentSnapshot, Box<FileError>> {
     let path = target_path(Path::new(&path))?;
-    let raw = raw_snapshot(&path)?;
+    let raw = raw_snapshot(&path, MAX_TEXT_FILE_BYTES)?;
     if looks_binary(&raw.bytes) {
         return Err(FileError::new(
             "INVALID_ENCODING",
@@ -285,6 +318,7 @@ pub fn read_document(path: String) -> Result<DocumentSnapshot, Box<FileError>> {
     }
     let content = decode_text(&raw.bytes)
         .map_err(|message| FileError::new("INVALID_ENCODING", &path, message))?;
+    validate_text(&path, &content, MAX_TEXT_FILE_BYTES)?;
     Ok(DocumentSnapshot {
         path: display(&path),
         content,
@@ -293,10 +327,17 @@ pub fn read_document(path: String) -> Result<DocumentSnapshot, Box<FileError>> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn document_revision(path: String) -> Result<RevisionState, Box<FileError>> {
+    revision_with_limit(path, MAX_TEXT_FILE_BYTES)
+}
+
+pub(crate) fn revision_with_limit(
+    path: String,
+    limit: u64,
+) -> Result<RevisionState, Box<FileError>> {
     let path = target_path(Path::new(&path))?;
-    let raw = optional_snapshot(&path)?;
+    let raw = optional_snapshot(&path, limit)?;
     Ok(RevisionState {
         path: display(&path),
         revision: raw.as_ref().map(|value| value.revision.clone()),
@@ -416,25 +457,30 @@ fn publish_new(staging: &Path, target: &Path) -> io::Result<()> {
     fs::remove_file(staging)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn write_document(
     path: String,
     content: String,
     expected_revision: Option<String>,
 ) -> Result<WriteReceipt, Box<FileError>> {
+    write_text_with_limit(path, content, expected_revision, MAX_TEXT_FILE_BYTES)
+}
+
+/// Internal policy-specific entry point. The frontend cannot choose or widen a
+/// budget; all snapshots, retained-copy checks and commit verification share it.
+pub(crate) fn write_text_with_limit(
+    path: String,
+    content: String,
+    expected_revision: Option<String>,
+    limit: u64,
+) -> Result<WriteReceipt, Box<FileError>> {
     let target = target_path(Path::new(&path))?;
-    if content.len() as u64 > MAX_TEXT_FILE_BYTES {
-        return Err(FileError::new(
-            "TOO_LARGE",
-            &target,
-            format!("文稿超过 {} 字节上限", MAX_TEXT_FILE_BYTES),
-        ));
-    }
+    validate_text(&target, &content, limit)?;
     let _lock = DOCUMENT_WRITES
         .lock()
         .map_err(|_| FileError::new("IO_ERROR", &target, "保存队列不可用，请保留草稿并重启"))?;
     let copies = SaveCopies::new(&target, content.as_bytes())?;
-    let current = match optional_snapshot(&target) {
+    let current = match optional_snapshot(&target, limit) {
         Ok(current) => current,
         Err(error) => return Err(copies.retain(error)),
     };
@@ -470,7 +516,7 @@ pub fn write_document(
             } else {
                 FileError::io(&target, error)
             };
-            failure.actual_revision = optional_snapshot(&target)
+            failure.actual_revision = optional_snapshot(&target, limit)
                 .ok()
                 .flatten()
                 .map(|raw| raw.revision);
@@ -479,7 +525,7 @@ pub fn write_document(
     }
     #[cfg(test)]
     hooks::run(hooks::Checkpoint::AfterCommit, &target);
-    let committed = match raw_snapshot(&target) {
+    let committed = match raw_snapshot(&target, limit) {
         Ok(raw) => raw,
         Err(cause) => {
             let mut error = FileError::new(
@@ -494,7 +540,7 @@ pub fn write_document(
     let expected_local = revision(content.as_bytes());
     let backup_matches = match expected_revision {
         Some(ref expected) => {
-            raw_snapshot(&copies.previous).is_ok_and(|raw| raw.revision == *expected)
+            raw_snapshot(&copies.previous, limit).is_ok_and(|raw| raw.revision == *expected)
         }
         None => true,
     };
@@ -526,25 +572,44 @@ pub fn write_document(
     Ok(receipt)
 }
 
+struct OwnedAsset {
+    file: File,
+    path: PathBuf,
+}
+
+static IMAGE_ALLOCATIONS: std::sync::LazyLock<
+    Mutex<std::collections::HashMap<String, OwnedAsset>>,
+> = std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
 #[tauri::command]
 pub fn save_image_asset(
     doc_path: String,
     filename: String,
-    data: Vec<u8>,
+    data_base64: String,
 ) -> Result<ImageReceipt, Box<FileError>> {
     let document = target_path(Path::new(&doc_path))?;
     if !valid_basename(&filename) {
         return Err(FileError::new("INVALID_PATH", &document, "图片文件名无效"));
     }
-    if data.len() as u64 > MAX_IMAGE_FILE_BYTES {
+    let data = crate::image_data::decode_image(&data_base64).map_err(|error| {
+        let code = match error {
+            crate::image_data::ImageDataError::TooLarge(_) => "TOO_LARGE",
+            crate::image_data::ImageDataError::InvalidBase64 => "INVALID_ENCODING",
+        };
+        FileError::new(code, &document, error.to_string())
+    })?;
+    image_mime(Path::new(&filename), &data)
+        .map_err(|message| FileError::new("INVALID_ENCODING", &document, message))?;
+    let mut allocations = IMAGE_ALLOCATIONS
+        .lock()
+        .map_err(|_| FileError::new("IO_ERROR", &document, "图片分配队列不可用"))?;
+    if allocations.len() >= crate::config::MAX_IMAGE_STASH_ENTRIES {
         return Err(FileError::new(
             "TOO_LARGE",
             &document,
-            format!("图片超过 {} 字节上限", MAX_IMAGE_FILE_BYTES),
+            "未完成的图片分配过多，请先完成或取消保存",
         ));
     }
-    image_mime(Path::new(&filename), &data)
-        .map_err(|message| FileError::new("INVALID_ENCODING", &document, message))?;
     let directory = document.parent().unwrap().join("assets");
     match fs::create_dir(&directory) {
         Ok(()) => {}
@@ -563,6 +628,7 @@ pub fn save_image_asset(
     let (stem, extension) = filename
         .rsplit_once('.')
         .ok_or_else(|| FileError::new("INVALID_PATH", &document, "图片缺少扩展名"))?;
+    let expected_hash = revision(&data);
     for attempt in 0..1000 {
         let filename = if attempt == 0 {
             filename.clone()
@@ -570,38 +636,65 @@ pub fn save_image_asset(
             format!("{stem}-{attempt}.{extension}")
         };
         let path = directory.join(&filename);
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::OpenOptionsExt;
-            options.share_mode(0);
+        // An uncommitted allocation belongs to a different migration. Sharing
+        // its token or returning it as unowned would allow one rollback to break
+        // another document, so allocate separately until it has been committed.
+        if allocations.values().any(|asset| asset.path == path) {
+            continue;
         }
-        let mut file = match options.open(&path) {
+        let mut file = match crate::owned_file::create_owned(&path) {
             Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                // Reuse only a regular leaf, never a symlink/reparse point whose
+                // bytes happen to match. Such references may fail on reopen or
+                // escape the document directory; leave them alone and suffix.
+                if optional_snapshot(&path, MAX_IMAGE_FILE_BYTES)
+                    .is_ok_and(|raw| raw.is_some_and(|raw| raw.revision == expected_hash))
+                {
+                    return Ok(ImageReceipt {
+                        relative_path: format!("./assets/{filename}"),
+                        filename,
+                        path: display(&path),
+                        allocation_id: None,
+                    });
+                }
+                continue;
+            }
             Err(error) => return Err(FileError::io(&path, error)),
         };
         let result = file.write_all(&data).and_then(|_| file.sync_all());
         #[cfg(test)]
         let result = hooks::image_write_result(result);
-        drop(file);
         if let Err(error) = result {
+            // The still-exclusive handle is proof of ownership. Delete only that
+            // object; after closing it no cleanup is allowed by pathname.
+            let cleanup = crate::owned_file::delete_on_close(&file);
+            drop(file);
             #[cfg(test)]
             hooks::run(hooks::Checkpoint::ImageWriteFailed, &path);
-            // The closed path may now name another writer's file; never delete it by name.
             let mut failure = FileError::io(&path, error);
-            failure.write_state = "unknown";
-            failure.message.push_str(&format!(
-                "\n图片可能不完整，未删除该路径，请手动核对：{}",
-                failure.path
-            ));
+            if let Err(cleanup) = cleanup {
+                failure.write_state = "unknown";
+                failure.message.push_str(&format!(
+                    "\n图片可能不完整，未删除该路径：{}（{cleanup}）",
+                    failure.path
+                ));
+            }
             return Err(failure);
         }
+        let allocation_id = uuid::Uuid::new_v4().simple().to_string();
+        allocations.insert(
+            allocation_id.clone(),
+            OwnedAsset {
+                file,
+                path: path.clone(),
+            },
+        );
         return Ok(ImageReceipt {
             relative_path: format!("./assets/{filename}"),
             filename,
             path: display(&path),
+            allocation_id: Some(allocation_id),
         });
     }
     Err(FileError::new(
@@ -611,12 +704,58 @@ pub fn save_image_asset(
     ))
 }
 
+fn finish_image_allocations(allocation_ids: Vec<String>, discard: bool) -> Result<(), String> {
+    if allocation_ids.len() > crate::config::MAX_IMAGE_STASH_ENTRIES {
+        return Err("too many image allocation ids".into());
+    }
+    let mut allocations = IMAGE_ALLOCATIONS
+        .lock()
+        .map_err(|_| "image allocation lock failed")?;
+    let mut failures = Vec::new();
+    for id in allocation_ids {
+        // Unknown, duplicated or already-finalized tokens are harmless; clients
+        // can retry completion but can never turn an arbitrary path into a token.
+        if let Some(asset) = allocations.remove(&id) {
+            if discard {
+                let cleanup = || crate::owned_file::delete_on_close(&asset.file);
+                #[cfg(test)]
+                let result = hooks::image_discard_result(cleanup);
+                #[cfg(not(test))]
+                let result = cleanup();
+                if let Err(error) = result {
+                    failures.push(format!(
+                        "图片清理未确认，请核对路径：{}（{error}）",
+                        display(&asset.path)
+                    ));
+                }
+            }
+            drop(asset); // revoke the deletion right even if cleanup failed
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("\n"))
+    }
+}
+
+#[tauri::command]
+pub fn commit_image_assets(allocation_ids: Vec<String>) -> Result<(), String> {
+    finish_image_allocations(allocation_ids, false)
+}
+
+#[tauri::command]
+pub fn discard_image_assets(allocation_ids: Vec<String>) -> Result<(), String> {
+    finish_image_allocations(allocation_ids, true)
+}
+
 #[cfg(test)]
 pub(crate) mod hooks {
     use std::cell::{Cell, RefCell};
     use std::path::Path;
     #[derive(Clone, Copy, PartialEq)]
     pub enum Checkpoint {
+        BeforeReadOpen,
         ReadLocked,
         BeforeCommit,
         AfterCommit,
@@ -625,6 +764,19 @@ pub(crate) mod hooks {
     type Hook = (Checkpoint, Box<dyn FnOnce(&Path)>);
     thread_local! { static HOOK: RefCell<Option<Hook>> = const { RefCell::new(None) }; }
     thread_local! { static IMAGE_WRITE_FAILURE: Cell<bool> = const { Cell::new(false) }; }
+    thread_local! { static IMAGE_DISCARD_FAILURE: Cell<bool> = const { Cell::new(false) }; }
+    pub fn fail_next_image_discard() {
+        IMAGE_DISCARD_FAILURE.with(|flag| flag.set(true));
+    }
+    pub(super) fn image_discard_result(
+        cleanup: impl FnOnce() -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
+        if IMAGE_DISCARD_FAILURE.with(|flag| flag.replace(false)) {
+            Err(std::io::Error::other("injected image discard failure"))
+        } else {
+            cleanup()
+        }
+    }
     pub fn fail_next_image_write() {
         IMAGE_WRITE_FAILURE.with(|flag| flag.set(true));
     }
@@ -655,3 +807,7 @@ pub(crate) mod hooks {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/perf/native.rs"]
+mod perf_native;

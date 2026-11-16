@@ -2,6 +2,16 @@
 
 跟踪 issue：[xsuooo/MDplus#2](https://github.com/xsuooo/MDplus/issues/2)。
 
+## 2026-11-13 状态补充
+
+本地提交 `9a5bc5c` 已将唯一 Tokio 实例更新到 1.53.3，普通 Rust 108 项、真实符号链接 3 项和 Clippy 通过；前端 836 项及完整浏览器 269 项通过，浏览器原生 IPC 为模拟。当前采用锁文件的新审计为 0 vulnerabilities、2 unsound、9 unmaintained、1 yanked，registry errors 为 0。续跑补做 Rust 生产覆盖率，行 73.16%、函数 55.27%，原门槛通过；当前提交 CI 和最终 Windows 安装验收继续准备。
+
+tauri-utils 2.10.2 / urlpattern 0.6.0 的最小路线解析通过，但 Tauri 2.11.5 的 test feature 因缺少 `app_directories_override` 字段而编译失败；已恢复 utils 2.9.3，五个 unic 包仍在 Windows 图中。新增 rustix 与被撤回的 async-executor 1.14.0 均纳入记录；没有自动升级核心或插件。
+
+详细数据库身份、锁摘要、失败证据和剩余平台风险见 [0.2.6 发布收尾记录](ops/release-0.2.6-closeout.md)。原 2026-11-12 计划未按期完成，实施与本地检查实际发生于 2026-11-13；原 2026-12-03 后续节点保持不变。下文保留 2026-11-05 历史快照，不作为当前锁文件或最终候选的验收结论。
+
+## 2026-11-05 历史快照
+
 当前锁文件的 `cargo-audit` 漏洞条目为 0，另有 2 项 `unsound` 和 9 项停止维护公告。结论限于 `x86_64-pc-windows-msvc`：没有发现这两项内存／I/O 安全公告涉及的代码会进入当前 Windows 构建。停止维护公告仍属于需要处理的维护风险，不能用编译和测试通过证明依赖绝对安全。
 
 核对使用 RustSec 数据库 2026-11-04 快照、锁定的 Cargo 依赖树及依赖源码中的条件编译；原生测试和 Clippy 均在 Windows 运行。

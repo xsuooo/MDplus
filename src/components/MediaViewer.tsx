@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { fitMedia, type MediaPreview } from '../lib/media';
 import { useDialogFocus } from '../lib/useDialogFocus';
 import { IconClose } from './icons';
@@ -12,34 +12,116 @@ export function MediaViewer({ media, onClose }: { media: MediaPreview; onClose: 
   const [fit, setFit] = useState(1);
   const [zoom, setZoom] = useState<number | null>(null);
   const [failed, setFailed] = useState(false);
-  const scale = zoom ?? fit;
+  const manual = useRef<number | null>(null);
+  const fitted = useRef(1);
+  const renderedScale = useRef(zoom ?? fit);
+  const scale = present ? (zoom ?? fit) : renderedScale.current;
+  const frame = useRef(0);
+  const anchor = useRef<{ x: number; y: number; mediaX: number; mediaY: number } | null>(null);
+  const previousMedia = useRef<MediaPreview | null>(null);
   const drag = useRef<{ id: number; x: number; y: number; left: number; top: number } | null>(null);
-  useEffect(() => {
-    if (!present) {
-      dialog.current?.close();
-      setZoom(null);
-      setFailed(false);
-      drag.current = null;
-      return;
+  useLayoutEffect(() => {
+    const element = viewport.current;
+    const image = element?.querySelector<HTMLElement>('.media-viewer-content');
+    const point = anchor.current;
+    if (element && image && point) {
+      const bounds = image.getBoundingClientRect();
+      element.scrollLeft += bounds.left + point.mediaX * scale - point.x;
+      element.scrollTop += bounds.top + point.mediaY * scale - point.y;
     }
-    dialog.current?.showModal();
-    const element = viewport.current!;
-    const measure = () =>
-      setFit(
-        fitMedia(media.width, media.height, element.clientWidth - 32, element.clientHeight - 32),
-      );
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    measure();
-    return () => observer.disconnect();
-  }, [dialog, media, present]);
-  const changeZoom = (next: number | null) => {
-    setZoom(next === null ? null : Math.max(0.1, Math.min(4, next)));
+    anchor.current = null;
+    renderedScale.current = scale;
+  }, [scale]);
+  const resetZoom = (next: number | null) => {
+    if (frame.current) cancelAnimationFrame(frame.current);
+    frame.current = 0;
+    anchor.current = null;
+    manual.current = next;
+    setZoom(next);
     if (viewport.current) {
       viewport.current.scrollTop = 0;
       viewport.current.scrollLeft = 0;
     }
   };
+  const stepZoom = (increase: boolean, point?: { x: number; y: number }) => {
+    const current = manual.current ?? fitted.current;
+    if (!increase && current <= 0.1) return;
+    const next = Math.max(0.1, Math.min(4, increase ? current * 1.25 : current / 1.25));
+    if (next === current) return;
+    const element = viewport.current;
+    const image = element?.querySelector<HTMLElement>('.media-viewer-content');
+    if (!anchor.current && element && image) {
+      const viewportBounds = element.getBoundingClientRect();
+      const bounds = image.getBoundingClientRect();
+      const x = point?.x ?? viewportBounds.left + viewportBounds.width / 2;
+      const y = point?.y ?? viewportBounds.top + viewportBounds.height / 2;
+      anchor.current = {
+        x,
+        y,
+        mediaX: (x - bounds.left) / renderedScale.current,
+        mediaY: (y - bounds.top) / renderedScale.current,
+      };
+    }
+    manual.current = next;
+    drag.current = null;
+    if (!frame.current)
+      frame.current = requestAnimationFrame(() => {
+        frame.current = 0;
+        setZoom(manual.current);
+      });
+  };
+  const step = useRef(stepZoom);
+  step.current = stepZoom;
+  useLayoutEffect(() => {
+    if (!present) {
+      if (frame.current) cancelAnimationFrame(frame.current);
+      frame.current = 0;
+      anchor.current = null;
+      dialog.current?.close();
+      drag.current = null;
+      return;
+    }
+    if (previousMedia.current !== media) {
+      previousMedia.current = media;
+      manual.current = null;
+      setZoom(null);
+      setFailed(false);
+    }
+    dialog.current?.showModal();
+    const element = viewport.current!;
+    const measure = () => {
+      fitted.current = fitMedia(
+        media.width,
+        media.height,
+        element.clientWidth - 32,
+        element.clientHeight - 32,
+      );
+      setFit(fitted.current);
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    const wheel = (event: WheelEvent) => {
+      if (
+        !event.ctrlKey ||
+        event.altKey ||
+        event.metaKey ||
+        !Number.isFinite(event.deltaY) ||
+        !event.deltaY
+      )
+        return;
+      event.preventDefault();
+      event.stopPropagation();
+      step.current(event.deltaY < 0, { x: event.clientX, y: event.clientY });
+    };
+    element.addEventListener('wheel', wheel, { passive: false });
+    measure();
+    return () => {
+      observer.disconnect();
+      element.removeEventListener('wheel', wheel);
+      if (frame.current) cancelAnimationFrame(frame.current);
+      frame.current = 0;
+    };
+  }, [dialog, media, present]);
   return (
     <dialog
       ref={dialog}
@@ -53,39 +135,31 @@ export function MediaViewer({ media, onClose }: { media: MediaPreview; onClose: 
       onKeyDown={(event) => {
         // Viewer keyboard actions never fall through to document shortcuts.
         event.stopPropagation();
-        if (isComposingEvent(event.nativeEvent)) return;
+        if (isComposingEvent(event.nativeEvent) || event.altKey || event.metaKey) return;
         if (event.key === '+' || event.key === '=') {
           event.preventDefault();
-          changeZoom(scale * 1.25);
+          stepZoom(true);
         }
-        if (event.key === '-') {
+        if (event.key === '-' || event.key === '−') {
           event.preventDefault();
-          if (scale > 0.1) changeZoom(scale / 1.25);
+          stepZoom(false);
         }
       }}
     >
       <header className="media-viewer-header">
         <h2 title={media.title}>{media.title}</h2>
         <div className="media-viewer-actions">
-          <button onClick={() => changeZoom(null)} aria-pressed={zoom === null}>
+          <button onClick={() => resetZoom(null)} aria-pressed={zoom === null}>
             适合窗口
           </button>
-          <button onClick={() => changeZoom(1)} aria-pressed={zoom === 1}>
+          <button onClick={() => resetZoom(1)} aria-pressed={zoom === 1}>
             原始大小
           </button>
-          <button
-            aria-label="缩小预览"
-            disabled={scale <= 0.1}
-            onClick={() => changeZoom(scale / 1.25)}
-          >
+          <button aria-label="缩小预览" disabled={scale <= 0.1} onClick={() => stepZoom(false)}>
             −
           </button>
           <output aria-label="预览缩放比例">{Math.round(scale * 100)}%</output>
-          <button
-            aria-label="放大预览"
-            disabled={scale >= 4}
-            onClick={() => changeZoom(scale * 1.25)}
-          >
+          <button aria-label="放大预览" disabled={scale >= 4} onClick={() => stepZoom(true)}>
             +
           </button>
           <button aria-label="关闭查看器" onClick={onClose}>
@@ -144,7 +218,9 @@ export function MediaViewer({ media, onClose }: { media: MediaPreview; onClose: 
           </div>
         )}
       </div>
-      <footer>仅查看，不修改文档。原始大小下可滚动或拖动；Esc 返回编辑器。</footer>
+      <footer>
+        仅查看，不修改文档。Ctrl+滚轮或 Ctrl+加号／减号缩放；可滚动或拖动查看，Esc 返回编辑器。
+      </footer>
     </dialog>
   );
 }

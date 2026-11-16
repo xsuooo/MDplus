@@ -1,9 +1,12 @@
 import { createRoot } from 'react-dom/client';
+import { createNativeMocks, decodeFixtureBase64, encodeFixtureBytes } from './nativeMocks';
 import { editorViewCtx } from '@milkdown/kit/core';
 import { TextSelection, NodeSelection } from '@milkdown/prose/state';
 import { undoDepth } from '@milkdown/prose/history';
 import { createEditor, getCurrentState, setMarkdown } from '../../src/lib/editor';
 import App from '../../src/App';
+import { toRendered, toSource } from '../../src/lib/editorPosition';
+import { sourceTextLayout } from '../../src/lib/sourcePosition';
 import '../../src/styles/global.css';
 
 export const continuityCases = [
@@ -25,6 +28,10 @@ export const continuityCases = [
   'rendered-tab-position',
   'mode-formatted-blocks',
   'mode-input-isolation',
+  'mode-range-budget',
+  'mode-source-data-uri',
+  'zoom-live-view',
+  'zoom-mode-switch',
 ] as const;
 export type ContinuityCase = (typeof continuityCases)[number];
 export const longDocument = Array.from(
@@ -32,6 +39,26 @@ export const longDocument = Array.from(
   (_, i) =>
     `## Section ${i}\n\n段落 ${i} 中文 Mixed English **bold** and \`code\`. ${'Long paragraph content. '.repeat(8)}\n`,
 ).join('\n');
+
+function sourceImageUri(): string {
+  const image = decodeFixtureBase64('UklGRiQAAABXRUJQVlA4IBgAAAAwAQCdASoIAAgAAUAmJaQAA3AA/vz0AAA=');
+  const payload = new Uint8Array(116000);
+  let random = 20261110;
+  for (let index = 0; index < payload.length - 10536; index++) {
+    random = (Math.imul(random, 1664525) + 1013904223) >>> 0;
+    payload[index] = random >>> 24;
+  }
+  // Valid synthetic WebP with ignored RIFF data; no user image or large checked-in fixture.
+  payload.fill(255, payload.length - 10536);
+  const bytes = new Uint8Array(image.length + 8 + payload.length);
+  bytes.set(image);
+  bytes.set([74, 85, 78, 75], image.length);
+  const header = new DataView(bytes.buffer);
+  header.setUint32(4, bytes.length - 8, true);
+  header.setUint32(image.length + 4, payload.length, true);
+  bytes.set(payload, image.length + 8);
+  return 'data:image/webp;base64,' + encodeFixtureBytes(bytes);
+}
 
 function check(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
@@ -54,6 +81,117 @@ function input(field: HTMLTextAreaElement, text: string) {
 }
 
 export async function runContinuityRegression(testCase: ContinuityCase): Promise<string> {
+  createNativeMocks().install();
+  if (testCase.startsWith('zoom-')) localStorage.setItem('mdplus-editor-zoom', '100');
+  if (testCase === 'mode-source-data-uri') {
+    const image = sourceImageUri();
+    const markdown = `# Source layout\n\n![one](${image}) ![two](${image})\n\nKeep **selected marker** here.\n`;
+    const host = document.createElement('div');
+    host.className = 'milkdown-container';
+    host.style.cssText = 'width:960px;height:420px;overflow:auto';
+    const input = document.createElement('textarea');
+    input.className = 'source-textarea';
+    input.style.cssText = 'width:960px;height:420px;display:none';
+    input.value = markdown;
+    document.body.append(host, input);
+    const editor = createEditor(host, markdown, {
+      onUpdate: () => {},
+      resolveImageIdentity: (url) => url,
+      resolveImageReference: (url) => url,
+    });
+    await editor.create();
+    try {
+      await document.fonts.ready;
+      await until(() => {
+        const images = [...host.querySelectorAll<HTMLImageElement>('.md-image-node img')];
+        return (
+          images.length === 2 && images.every((image) => image.complete && image.naturalWidth > 0)
+        );
+      });
+      const view = editor.action((ctx) => ctx.get(editorViewCtx));
+      const original = view.state.doc;
+      let at = -1;
+      original.descendants((node, position) => {
+        if (node.isText && node.text?.includes('selected marker'))
+          at = position + node.text.indexOf('selected marker');
+      });
+      check(at >= 0, 'Long source fixture lost its selected text');
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(original, at + 15, at)));
+      const start = performance.now();
+      input.style.display = '';
+      toSource(editor, markdown, input);
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+      const elapsedMs = performance.now() - start;
+      check(
+        getComputedStyle(input).fontVariantLigatures === 'none',
+        'Source ligatures remain enabled for long embedded-image data',
+      );
+      check(
+        sourceTextLayout(input).properties['font-variant-ligatures'] === 'none',
+        'Source measurement does not capture the disabled ligatures',
+      );
+      check(input.value === markdown, 'Source switching changed embedded image bytes');
+      check(
+        input.value.slice(input.selectionStart, input.selectionEnd) === 'selected marker' &&
+          input.selectionDirection === 'backward',
+        'Long source switching lost selected text or its direction',
+      );
+      toRendered(editor, markdown, input);
+      check(
+        view.state.doc === original &&
+          view.state.doc.textBetween(view.state.selection.from, view.state.selection.to) ===
+            'selected marker' &&
+          view.state.selection.anchor > view.state.selection.head,
+        'Long source round trip changed the document or selection',
+      );
+      return JSON.stringify({ case: testCase, characters: markdown.length, elapsedMs });
+    } finally {
+      await editor.destroy();
+      host.remove();
+      input.remove();
+    }
+  }
+  if (testCase === 'mode-range-budget') {
+    const host = document.createElement('div');
+    host.className = 'milkdown-container';
+    host.style.cssText = 'width:800px;height:420px';
+    const input = document.createElement('textarea');
+    input.className = 'source-textarea';
+    input.style.cssText = 'width:800px;height:420px';
+    const markdown = longDocument.repeat(8);
+    input.value = markdown;
+    document.body.append(host, input);
+    const editor = createEditor(host, markdown, { onUpdate: () => {} });
+    await editor.create();
+    await document.fonts.ready;
+    const original = Range.prototype.getBoundingClientRect;
+    let reads = 0;
+    Range.prototype.getBoundingClientRect = function () {
+      reads++;
+      return original.call(this);
+    };
+    try {
+      toSource(editor, markdown, input);
+      const at = markdown.indexOf('段落 17', markdown.length / 2);
+      check(at > 0, 'Range budget fixture lacks its middle paragraph');
+      input.setSelectionRange(at, at + 2);
+      input.scrollTop = input.scrollHeight / 2;
+      toRendered(editor, markdown, input);
+      toSource(editor, markdown, input);
+      check(
+        input.value.slice(input.selectionStart, input.selectionEnd) === '段落',
+        'Visible-block mapping lost the selected text',
+      );
+      check(reads < 100, `Mode switching measured the whole document: ${reads} Range reads`);
+      return `${testCase}: ${reads} Range reads for 280 sections with selection preserved`;
+    } finally {
+      Range.prototype.getBoundingClientRect = original;
+      await editor.destroy();
+      host.remove();
+      input.remove();
+    }
+  }
   if (testCase.startsWith('sync-')) {
     const host = document.createElement('div');
     host.className = 'milkdown-container';
@@ -213,6 +351,85 @@ export async function runContinuityRegression(testCase: ContinuityCase): Promise
     input(field, longDocument);
     await until(() => field.value === longDocument);
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    if (testCase.startsWith('zoom-')) {
+      await document.fonts.ready;
+      click('button[aria-label="切换源码模式"]');
+      await until(() => !document.querySelector('.source-editor:not([hidden])'));
+      const rich = document.querySelector<HTMLElement>('.editor-tab.active .milkdown')!;
+      const editor = rich.querySelector<HTMLElement>('.ProseMirror')!;
+      const doc = (editor as HTMLElement & { pmViewDesc?: { node: object } }).pmViewDesc!.node;
+      const scroller = rich.closest<HTMLElement>('.milkdown-container')!;
+      const heading = editor.querySelectorAll<HTMLHeadingElement>('h2')[17];
+      scroller.scrollTop +=
+        heading.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 100;
+      await new Promise(requestAnimationFrame);
+      const rect = heading.getBoundingClientRect();
+      const toolbar = document.querySelector('.toolbar')!.getBoundingClientRect().toJSON();
+      for (let index = 0; index < 2; index++) {
+        const event = new WheelEvent('wheel', {
+          bubbles: true,
+          cancelable: true,
+          ctrlKey: true,
+          deltaY: -40,
+          clientX: rect.left + rect.width / 2,
+          clientY: rect.top + rect.height / 2,
+        });
+        heading.dispatchEvent(event);
+        check(event.defaultPrevented, 'Ctrlwheel escaped into page zoom');
+      }
+      await until(() => document.querySelector('.statusbar-zoom')?.textContent === '120%');
+      check(
+        rich.style.transform === 'scale(1.2)',
+        'Continuous zoom did not use its lightweight preview',
+      );
+      if (testCase === 'zoom-mode-switch') {
+        const mode = document.querySelector<HTMLButtonElement>(
+          'button[aria-label="切换源码模式"]',
+        )!;
+        mode.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+        check(
+          rich.style.getPropertyValue('transform') === '' && rich.style.zoom === '1.2',
+          'Mode interaction read unfinished zoom geometry',
+        );
+        mode.click();
+        await until(() => document.querySelector('.source-editor:not([hidden]) textarea'));
+        const source = document.querySelector<HTMLTextAreaElement>(
+          '.source-editor:not([hidden]) textarea',
+        )!;
+        check(
+          source.style.zoom === '1.2' && source.value === longDocument,
+          'Source mode lost the zoom or source text',
+        );
+        source.dispatchEvent(
+          new WheelEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: true, deltaY: 40 }),
+        );
+        await until(() => document.querySelector('.statusbar-zoom')?.textContent === '110%');
+        mode.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+        mode.click();
+        await until(() => !document.querySelector('.source-editor:not([hidden])'));
+        check(
+          rich.style.getPropertyValue('zoom') === '1.1' && !source.style.transform,
+          'Returning to rich mode left a pending source preview',
+        );
+      } else {
+        await until(() => !rich.style.transform && rich.style.zoom === '1.2');
+        const after = heading.getBoundingClientRect();
+        check(
+          Math.abs(after.top + after.height / 2 - rect.top - rect.height / 2) < 2,
+          'Zoom moved the paragraph under the pointer',
+        );
+      }
+      check(
+        (editor as HTMLElement & { pmViewDesc?: { node: object } }).pmViewDesc!.node === doc,
+        'Zoom changed or recreated the document',
+      );
+      check(
+        JSON.stringify(document.querySelector('.toolbar')!.getBoundingClientRect().toJSON()) ===
+          JSON.stringify(toolbar),
+        'Editor zoom changed the toolbar geometry',
+      );
+      return `${testCase}: coalesced preview, settled geometry, document identity and shared mode zoom passed`;
+    }
     if (testCase.startsWith('font-pending-') || testCase === 'font-source-position')
       await document.fonts.ready;
     const selection = longDocument.indexOf('段落 17') + 5;

@@ -1,11 +1,7 @@
-/** Measure source offsets using the textarea's actual wrapping and font metrics. */
-export function measureSourceText<T>(
-  input: HTMLTextAreaElement,
-  value: string,
-  measure: (top: (offset: number) => number, lineHeight: number) => T,
-): T {
+/** Freeze wrapping metrics before a source tab becomes hidden or changes font. */
+export function sourceTextLayout(input: HTMLTextAreaElement) {
   const style = getComputedStyle(input);
-  const mirror = document.createElement('div');
+  const properties: Record<string, string> = {};
   for (const property of [
     'font-family',
     'font-size',
@@ -20,13 +16,24 @@ export function measureSourceText<T>(
     'padding-left',
     'padding-right',
   ]) {
-    mirror.style.setProperty(property, style.getPropertyValue(property));
+    properties[property] = style.getPropertyValue(property);
   }
+  return { width: input.clientWidth, properties };
+}
+
+export function measureSourceLayout<T>(
+  layout: ReturnType<typeof sourceTextLayout>,
+  value: string,
+  measure: (top: (offset: number) => number, lineHeight: number) => T,
+): T {
+  const mirror = document.createElement('div');
+  for (const [property, value] of Object.entries(layout.properties))
+    mirror.style.setProperty(property, value);
   Object.assign(mirror.style, {
     position: 'fixed',
     left: '-100000px',
     top: '0',
-    width: `${input.clientWidth}px`,
+    width: `${layout.width}px`,
     boxSizing: 'border-box',
     whiteSpace: 'pre-wrap',
     overflowWrap: 'break-word',
@@ -38,7 +45,9 @@ export function measureSourceText<T>(
   document.body.append(mirror);
   try {
     const origin = mirror.getBoundingClientRect().top;
-    const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.7;
+    const lineHeight =
+      parseFloat(layout.properties['line-height']) ||
+      parseFloat(layout.properties['font-size']) * 1.7;
     return measure((offset) => {
       const at = Math.min(Math.max(0, offset), text.length - 1);
       const range = document.createRange();
@@ -49,6 +58,15 @@ export function measureSourceText<T>(
   } finally {
     mirror.remove();
   }
+}
+
+/** Measure source offsets using the textarea's actual wrapping and font metrics. */
+export function measureSourceText<T>(
+  input: HTMLTextAreaElement,
+  value: string,
+  measure: (top: (offset: number) => number, lineHeight: number) => T,
+): T {
+  return measureSourceLayout(sourceTextLayout(input), value, measure);
 }
 
 export function mapSourceScroll(

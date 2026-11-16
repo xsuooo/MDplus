@@ -141,6 +141,11 @@ fn pending_open_files_survive_before_frontend_listener_is_ready() {
 }
 
 #[test]
+fn review_m7_single_instance_does_not_discard_sender_cwd() {
+    assert!(!include_str!("lib.rs").contains("|app, args, _cwd|"));
+}
+
+#[test]
 fn startup_file_arguments_are_detected_before_webview_creation() {
     let files = markdown_files_from_args(
         vec![
@@ -149,10 +154,91 @@ fn startup_file_arguments_are_detected_before_webview_creation() {
             "notes.txt".to_string(),
             "missing.md".to_string(),
         ],
-        |path| path == "README.md",
+        &std::env::current_dir().unwrap(),
+        |path| {
+            Path::new(path)
+                .file_name()
+                .is_some_and(|name| name == "README.md")
+        },
     );
 
-    assert_eq!(files, vec!["README.md"]);
+    assert_eq!(
+        files,
+        vec![std::env::current_dir()
+            .unwrap()
+            .join("README.md")
+            .to_string_lossy()]
+    );
+}
+
+#[test]
+fn review_m7_arguments_use_sender_cwd_and_are_queued_as_absolute_regular_files() {
+    let root = TestDirectory::new();
+    let primary = root.0.join("primary");
+    let sender = root.0.join("sender");
+    fs::create_dir(&primary).unwrap();
+    fs::create_dir(&sender).unwrap();
+    fs::write(primary.join("same.md"), "wrong primary").unwrap();
+    fs::write(sender.join("same.md"), "correct sender").unwrap();
+    fs::write(sender.join("中文.MARKDOWN"), "correct unicode").unwrap();
+    fs::create_dir(sender.join("directory.md")).unwrap();
+    let absolute = primary.join("same.md").to_string_lossy().into_owned();
+    let cwd_before = std::env::current_dir().unwrap();
+    let files = markdown_files_from_args(
+        vec![
+            "mdplus.exe".into(),
+            "same.md".into(),
+            "中文.MARKDOWN".into(),
+            "missing.md".into(),
+            "directory.md".into(),
+            "notes.txt".into(),
+            absolute.clone(),
+        ],
+        &sender,
+        |path| Path::new(path).is_file(),
+    );
+    assert_eq!(
+        files,
+        vec![
+            sender.join("same.md").to_string_lossy().into_owned(),
+            sender.join("中文.MARKDOWN").to_string_lossy().into_owned(),
+            absolute
+        ]
+    );
+    assert!(files.iter().all(|path| Path::new(path).is_absolute()));
+    assert_eq!(fs::read_to_string(&files[0]).unwrap(), "correct sender");
+    assert_eq!(std::env::current_dir().unwrap(), cwd_before);
+    let pending = PendingOpenFiles::default();
+    pending.push(files.clone());
+    assert_eq!(pending.take(), files);
+}
+
+#[test]
+fn review_m7_invalid_sender_cwd_never_falls_back_to_primary_cwd() {
+    let root = TestDirectory::new();
+    let absolute = root.0.join("note.md").to_string_lossy().into_owned();
+    let files = markdown_files_from_args(
+        vec!["app".into(), "relative.md".into(), absolute.clone()],
+        Path::new("not-an-absolute-cwd"),
+        |_| true,
+    );
+    assert_eq!(files, vec![absolute]);
+}
+
+#[cfg(windows)]
+#[test]
+fn review_m7_drive_relative_arguments_are_bound_only_to_sender_drive() {
+    let files = markdown_files_from_args(
+        vec![
+            "app".into(),
+            r"D:note.md".into(),
+            r"C:other.md".into(),
+            r"\root.md".into(),
+        ],
+        Path::new(r"D:\sender"),
+        |_| true,
+    );
+    assert_eq!(files, vec![r"D:\sender\note.md", r"D:\root.md"]);
 }
 
 #[test]

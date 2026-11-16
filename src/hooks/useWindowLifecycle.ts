@@ -1,18 +1,55 @@
 import { WINDOW_PERSIST_MS } from '../config/constants';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { BODY_FONTS, CODE_FONTS, readBodyFont, readCodeFont } from '../lib/editorFont';
 
-import { persistWindowState, restoreWindowState } from '../services/windowState';
+import { persistWindowState, prepareWindowState, showInitialWindow } from '../services/windowState';
 
-export function useWindowLifecycle() {
+export function useWindowLifecycle(preferencesReady: boolean) {
+  const [windowReady, setWindowReady] = useState(() => !isTauri());
   useEffect(() => {
-    if (isTauri())
-      void restoreWindowState().catch((error) => console.warn('窗口恢复不可用', error));
+    void prepareWindowState();
   }, []);
+
+  useEffect(() => {
+    if (!isTauri() || !preferencesReady) return;
+    let disposed = false;
+    void (async () => {
+      await prepareWindowState();
+      const fonts = document.fonts;
+      if (fonts) {
+        try {
+          const body = BODY_FONTS.find((font) => font.id === readBodyFont())!;
+          const code = CODE_FONTS.find((font) => font.id === readCodeFont())!;
+          await Promise.allSettled([
+            ...(typeof fonts.load === 'function'
+              ? [
+                  ...[body.family, ...code.family.split(', ')].map((family) =>
+                    fonts.load(`400 16px ${family}`, '中文 Mixed'),
+                  ),
+                  fonts.load(`${body.strongWeight} 16px ${body.family}`, '中文 Bold'),
+                ]
+              : []),
+          ]);
+        } catch (error) {
+          console.warn('启动字体准备不可用', error);
+        }
+      }
+      if (disposed) return;
+      // 隐藏窗口可能暂停动画帧;同步完成最终布局后直接显示,不依赖后台绘制时机。
+      document.documentElement.getBoundingClientRect();
+      await showInitialWindow();
+      if (!disposed) setWindowReady(true);
+    })();
+    return () => {
+      disposed = true;
+    };
+  }, [preferencesReady]);
+
   /* ---------- 窗口状态持久化 ---------- */
   useEffect(() => {
-    if (!isTauri()) return;
+    if (!isTauri() || !windowReady) return;
     let disposed = false;
     let unlistenResized: (() => void) | undefined;
     let unlistenMoved: (() => void) | undefined;
@@ -49,7 +86,7 @@ export function useWindowLifecycle() {
       unlistenResized?.();
       unlistenMoved?.();
     };
-  }, []);
+  }, [windowReady]);
 
-  return { persistWindowState };
+  return { persistWindowState, windowReady };
 }

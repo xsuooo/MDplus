@@ -2,11 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import contract from '../src-tauri/src/file_contract.json';
 
 const invoke = vi.hoisted(() => vi.fn());
+const open = vi.hoisted(() => vi.fn());
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
+vi.mock('@tauri-apps/plugin-dialog', () => ({ open, save: vi.fn() }));
 import {
   documentRevision,
   readDocument,
   writeDocument,
+  pickImageFiles,
   type DocumentSnapshot,
   type WriteReceipt,
 } from '../src/lib/fileOps';
@@ -15,6 +18,22 @@ import { errorMessage } from '../src/lib/errors';
 beforeEach(() => vi.resetAllMocks());
 
 describe('native document IPC contract', () => {
+  it.each([null, 'C:/images/中文.png', ['C:/images/2.jpg', 'C:/images/1.png']])(
+    'accepts image selection or cancellation: %j',
+    async (selected) => {
+      open.mockResolvedValue(selected);
+      expect(await pickImageFiles()).toEqual(
+        selected === null ? [] : Array.isArray(selected) ? selected : [selected],
+      );
+      expect(open).toHaveBeenCalledWith({
+        multiple: true,
+        directory: false,
+        title: '插入本地图片',
+        filters: [{ name: 'PNG / JPEG 图片', extensions: ['png', 'jpg', 'jpeg'] }],
+      });
+      expect(invoke).not.toHaveBeenCalled();
+    },
+  );
   it('reads the content and revision together with the canonical response keys', async () => {
     const snapshot: DocumentSnapshot = {
       path: 'C:/notes/note.md',
@@ -84,4 +103,32 @@ describe('native document IPC contract', () => {
       expect(message).toContain('请勿直接再次覆盖');
     },
   );
+  it('shows readable retained-copy paths while preserving the canonical IPC failure', async () => {
+    const path = '\\\\?\\E:\\桌面\\降智题.md';
+    const recoveryPath = '\\\\?\\E:\\桌面\\降智题.local.md';
+    const backupPath = '\\\\?\\UNC\\Server\\笔记\\降智题.backup.md';
+    const failure = {
+      message: `副本：${recoveryPath}；备份：${backupPath}`,
+      recoveryPath,
+      backupPath,
+      writeState: 'unknown',
+    };
+    invoke.mockRejectedValue(failure);
+    await expect(writeDocument(path, 'local edit', 'old')).rejects.toBe(failure);
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('write_document', {
+      path,
+      content: 'local edit',
+      expectedRevision: 'old',
+    });
+    const message = errorMessage(failure);
+    expect(message).toContain('副本：E:\\桌面\\降智题.local.md');
+    expect(message).toContain('备份：\\\\Server\\笔记\\降智题.backup.md');
+    expect(message).toContain('本地编辑副本：E:\\桌面\\降智题.local.md');
+    expect(message).toContain('原磁盘版本：\\\\Server\\笔记\\降智题.backup.md');
+    expect(message).not.toContain('\\\\?\\');
+    expect(errorMessage(new Error(failure.message))).toBe(message.split('\n')[0]);
+    expect(errorMessage(failure.message)).toBe(message.split('\n')[0]);
+    expect(failure.recoveryPath).toBe(recoveryPath);
+    expect(failure.backupPath).toBe(backupPath);
+  });
 });

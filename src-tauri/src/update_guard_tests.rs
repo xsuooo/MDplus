@@ -7,9 +7,19 @@ fn unicode_installation_paths_are_normalized_without_losing_characters() {
     );
 }
 #[test]
+fn network_installation_paths_match_their_extended_unc_form() {
+    assert_eq!(
+        normalized(Path::new(r"\\?\UNC\server\共享 目录\MDPlus.exe")),
+        normalized(Path::new(r"\\server\共享 目录\mdplus.exe"))
+    );
+    assert_eq!(
+        normalized(Path::new("//?/unc/server/share/MDPlus.exe")),
+        normalized(Path::new(r"\\server\share\mdplus.exe"))
+    );
+}
+#[test]
 fn exclusive_probe_detects_an_external_file_lock() {
-    let dir =
-        std::env::temp_dir().join(format!("MDPlus 安装 锁测试-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("MDPlus 安装 锁测试-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("mdplus.exe");
     std::fs::write(&file, b"fixture").unwrap();

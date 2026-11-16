@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import thresholds from './config/coverage.json';
 
@@ -7,6 +7,7 @@ export default defineConfig({
   define: { __MDPLUS_BUILD_ID__: JSON.stringify('test') },
   test: {
     include: ['tests/**/*.test.{ts,tsx}'],
+    exclude: [...configDefaults.exclude, 'tests/perf/.runs/**', 'tests/perf/.rollback/**'],
     coverage: {
       provider: 'v8',
       include: ['src/**/*.{ts,tsx}'],

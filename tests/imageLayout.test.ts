@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Schema } from '@milkdown/prose/model';
 import { EditorState } from '@milkdown/prose/state';
 import { imageLayoutPlugin } from '../src/lib/imageLayout';
@@ -24,6 +24,8 @@ describe('standalone image layout', () => {
     });
   const centered = (current: EditorState) => imageLayoutPlugin.getState(current)!.find().length;
 
+  afterEach(() => vi.restoreAllMocks());
+
   it('centers standalone and consecutive images without changing document data', () => {
     const current = state(paragraph(image(), schema.text(' '), schema.node('hardbreak'), image()));
     const before = current.doc.toJSON();
@@ -41,6 +43,19 @@ describe('standalone image layout', () => {
     current = current.apply(current.tr.insertText('text ', 1));
     expect(centered(current)).toBe(0);
     current = current.apply(current.tr.delete(1, 6));
+    expect(centered(current)).toBe(1);
+  });
+
+  it('does not rescan unchanged image paragraphs', () => {
+    const first = paragraph(image());
+    const second = paragraph(image());
+    let current = state(first, second);
+    const scan = vi.spyOn(first, 'forEach');
+
+    current = current.apply(current.tr.insertText('caption ', first.nodeSize + 1));
+
+    expect(current.doc.firstChild).toBe(first);
+    expect(scan).not.toHaveBeenCalled();
     expect(centered(current)).toBe(1);
   });
 });

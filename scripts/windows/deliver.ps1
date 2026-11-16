@@ -59,7 +59,7 @@ function Invoke-SourceJson([string[]]$Arguments, [string]$Name) {
 try {
     if ($mode -eq 'Build') {
         if (!$Build) { throw 'The Build parameter set requires -Build, not -Build:$false.' }
-        $sourceNode = (Get-Command node.exe -CommandType Application -ErrorAction Stop).Source
+        $sourceNode = (Get-Command node.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
         $sourceTool = Join-Path $repository 'scripts/source-manifest.mjs'
         $beforePath = Join-Path $evidence 'source-before-checks.json'
         $afterChecksPath = Join-Path $evidence 'source-after-checks.json'

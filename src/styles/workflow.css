@@ -1,0 +1,143 @@
+.workflow-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-shrink: 0;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.workflow-notice > details,
+.workflow-notice > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.workflow-notice summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.workflow-notice ul {
+  display: grid;
+  gap: 8px;
+  max-height: 160px;
+  overflow: auto;
+  margin: 10px 0 0;
+  padding-left: 20px;
+}
+
+.workflow-notice li > span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.workflow-notice-path {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.workflow-notice > .btn {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.workflow-notice-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.workflow-notice-close:hover,
+.workflow-notice-close:focus-visible {
+  background: var(--bg-hover);
+  color: var(--text-strong);
+}
+
+.image-drop-notice {
+  align-items: center;
+  min-height: 48px;
+  padding-block: 2px;
+}
+
+.image-drop-notice .workflow-notice-close {
+  width: 44px;
+  height: 44px;
+}
+
+.recent-session-preference {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.recent-session-preference p {
+  margin: 4px 0 0 26px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.recent-session-setting,
+.recent-session-retry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.recent-session-setting:disabled,
+.recent-session-retry:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.recent-session-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-strong);
+}
+
+.recent-session-retry {
+  margin-top: 6px;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+body.dragging::after {
+  content: '松开以打开文稿或插入图片';
+}
+
+@media (max-width: 600px) {
+  .workflow-notice {
+    gap: 6px;
+    padding: 8px;
+  }
+  .image-drop-notice {
+    padding-block: 2px;
+  }
+}

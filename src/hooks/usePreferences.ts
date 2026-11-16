@@ -23,6 +23,7 @@ export function usePreferences(setSourceMode: (enabled: boolean) => void) {
   const [outlineOpen, setOutline] = useState(false);
   const [shortcuts, setShortcuts] = useState<ShortcutBindings>(DEFAULT_SHORTCUTS);
   const [settingsError, setSettingsError] = useState<'load' | 'save' | null>(null);
+  const [preferencesReady, setPreferencesReady] = useState(() => !isTauri());
   const changed = useRef(new Set<Preference>());
   const pending = useRef(new Map<Preference, PendingWrite>());
   const loadFailed = useRef(false);
@@ -59,6 +60,7 @@ export function usePreferences(setSourceMode: (enabled: boolean) => void) {
       loadFailed.current = true;
     }
     refreshError();
+    setPreferencesReady(true);
   }, [refreshError, setSourceMode]);
   const write = useCallback(
     async (key: Preference, operation: PendingWrite) => {
@@ -139,6 +141,7 @@ export function usePreferences(setSourceMode: (enabled: boolean) => void) {
     outlineOpen,
     shortcuts,
     settingsError,
+    preferencesReady,
     retrySettings,
     changeThemeMode,
     changeOutlineOpen,

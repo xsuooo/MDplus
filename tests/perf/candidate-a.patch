@@ -1,0 +1,86 @@
+diff --git a/src-tauri/src/safe_files.rs b/src-tauri/src/safe_files.rs
+index 5b748e4..b69ab39 100644
+--- a/src-tauri/src/safe_files.rs
++++ b/src-tauri/src/safe_files.rs
+@@ -327,8 +327,16 @@ pub fn read_document(path: String) -> Result<DocumentSnapshot, Box<FileError>> {
+     })
+ }
+ 
+-#[tauri::command]
++#[tauri::command(async)]
+ pub fn document_revision(path: String) -> Result<RevisionState, Box<FileError>> {
++    // Serialize background snapshots with writes to preserve Windows sharing.
++    let _lock = DOCUMENT_WRITES.lock().map_err(|_| {
++        FileError::new(
++            "IO_ERROR",
++            Path::new(&path),
++            "保存队列不可用，请保留草稿并重启",
++        )
++    })?;
+     revision_with_limit(path, MAX_TEXT_FILE_BYTES)
+ }
+ 
+@@ -811,3 +819,50 @@ pub(crate) mod hooks {
+ #[cfg(test)]
+ #[path = "../../tests/perf/native.rs"]
+ mod perf_native;
++
++#[cfg(test)]
++#[test]
++fn revision_checks_serialize_with_writes() {
++    use std::sync::{mpsc::sync_channel, TryLockError};
++    use std::time::Duration;
++
++    let directory = tempfile::tempdir().unwrap();
++    let path = directory.path().join("revision.md");
++    fs::write(&path, "original").unwrap();
++    let path = path.to_string_lossy().into_owned();
++    let expected = read_document(path.clone()).unwrap().revision;
++    let read_path = path.clone();
++    let (opened_sender, opened_receiver) = sync_channel(1);
++    let (release_sender, release_receiver) = sync_channel(1);
++    let reader = std::thread::spawn(move || {
++        hooks::at(hooks::Checkpoint::ReadLocked, move |_| {
++            opened_sender.send(()).unwrap();
++            release_receiver
++                .recv_timeout(Duration::from_secs(10))
++                .unwrap();
++        });
++        document_revision(read_path)
++    });
++    let opened = opened_receiver.recv_timeout(Duration::from_secs(10));
++    let write_path = path.clone();
++    let write_revision = expected.clone();
++    let (waiting_sender, waiting_receiver) = sync_channel(1);
++    let writer = std::thread::spawn(move || {
++        let blocked = matches!(DOCUMENT_WRITES.try_lock(), Err(TryLockError::WouldBlock));
++        waiting_sender.send(blocked).unwrap();
++        write_document(write_path, "edited".into(), Some(write_revision))
++    });
++    let waiting = waiting_receiver.recv_timeout(Duration::from_secs(10));
++    // Release the real read handle before checking results, including failure paths.
++    let released = release_sender.send(());
++    let read = reader.join();
++    let written = writer.join();
++    assert!(opened.is_ok());
++    assert!(released.is_ok());
++    assert!(waiting.unwrap());
++    assert_eq!(read.unwrap().unwrap().revision, Some(expected));
++    let receipt = written.unwrap().unwrap();
++    let snapshot = read_document(path).unwrap();
++    assert_eq!(snapshot.content, "edited");
++    assert_eq!(receipt.revision, snapshot.revision);
++}
+diff --git a/tests/ipcContract.test.ts b/tests/ipcContract.test.ts
+index e0655a1..2ac4633 100644
+--- a/tests/ipcContract.test.ts
++++ b/tests/ipcContract.test.ts
+@@ -44,7 +44,7 @@ describe('IPC allowlist and contract synchronization', () => {
+       .join('\n');
+     const native = [
+       ...source.matchAll(
+-        /#\[tauri::command\]\s+(?:pub\s+)?(?:async\s+)?fn\s+(\w+)\s*\(([\s\S]*?)\)\s*->/g,
++        /#\[tauri::command(?:\(async\))?\]\s+(?:pub\s+)?(?:async\s+)?fn\s+(\w+)\s*\(([\s\S]*?)\)\s*->/g,
+       ),
+     ];
+     expect(native).toHaveLength(commands.length);

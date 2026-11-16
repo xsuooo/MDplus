@@ -1,55 +1,53 @@
-import type { ReactElement } from 'react';
-import { describe, expect, it, vi } from 'vitest';
-
-vi.mock('react', async (original) => ({
-  ...(await original<typeof import('react')>()),
-  memo: (component: unknown) => component,
-  useState: (value: unknown) => [value, vi.fn()],
-  useRef: (current: unknown) => ({ current }),
-  useEffect: () => {},
-}));
-vi.mock('../src/lib/search', () => ({
-  runSearch: vi.fn(),
-  stepSearch: vi.fn(),
-  clearSearch: vi.fn(),
-  getSearchCount: () => 0,
-  subscribeSearchCount: vi.fn(),
-}));
-vi.mock('../src/lib/presence', () => ({ useIsPresent: () => true }));
-
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SearchBar } from '../src/components/SearchBar';
 
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
 describe('search keyboard scope', () => {
-  function press(key: string, extra = {}) {
+  function press(key: string, extra: KeyboardEventInit & { defaultPrevented?: boolean } = {}) {
     const close = vi.fn();
-    const tree = SearchBar({ editor: null, onClose: close }) as ReactElement<{
-      children: ReactElement[];
-    }>;
-    const field = tree.props.children.find((child) => child.type === 'input')! as ReactElement<any>;
-    const event = {
-      key,
-      defaultPrevented: false,
-      nativeEvent: { key, ...extra },
-      preventDefault: vi.fn(),
-      ...extra,
-    };
-    field.props.onKeyDown(event);
-    return { close, event };
+    // Use the real React dispatcher so adding a memo/ref hook cannot make this
+    // test fail for reasons unrelated to keyboard ownership.
+    const view = render(<SearchBar editor={null} onClose={close} />);
+    const field = within(view.container).getByRole('textbox', { name: '搜索关键词' });
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...extra });
+    if (extra.keyCode) Object.defineProperty(event, 'keyCode', { value: extra.keyCode });
+    if (extra.defaultPrevented) event.preventDefault();
+    const preventDefault = vi.spyOn(event, 'preventDefault');
+    fireEvent(field, event);
+    view.unmount();
+    return { close, event, preventDefault };
   }
 
   it('consumes Escape so the outer outline listener cannot close a second panel', () => {
-    const { close, event } = press('Escape');
-    expect(close).toHaveBeenCalledOnce();
-    expect(event.preventDefault).toHaveBeenCalledOnce();
+    const outerClose = vi.fn();
+    const outer = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented) outerClose();
+    };
+    window.addEventListener('keydown', outer);
+    try {
+      const { close, event, preventDefault } = press('Escape');
+      expect(close).toHaveBeenCalledOnce();
+      expect(preventDefault).toHaveBeenCalledOnce();
+      expect(event.defaultPrevented).toBe(true);
+      expect(outerClose).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener('keydown', outer);
+    }
   });
 
   it.each([{ isComposing: true }, { keyCode: 229 }, { defaultPrevented: true }])(
     'preserves composition and already handled keys: %j',
     (extra) => {
       for (const key of ['Escape', 'Enter']) {
-        const { close, event } = press(key, extra);
+        const { close, preventDefault } = press(key, extra);
         expect(close).not.toHaveBeenCalled();
-        expect(event.preventDefault).not.toHaveBeenCalled();
+        expect(preventDefault).not.toHaveBeenCalled();
       }
     },
   );

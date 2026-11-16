@@ -78,6 +78,24 @@ describe('clampToVisibleDisplays', () => {
     expect(clampToVisibleDisplays(onLeft, [primary, leftScreen])).toEqual(onLeft);
   });
 
+  it.each([
+    { x: -1199, y: 0 },
+    { x: 1919, y: 0 },
+    { x: 0, y: -79 },
+    { x: 0, y: 1039 },
+  ])('restores a usable title area when only a thin strip is visible: %j', (position) => {
+    const placed = clampToVisibleDisplays({ ...valid, ...position }, [primary]);
+    expect(placed.x).toBeGreaterThanOrEqual(primary.x);
+    expect(placed.y).toBeGreaterThanOrEqual(primary.y);
+    expect(placed.x + placed.width).toBeLessThanOrEqual(primary.width);
+    expect(placed.y + placed.height).toBeLessThanOrEqual(primary.height);
+  });
+
+  it('preserves a partly offscreen window with a usable title area', () => {
+    const partlyVisible = { ...valid, x: -1100, y: 20 };
+    expect(clampToVisibleDisplays(partlyVisible, [primary])).toEqual(partlyVisible);
+  });
+
   it('moves a window that is entirely off every display into a visible area', () => {
     const stray: WindowState = { ...valid, x: 9000, y: 9000 };
     const placed = clampToVisibleDisplays(stray, [primary, leftScreen]);

@@ -4,9 +4,21 @@ import { DecorationSet, type EditorView } from '@milkdown/prose/view';
 import { imageView } from '../src/lib/imageView';
 
 class TestElement {
+  listeners = new Map<string, EventListener[]>();
   children: TestElement[] = [];
   attributes = new Map<string, string>();
   className = '';
+  classList = {
+    add: (name: string) => {
+      this.className = `${this.className} ${name}`;
+    },
+    remove: (name: string) => {
+      this.className = this.className
+        .split(' ')
+        .filter((item) => item !== name)
+        .join(' ');
+    },
+  };
   textContent = '';
   contentEditable = '';
   type = '';
@@ -29,7 +41,9 @@ class TestElement {
   append(...children: TestElement[]) {
     this.children.push(...children);
   }
-  addEventListener() {}
+  addEventListener(type: string, listener: EventListener) {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+  }
 }
 const schema = new Schema({
   nodes: {
@@ -41,6 +55,27 @@ const schema = new Schema({
 afterEach(() => vi.unstubAllGlobals());
 
 describe('image cache refresh in a NodeView', () => {
+  it('leaves active composition to ProseMirror before changing image selection', () => {
+    vi.stubGlobal('document', { createElement: () => new TestElement() });
+    const view = { isDestroyed: false, composing: true, dispatch: vi.fn(), focus: vi.fn() };
+    const nodeView = imageView((src) => src)(
+      schema.nodes.image.create({ src: './one.png' }),
+      view as unknown as EditorView,
+      () => 0,
+      [],
+      DecorationSet.empty,
+    );
+    const image = (nodeView.dom as unknown as TestElement).children[0];
+    for (const type of ['mousedown', 'click']) {
+      const event = new Event(type, { cancelable: true });
+      Object.assign(event, { button: 0, ctrlKey: false });
+      image.listeners.get(type)!.forEach((listener) => listener(event));
+      expect(event.defaultPrevented).toBe(false);
+    }
+    expect(view.dispatch).not.toHaveBeenCalled();
+    expect(view.focus).not.toHaveBeenCalled();
+    nodeView.destroy!();
+  });
   it('updates only the image DOM, uses the latest node and unsubscribes on destroy', () => {
     vi.stubGlobal('document', { createElement: () => new TestElement() });
     let bytes = 'data:image/png;base64,old';
@@ -68,6 +103,12 @@ describe('image cache refresh in a NodeView', () => {
     expect(image.src).toBe(bytes);
     expect(view.dispatch).not.toHaveBeenCalled();
     expect(view.focus).not.toHaveBeenCalled();
+    const dom = nodeView.dom as unknown as TestElement;
+    expect(dom.children[2].children).toHaveLength(1);
+    nodeView.selectNode!();
+    expect(dom.className).toContain('ProseMirror-selectednode');
+    nodeView.deselectNode!();
+    expect(dom.className).not.toContain('ProseMirror-selectednode');
     expect(
       nodeView.update!(
         schema.nodes.image.create({ src: './two.png', alt: 'two' }),

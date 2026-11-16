@@ -1,13 +1,14 @@
 {
   "name": "mdplus",
   "private": true,
-  "version": "0.2.5",
+  "version": "0.2.6",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc --noEmit",
     "typecheck:browser": "tsc --project tsconfig.browser.json --noEmit",
     "test": "vitest run",
+    "perf": "node tests/perf/run.mjs",
     "test:watch": "vitest",
     "check": "npm run lint && npm run format:check && npm run config:check && npm run typecheck && npm run typecheck:browser && npm run test:coverage",
     "build": "npm run config:check && npm run typecheck && vite build",
@@ -50,6 +51,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.14.0",
     "jsdom": "^27.4.0",
+    "postcss": "^8.5.32",
     "prettier": "^3.9.10",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.72.1",

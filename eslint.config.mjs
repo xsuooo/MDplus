@@ -13,6 +13,8 @@ export default tseslint.config(
       'src-tauri/**',
       'public/**',
       '_backup/**',
+      'tests/perf/.runs/**',
+      'tests/perf/.rollback/**',
     ],
   },
   eslint.configs.recommended,

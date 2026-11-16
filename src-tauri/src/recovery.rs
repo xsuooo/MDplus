@@ -5,10 +5,13 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 
-use crate::{image_mime, write_file_atomic, MAX_IMAGE_FILE_BYTES, MAX_TEXT_FILE_BYTES};
+use crate::{
+    image_mime, image_stash::ImageStash, write_file_atomic, MAX_IMAGE_FILE_BYTES,
+    MAX_TEXT_FILE_BYTES,
+};
 
 use crate::config::{
-    MAX_RECOVERY_IMAGES as MAX_IMAGES, MAX_SNAPSHOT_IMAGE_BYTES,
+    MAX_IMAGE_STASH_ENTRIES, MAX_RECOVERY_IMAGES as MAX_IMAGES, MAX_SNAPSHOT_IMAGE_BYTES,
     RECOVERY_RETENTION_MS as RETENTION_MS,
 };
 static IO_LOCK: Mutex<()> = Mutex::new(());
@@ -44,10 +47,11 @@ pub struct Entry {
 }
 
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RestoredImage {
     #[serde(flatten)]
     image: RecoveryImage,
-    data: Vec<u8>,
+    data_base64: String,
     mime: String,
 }
 
@@ -55,6 +59,13 @@ pub struct RestoredImage {
 pub struct Restored {
     snapshot: Snapshot,
     images: Vec<RestoredImage>,
+}
+
+#[derive(Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Cleanup {
+    removed_keys: Vec<String>,
+    cleanup_error: Option<String>,
 }
 
 fn now_ms() -> u64 {
@@ -176,13 +187,60 @@ fn validate(snapshot: &Snapshot) -> Result<(), String> {
     Ok(())
 }
 
-fn cache_image(root: &Path, id: &str, key: &str, data: &[u8]) -> Result<(), String> {
+fn validate_retained_keys(keys: &[String]) -> Result<HashSet<String>, String> {
+    if keys.len() > MAX_IMAGE_STASH_ENTRIES {
+        return Err("too many retained recovery images".into());
+    }
+    for key in keys {
+        image_path(Path::new(""), key)?;
+    }
+    Ok(keys.iter().cloned().collect())
+}
+
+fn prune_images(dir: &Path, id: &str, mut retained: HashSet<String>) -> Cleanup {
+    let mut cleanup = Cleanup::default();
+    let operation = (|| -> Result<(), String> {
+        if dir.join("snapshot.json").exists() {
+            let snapshot = read_snapshot(dir, id)?;
+            validate_attachments(dir, &snapshot.images)?;
+            retained.extend(snapshot.images.into_iter().map(|image| image.key));
+        }
+        for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let key = entry.file_name().to_string_lossy().into_owned();
+            if retained.contains(&key) || image_path(dir, &key).is_err() {
+                continue;
+            }
+            regular_path(&entry.path(), false)?;
+            // shortcut: bound each cleanup receipt, retry on the next write for larger legacy caches.
+            if cleanup.removed_keys.len() == MAX_IMAGE_STASH_ENTRIES {
+                return Err("recovery cleanup batch limit reached; retry on the next write".into());
+            }
+            fs::remove_file(entry.path()).map_err(|e| e.to_string())?;
+            cleanup.removed_keys.push(key);
+        }
+        Ok(())
+    })();
+    cleanup.cleanup_error = operation.err();
+    cleanup
+}
+
+fn cache_image(
+    root: &Path,
+    id: &str,
+    key: &str,
+    data: &[u8],
+    retained_keys: &[String],
+) -> Result<Cleanup, String> {
     if data.len() as u64 > MAX_IMAGE_FILE_BYTES {
         return Err("recovery image exceeds size limit".into());
     }
     let dir = tab_dir(root, id, true)?;
     let path = image_path(&dir, key)?;
     image_mime(&path, data)?;
+    let mut retained = validate_retained_keys(retained_keys)?;
+    retained.insert(key.into());
+    let cleanup = prune_images(&dir, id, retained);
     let mut total = data.len() as u64;
     for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
@@ -191,25 +249,25 @@ fn cache_image(root: &Path, id: &str, key: &str, data: &[u8]) -> Result<(), Stri
             total += entry.metadata().map_err(|e| e.to_string())?.len();
         }
     }
-    if total > MAX_SNAPSHOT_IMAGE_BYTES + MAX_TEXT_FILE_BYTES + 1024 * 1024 {
+    // Keep the last complete snapshot while a disjoint replacement attachment set is staged.
+    if total > 2 * MAX_SNAPSHOT_IMAGE_BYTES + MAX_TEXT_FILE_BYTES + 1024 * 1024 {
         return Err("recovery cache exceeds per-document limit".into());
     }
     if path.exists() {
         regular_path(&path, false)?;
         if read_limited(&path, MAX_IMAGE_FILE_BYTES)? == data {
-            return Ok(());
+            return Ok(cleanup);
         }
         return Err("recovery image keys are immutable".into());
     }
-    write_file_atomic(&path, data).map_err(|e| e.to_string())
+    write_file_atomic(&path, data).map_err(|e| e.to_string())?;
+    Ok(cleanup)
 }
 
-fn save(root: &Path, mut snapshot: Snapshot) -> Result<(), String> {
-    validate(&snapshot)?;
-    let dir = tab_dir(root, &snapshot.id, true)?;
+fn validate_attachments(dir: &Path, images: &[RecoveryImage]) -> Result<(), String> {
     let mut size = 0;
-    for image in &snapshot.images {
-        let path = image_path(&dir, &image.key)?;
+    for image in images {
+        let path = image_path(dir, &image.key)?;
         regular_path(&path, false)?;
         let length = fs::metadata(&path).map_err(|e| e.to_string())?.len();
         if length > MAX_IMAGE_FILE_BYTES {
@@ -220,6 +278,14 @@ fn save(root: &Path, mut snapshot: Snapshot) -> Result<(), String> {
     if size > MAX_SNAPSHOT_IMAGE_BYTES {
         return Err("recovery attachments exceed 256 MiB".into());
     }
+    Ok(())
+}
+
+fn save(root: &Path, mut snapshot: Snapshot, retained_keys: &[String]) -> Result<Cleanup, String> {
+    validate(&snapshot)?;
+    let retained = validate_retained_keys(retained_keys)?;
+    let dir = tab_dir(root, &snapshot.id, true)?;
+    validate_attachments(&dir, &snapshot.images)?;
     snapshot.updated_at = now_ms();
     let path = dir.join("snapshot.json");
     if path.exists() {
@@ -230,7 +296,9 @@ fn save(root: &Path, mut snapshot: Snapshot) -> Result<(), String> {
         return Err("encoded recovery snapshot exceeds size limit".into());
     }
     // Images are durable before the manifest replaces the previous complete snapshot.
-    write_file_atomic(&path, &data).map_err(|e| e.to_string())
+    write_file_atomic(&path, &data).map_err(|e| e.to_string())?;
+    // Cleanup is auxiliary: its failure cannot undo a fully published snapshot.
+    Ok(prune_images(&dir, &snapshot.id, retained))
 }
 
 fn read_snapshot(dir: &Path, id: &str) -> Result<Snapshot, String> {
@@ -262,7 +330,7 @@ fn restore(root: &Path, id: &str) -> Result<Restored, String> {
         let mime = image_mime(&path, &data)?.to_owned();
         images.push(RestoredImage {
             image: image.clone(),
-            data,
+            data_base64: crate::image_data::encode_image(&data),
             mime,
         });
     }
@@ -332,14 +400,16 @@ fn list(root: &Path, active_ids: &[String], now: u64) -> Result<Vec<Entry>, Stri
             continue;
         }
         match read_snapshot(&dir, &id) {
-            Ok(snapshot) => entries.push(Entry {
-                id,
-                title: snapshot.title,
-                original_path: snapshot.original_path,
-                updated_at: snapshot.updated_at,
-                damaged: false,
-            }),
-            Err(_) => entries.push(Entry {
+            Ok(snapshot) if validate_attachments(&dir, &snapshot.images).is_ok() => {
+                entries.push(Entry {
+                    id,
+                    title: snapshot.title,
+                    original_path: snapshot.original_path,
+                    updated_at: snapshot.updated_at,
+                    damaged: false,
+                })
+            }
+            _ => entries.push(Entry {
                 id,
                 title: "Damaged recovery snapshot".into(),
                 original_path: None,
@@ -352,24 +422,53 @@ fn list(root: &Path, active_ids: &[String], now: u64) -> Result<Vec<Entry>, Stri
     Ok(entries)
 }
 
+fn cache_stashed_image(
+    root: &Path,
+    state: &ImageStash,
+    id: &str,
+    key: &str,
+    stash_key: &str,
+    retained_keys: &[String],
+) -> Result<Cleanup, String> {
+    identifier(id)?;
+    image_path(Path::new(""), key)?;
+    validate_retained_keys(retained_keys)?;
+    let _lock = IO_LOCK.lock().map_err(|_| "recovery storage lock failed")?;
+    // Read under the recovery lock so simultaneous IPC cannot multiply image buffers.
+    let data = state.read_bytes(stash_key)?;
+    cache_image(root, id, key, &data, retained_keys)
+}
+
 #[tauri::command]
 pub async fn cache_recovery_image(
     app: tauri::AppHandle,
     id: String,
     key: String,
-    data: Vec<u8>,
-) -> Result<(), String> {
-    let _lock = IO_LOCK.lock().map_err(|_| "recovery storage lock failed")?;
-    cache_image(&root(&app)?, &id, &key, &data)
+    stash_key: String,
+    retained_keys: Vec<String>,
+) -> Result<Cleanup, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        cache_stashed_image(
+            &root(&app)?,
+            &app.state::<ImageStash>(),
+            &id,
+            &key,
+            &stash_key,
+            &retained_keys,
+        )
+    })
+    .await
+    .map_err(|error| format!("恢复图片缓存任务失败：{error}"))?
 }
 
 #[tauri::command]
 pub async fn write_recovery_snapshot(
     app: tauri::AppHandle,
     snapshot: Snapshot,
-) -> Result<(), String> {
+    retained_keys: Vec<String>,
+) -> Result<Cleanup, String> {
     let _lock = IO_LOCK.lock().map_err(|_| "recovery storage lock failed")?;
-    save(&root(&app)?, snapshot)
+    save(&root(&app)?, snapshot, &retained_keys)
 }
 
 #[tauri::command]

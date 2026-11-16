@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from 'react';
+import { showInitialWindow } from '../services/windowState';
 
 interface Props {
   children: ReactNode;
@@ -18,6 +19,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error): void {
     console.error('MDPlus 渲染异常:', error);
+    void showInitialWindow();
   }
 
   render() {

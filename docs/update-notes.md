@@ -52,25 +52,13 @@ C:\Users\<用户名>\AppData\Local\IconCache.db
 
 ## 构建与检查
 
-提交前跑前端检查（类型检查 + 单元测试，CI 跑的是同一条命令）：
+提交前跑前端质量检查（Lint、格式、配置同步、两套类型检查、单测与覆盖率门槛）：
 
 ```bash
 npm run check
 ```
 
-Rust 侧三项，和 CI 完全一致：
-
-```bash
-cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-```
-
-```bash
-cargo test --manifest-path src-tauri/Cargo.toml
-```
-
-```bash
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-```
+Rust 格式、Clippy、生产代码覆盖率门槛、真实 Windows 符号链接专项，以及完整浏览器回归的统一入口见 [开发与质量检查](development-quality.md)。普通 `cargo test` 不会执行 Windows 上显式忽略的真实符号链接专项，不能单独代表 CI 全部检查。
 
 打包安装程序：
 

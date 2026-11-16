@@ -235,6 +235,8 @@ export function dispatchShortcut(
 export function shortcutWarning(binding: string): string | null {
   const parsed = parseAccelerator(binding);
   if (!parsed) return null;
+  if (parsed.ctrl && !parsed.alt && !parsed.shift && !parsed.meta && parsed.key === 'enter')
+    return '富文本链接内优先打开文稿；替换输入框内优先执行全部替换。';
   if (parsed.meta || (parsed.alt && ['tab', 'escape', 'f4', 'space'].includes(parsed.key))) {
     return '系统可能优先处理此组合键;应用无法保证收到事件。';
   }
@@ -267,6 +269,15 @@ export function formatShortcut(binding: string | null): string {
   const display = DISPLAY_KEYS[parsed.key] ?? parsed.key.toUpperCase();
   parts.push(display);
   return parts.join('+');
+}
+
+/** Only advertise bindings that actually dispatch to this action. */
+export function formatActionShortcuts(bindings: ShortcutBindings, action: ShortcutAction): string {
+  const index = createShortcutIndex(bindings);
+  return [...index]
+    .filter(([, owner]) => owner === action)
+    .map(([binding]) => formatShortcut(binding))
+    .join(' / ');
 }
 
 export function findConflicts(
