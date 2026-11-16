@@ -44,6 +44,36 @@ pub struct StashedImage {
     data_base64: String,
 }
 
+/// `code` lets the frontend tell exhausted capacity, which leaves every stored
+/// image untouched and can be worked around, from every other failure.
+#[derive(Debug, serde::Serialize)]
+pub struct StashError {
+    code: &'static str,
+    message: String,
+}
+
+impl From<String> for StashError {
+    fn from(message: String) -> Self {
+        Self {
+            code: "STASH_FAILED",
+            message,
+        }
+    }
+}
+
+impl From<&str> for StashError {
+    fn from(message: &str) -> Self {
+        message.to_string().into()
+    }
+}
+
+/// Callers that only report the failure keep their plain-text errors.
+impl From<StashError> for String {
+    fn from(error: StashError) -> Self {
+        error.message
+    }
+}
+
 impl ImageStash {
     /// Copy validated bytes into process-owned storage; callers never acquire
     /// deletion authority over the original file they selected or dropped.
@@ -52,7 +82,7 @@ impl ImageStash {
         parent: &Path,
         filename: &str,
         bytes: &[u8],
-    ) -> Result<StashReceipt, String> {
+    ) -> Result<StashReceipt, StashError> {
         self.0
             .lock()
             .map_err(|_| "session image lock failed")?
@@ -92,7 +122,7 @@ impl Stash {
         filename: &str,
         data: &[u8],
         limit: u64,
-    ) -> Result<StashReceipt, String> {
+    ) -> Result<StashReceipt, StashError> {
         if !safe_files::valid_basename(filename) {
             return Err("invalid image filename".into());
         }
@@ -104,7 +134,10 @@ impl Stash {
         if length > limit.saturating_sub(self.total_bytes)
             || self.files.len() >= MAX_IMAGE_STASH_ENTRIES
         {
-            return Err("图片暂存空间已满，已有图片未受影响。请关闭其他含图片的文稿后重试".into());
+            return Err(StashError {
+                code: "STASH_FULL",
+                message: "图片暂存空间已满，已有图片未受影响。请关闭其他含图片的文稿后重试".into(),
+            });
         }
         if self.directory.is_none() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -246,7 +279,7 @@ pub fn stash_image(
     state: State<'_, ImageStash>,
     filename: String,
     data_base64: String,
-) -> Result<StashReceipt, String> {
+) -> Result<StashReceipt, StashError> {
     let data = image_data::decode_image(&data_base64).map_err(|error| error.to_string())?;
     let parent = app
         .path()

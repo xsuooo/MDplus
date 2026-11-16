@@ -59,6 +59,11 @@
       "response": "#/$defs/RecoveryCleanup",
       "error": "#/$defs/StringError"
     },
+    "cache_recovery_document_image": {
+      "request": "#/$defs/RecoveryDocumentImageRequest",
+      "response": "#/$defs/RecoveryCleanup",
+      "error": "#/$defs/StringError"
+    },
     "write_recovery_snapshot": {
       "request": "#/$defs/RecoveryWriteRequest",
       "response": "#/$defs/RecoveryCleanup",
@@ -92,7 +97,7 @@
     "stash_image": {
       "request": "#/$defs/StashImageRequest",
       "response": "#/$defs/StashReceipt",
-      "error": "#/$defs/StringError"
+      "error": "#/$defs/StashError"
     },
     "import_dropped_image": {
       "request": "#/$defs/DroppedImageRequest",
@@ -313,6 +318,20 @@
     "StringError": {
       "type": "string"
     },
+    "StashError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "description": "STASH_FULL means the byte or entry capacity is exhausted and every stored image is untouched; the frontend may then leave a document image in its own file. Every other rejection is STASH_FAILED.",
+      "properties": {
+        "code": {
+          "enum": ["STASH_FULL", "STASH_FAILED"]
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    },
     "SettingsSnapshot": {
       "type": "object",
       "additionalProperties": false,
@@ -441,6 +460,41 @@
           "type": "string",
           "pattern": "^[0-9a-f]{32}$",
           "description": "Key of a pinned process-owned image stash handle; native code copies its immutable bytes without transferring Base64 through the WebView."
+        },
+        "retainedKeys": {
+          "$ref": "#/$defs/RecoveryRetainedKeys"
+        }
+      }
+    },
+    "RecoveryDocumentImageRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "key", "docPath", "relativePath", "digest", "retainedKeys"],
+      "description": "Recovery copy of an image the full session stash could not admit. Native code reads the file itself under the same checks as read_image_file and refuses the copy unless its SHA-256 equals digest.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "^[A-Za-z0-9-]+$"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "docPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Relative image beneath the validated regular document directory; absolute paths and escapes are rejected."
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Lower-case SHA-256 of the bytes the frontend prepared; a file that no longer matches is rejected and nothing is written."
         },
         "retainedKeys": {
           "$ref": "#/$defs/RecoveryRetainedKeys"

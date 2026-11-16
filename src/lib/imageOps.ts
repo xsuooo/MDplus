@@ -16,16 +16,36 @@ export interface PendingImage extends PendingImageReference {
   mime: string;
   byteLength: number;
   source?: { url: string; absolutePath: string };
+  /** Set only while the bytes still live in the document's own image file. */
+  file?: PendingImageFile;
 }
-interface ImageBacking {
-  key: string;
+/** Where an image that the full stash could not admit is read from, and what it must hash to. */
+export interface PendingImageFile {
+  docPath: string;
+  relativePath: string;
+  digest: string;
+}
+interface BackingBase {
   mime: string;
   byteLength: number;
   digest: string;
   owners: number;
+}
+interface StashBacking extends BackingBase {
+  key: string;
   /** A process-owned, read-only native URL, not a retained JS binary/data URL. */
   previewUrl: string;
 }
+/**
+ * The stash had no room, so nothing native is owned: the bytes are the document's
+ * image file, re-read and checked against `digest` whenever they are needed.
+ */
+interface FileBacking extends BackingBase {
+  key: null;
+  previewUrl: null;
+  file: { docPath: string; relativePath: string };
+}
+type ImageBacking = StashBacking | FileBacking;
 interface CachedImage extends PendingImage {
   backing: ImageBacking;
   inserting?: boolean;
@@ -104,7 +124,7 @@ export function imageReferencesChanged(tabId: string): void {
   );
 }
 async function releaseBacking(backing: ImageBacking): Promise<void> {
-  if (--backing.owners > 0) return;
+  if (--backing.owners > 0 || backing.key === null) return;
   await invoke('discard_stashed_images', { keys: [backing.key] });
 }
 function quietlyRelease(backing: ImageBacking): void {
@@ -129,14 +149,17 @@ export async function collectUnusedImages(tabId?: string): Promise<void> {
       continue;
     }
     let removed = false;
+    let unstashedRemoved = false;
     for (const [token, image] of cache.images) {
       if (image.inserting || image.backing.owners > 1 || reachable.has(token)) continue;
       removed = true;
+      unstashedRemoved ||= image.backing.key === null;
       cache.images.delete(token);
       for (const [url, owner] of cache.aliases) if (owner === token) cache.aliases.delete(url);
       discarded.push(releaseBacking(image.backing));
     }
-    if (removed) changed(id, cache, false);
+    // Only the count of images without a preview is visible; previews themselves are not.
+    if (removed) changed(id, cache, unstashedRemoved);
   }
   await Promise.all(discarded);
 }
@@ -202,10 +225,19 @@ async function digestImage(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
   return [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
+function isStashFull(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: unknown }).code === 'STASH_FULL'
+  );
+}
 async function stashImage(
   filename: string,
   dataBase64: string,
   existing?: ImageBacking,
+  /** Given only where the bytes may stay in the document's own file when the stash is full. */
+  file?: { docPath: string; relativePath: string; mime: string },
 ): Promise<ImageBacking> {
   const byteLength = imageByteLength(dataBase64);
   // At most one transfer/hash operation runs globally. No persistent image bytes
@@ -213,14 +245,40 @@ async function stashImage(
   // while the compact base64 IPC string is itself bounded by the 64 MiB limit.
   if (byteLength * 2 > LIMITS.imageMemoryBytes) throw new Error('图片传输内存预算不足');
   const digest = await digestImage(decodeImage(dataBase64));
-  if (existing?.digest === digest && existing.owners > 0) {
+  // A file-backed image never takes this shortcut: every preparation retries its admission.
+  if (existing && existing.key !== null && existing.digest === digest && existing.owners > 0) {
     existing.owners += 1;
     return existing;
   }
-  const stashed = await invoke<{ key: string; mime: string; previewUrl: string }>('stash_image', {
-    filename,
-    dataBase64,
-  });
+  let stashed: { key: string; mime: string; previewUrl: string };
+  try {
+    stashed = await invoke<{ key: string; mime: string; previewUrl: string }>('stash_image', {
+      filename,
+      dataBase64,
+    });
+  } catch (error) {
+    // Only exhausted capacity is survivable. Every other failure keeps rejecting.
+    if (!file || !isStashFull(error)) throw error;
+    if (
+      existing?.key === null &&
+      existing.owners > 0 &&
+      existing.digest === digest &&
+      isSamePath(existing.file.docPath, file.docPath) &&
+      existing.file.relativePath === file.relativePath
+    ) {
+      existing.owners += 1;
+      return existing;
+    }
+    return {
+      key: null,
+      previewUrl: null,
+      file: { docPath: file.docPath, relativePath: file.relativePath },
+      mime: file.mime,
+      byteLength,
+      digest,
+      owners: 1,
+    };
+  }
   return {
     key: stashed.key,
     mime: stashed.mime,
@@ -230,14 +288,38 @@ async function stashImage(
     owners: 1,
   };
 }
+/** A file-backed image is only as good as its hash: never hand out other bytes. */
+async function readFileBacking(backing: FileBacking): Promise<string> {
+  const stale = new Error(`图片文件在准备后已变化或无法读取，请重试: ${backing.file.relativePath}`);
+  let dataBase64: string;
+  try {
+    ({ dataBase64 } = await readImageFile(backing.file.docPath, backing.file.relativePath));
+  } catch {
+    throw stale;
+  }
+  if (
+    imageByteLength(dataBase64) !== backing.byteLength ||
+    (await digestImage(decodeImage(dataBase64))) !== backing.digest
+  )
+    throw stale;
+  return dataBase64;
+}
 function snapshotImage(cache: ImageCache, image: CachedImage): PendingImage {
-  const { placeholder, relativePath, filename, mime, byteLength } = image;
+  const { placeholder, relativePath, filename, mime, byteLength, backing } = image;
   // A retired token owns its immutable stash, never somebody else's current disk URL.
   const source =
     image.source && cache.aliases.get(image.source.url) === placeholder
       ? { ...image.source }
       : undefined;
-  return { placeholder, relativePath, filename, mime, byteLength, source };
+  return {
+    placeholder,
+    relativePath,
+    filename,
+    mime,
+    byteLength,
+    source,
+    ...(backing.key === null ? { file: { ...backing.file, digest: backing.digest } } : {}),
+  };
 }
 export function getPendingImages(tabId: string): PendingImage[] {
   const cache = imageCaches.get(tabId);
@@ -255,7 +337,10 @@ export function getInFlightImages(tabId: string): PendingImage[] {
 export interface PendingImageLease {
   images: PendingImage[];
   readDataBase64: (placeholder: string) => Promise<string>;
+  /** Only for an image held by the stash; an image left in its file rejects. */
   withStashKey: <T>(placeholder: string, consume: (stashKey: string) => Promise<T>) => Promise<T>;
+  /** Only for an image left in its file (`PendingImage.file`); a stashed image rejects. */
+  withFile: <T>(placeholder: string, consume: (file: PendingImageFile) => Promise<T>) => Promise<T>;
   withDataBase64: <T>(
     placeholder: string,
     consume: (dataBase64: string) => Promise<T>,
@@ -292,6 +377,7 @@ export function capturePendingImages(tabId: string, urls?: Iterable<string>): Pe
   };
   const withDataBase64 = <T>(placeholder: string, consume: (dataBase64: string) => Promise<T>) =>
     withBacking(placeholder, async (backing) => {
+      if (backing.key === null) return consume(await readFileBacking(backing));
       const data = await invoke<{ dataBase64: string; mime: string }>('read_stashed_image', {
         key: backing.key,
       });
@@ -302,7 +388,18 @@ export function capturePendingImages(tabId: string, urls?: Iterable<string>): Pe
   return {
     images: selected.map((image) => snapshotImage(cache!, image)),
     withStashKey: (placeholder, consume) =>
-      withBacking(placeholder, (backing) => consume(backing.key)),
+      withBacking(placeholder, (backing) =>
+        backing.key === null
+          ? Promise.reject(new Error('图片未进入暂存区，无法按暂存键读取'))
+          : consume(backing.key),
+      ),
+    // The file is read from the backing, not from `images`: Save As may have moved it since.
+    withFile: (placeholder, consume) =>
+      withBacking(placeholder, (backing) =>
+        backing.key === null
+          ? consume({ ...backing.file, digest: backing.digest })
+          : Promise.reject(new Error('图片已在暂存区，无法按文件读取')),
+      ),
     withDataBase64,
     readDataBase64: (placeholder) => withDataBase64(placeholder, async (data) => data),
     release: () => {
@@ -380,15 +477,23 @@ export function clearPendingImages(tabId: string): void {
   if (cache) for (const image of cache.images.values()) quietlyRelease(image.backing);
   notifyImages(tabId);
 }
-/** Canonical identities for editor history; source text itself need not be rewritten. */
+/**
+ * Canonical identities for editor history; source text itself need not be rewritten.
+ * An image left in its file is not offered: its token owns no bytes and is replaced
+ * whenever the file changes, so editors and their history keep the raw URL.
+ */
 export function imageIdentityReferences(tabId: string): PendingImageReference[] {
-  return [...(imageCaches.get(tabId)?.aliases ?? [])].map(([url, token]) => ({
-    placeholder: url,
-    relativePath: token,
-  }));
+  const cache = imageCaches.get(tabId);
+  return [...(cache?.aliases ?? [])].flatMap(([url, token]) =>
+    cache!.images.get(token)?.backing.key === null
+      ? []
+      : [{ placeholder: url, relativePath: token }],
+  );
 }
 export function resolveImageIdentity(tabId: string, url: string): string {
-  return imageCaches.get(tabId)?.aliases.get(url) ?? url;
+  const cache = imageCaches.get(tabId);
+  const token = cache?.aliases.get(url);
+  return token !== undefined && cache!.images.get(token)?.backing.key !== null ? token : url;
 }
 /** Only expose a raw URL while it still names this exact immutable image. */
 export function resolveImageReference(tabId: string, token: string): string {
@@ -405,6 +510,28 @@ export function resolveImageSource(tabId: string, url: string): string {
   const cache = imageCaches.get(tabId);
   const image = cache?.images.get(url) ?? cache?.images.get(cache.aliases.get(url) ?? '');
   return image?.backing.previewUrl ?? url;
+}
+/** Images the full stash could not admit: saved and protected from their files, without a preview. */
+export function unstashedImageCount(tabId: string): number {
+  let count = 0;
+  for (const image of imageCaches.get(tabId)?.images.values() ?? [])
+    if (image.backing.key === null) count += 1;
+  return count;
+}
+/**
+ * An image left in its file owns no bytes and never enters editor history, so it is
+ * forgotten, with its aliases, as soon as it is not among the tokens still in use.
+ */
+function dropFileImages(cache: ImageCache, inUse: ReadonlySet<string>): boolean {
+  let dropped = false;
+  for (const [token, image] of cache.images) {
+    if (image.backing.key !== null || inUse.has(token)) continue;
+    cache.images.delete(token);
+    for (const [url, owner] of cache.aliases) if (owner === token) cache.aliases.delete(url);
+    quietlyRelease(image.backing);
+    dropped = true;
+  }
+  return dropped;
 }
 /** Diagnostics expose byte counts, not image contents. Encoded bytes live only in native stash. */
 export function imageCacheUsage(): { residentBytes: number; images: number } {
@@ -458,9 +585,16 @@ export function commitImageMigration(migration: ImageMigration): void {
     if (!current) continue;
     if (current.source && cache.aliases.get(current.source.url) === current.placeholder)
       cache.aliases.delete(current.source.url);
+    // The copy just written was checked against the digest, so it is the same image.
+    if (current.backing.key === null)
+      current.backing.file = {
+        docPath: migration.targetFilePath,
+        relativePath: relativeImageFilePath(source.url),
+      };
     cache.images.set(image.placeholder, { ...current, filename, relativePath: source.url, source });
     cache.aliases.set(source.url, image.placeholder);
   }
+  dropFileImages(cache, new Set(cache.aliases.values()));
   cache.docPath = migration.targetFilePath;
   changed(migration.tabId, cache);
   releaseMigration(migration);
@@ -583,10 +717,13 @@ export async function prepareImageReferences(
     for (const url of new Set(getImageUrls(markdown))) {
       if (!isRelativeImageUrl(url)) continue;
       const existing = cache.images.get(cache.aliases.get(url) ?? '');
-      if (sameDocument && existing && !options.refresh) continue;
+      // An image left in its file is read again by every preparation: that retries
+      // its admission and keeps the recorded digest in step with the file.
+      if (sameDocument && existing && existing.backing.key !== null && !options.refresh) continue;
       const relativePath = relativeImageFilePath(url);
-      // Missing/invalid source observations may retire a live alias. A stash-full
-      // error, however, must reject the preparation rather than retire good data.
+      // Missing/invalid source observations may retire a live alias. A stash failure
+      // must reject the preparation rather than retire good data, with one exception:
+      // outside a refresh, a full stash leaves the image in its file (see stashImage).
       const image = await imageIO(async () => {
         let loaded: Awaited<ReturnType<typeof readImageFile>>;
         try {
@@ -599,6 +736,7 @@ export async function prepareImageReferences(
           basename(relativePath),
           loaded.dataBase64,
           reusable ? existing.backing : undefined,
+          options.refresh ? undefined : { docPath, relativePath, mime: loaded.mime },
         );
         const placeholder =
           backing === existing?.backing ? existing.placeholder : `mdplus-image:${imageId()}`;
@@ -632,8 +770,10 @@ export async function prepareImageReferences(
         visibleChange = cache.aliases.size > 0;
         cache.aliases.clear();
       }
+      const stagedTokens = new Set<string>();
       for (const [url, image] of staged) {
         if (image) {
+          stagedTokens.add(image.placeholder);
           visibleChange ||= cache.aliases.get(url) !== image.placeholder;
           const previous = cache.images.get(image.placeholder);
           cache.images.set(image.placeholder, image);
@@ -641,8 +781,11 @@ export async function prepareImageReferences(
           if (previous) quietlyRelease(previous.backing);
         } else visibleChange = cache.aliases.delete(url) || visibleChange;
       }
+      // Each image left in its file is staged again whenever the text still references
+      // it, so one this preparation did not stage has left the document.
+      const dropped = dropFileImages(cache, stagedTokens);
       cache.docPath = docPath;
-      changed(tabId, cache, visibleChange);
+      changed(tabId, cache, visibleChange || dropped);
       return true;
     },
   };

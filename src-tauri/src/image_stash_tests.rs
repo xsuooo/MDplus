@@ -45,13 +45,23 @@ fn review_m8_stash_capacity_and_bad_input_fail_without_eviction_or_partial_accou
     let root = tempfile::tempdir().unwrap();
     let mut stash = Stash::default();
     let a = stash.insert(root.path(), "one.svg", b"<svg/>", 6).unwrap();
-    for (name, bytes) in [
-        ("two.svg", b"<svg/>".as_slice()),
-        ("bad.png", b"not png".as_slice()),
-        ("../escape.svg", b"<svg/>".as_slice()),
+    // Only exhausted capacity may carry the code the frontend works around.
+    for (name, bytes, code) in [
+        ("two.svg", b"<svg/>".as_slice(), "STASH_FULL"),
+        ("bad.png", b"not png".as_slice(), "STASH_FAILED"),
+        ("../escape.svg", b"<svg/>".as_slice(), "STASH_FAILED"),
     ] {
-        assert!(stash.insert(root.path(), name, bytes, 6).is_err());
+        let error = stash.insert(root.path(), name, bytes, 6).unwrap_err();
+        assert_eq!(error.code, code, "{name}");
     }
+    let full = stash
+        .insert(root.path(), "two.svg", b"<svg/>", 6)
+        .unwrap_err();
+    assert_eq!(
+        serde_json::to_value(&full).unwrap(),
+        serde_json::json!({ "code": "STASH_FULL", "message": full.message })
+    );
+    assert!(String::from(full).contains("图片暂存空间已满"));
     assert_eq!(stash.total_bytes, 6);
     assert_eq!(stash.files.len(), 1);
     assert_eq!(

@@ -145,6 +145,44 @@ describe('strict pure-browser native fixtures', () => {
     expect(byCount.stashes.size).toBe(1);
   });
 
+  it('marks only an exhausted stash with the code that keeps a document image on disk', async () => {
+    const path = 'C:/drop/picture.png';
+    const limit = decodeFixtureBase64(png).length;
+    const byBytes = createNativeMocks({
+      binaries: new Map([[path, [...decodeFixtureBase64(png)]]]),
+      stashByteLimit: limit,
+    });
+    await byBytes.invoke('stash_image', image);
+    await expect(byBytes.invoke('stash_image', image)).rejects.toMatchObject({
+      code: 'STASH_FULL',
+      message: expect.stringContaining('stash full'),
+    });
+    const byCount = createNativeMocks({ stashEntryLimit: 1 });
+    await byCount.invoke('stash_image', image);
+    await expect(byCount.invoke('stash_image', image)).rejects.toMatchObject({
+      code: 'STASH_FULL',
+      message: expect.stringContaining('too many session'),
+    });
+    // Invalid input is refused before capacity is considered, and a drop keeps
+    // its plain error: neither may be mistaken for an image that can stay on disk.
+    const refusals = [
+      byBytes.invoke('stash_image', { ...image, filename: 'picture.txt' }),
+      byBytes.invoke('stash_image', { ...image, dataBase64: 'bad' }),
+      byBytes.invoke('import_dropped_image', { path }),
+    ];
+    for (const refusal of refusals) {
+      const error = await refusal.then(
+        () => null,
+        (reason: unknown) => reason,
+      );
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toHaveProperty('code');
+    }
+    await expect(byBytes.invoke('import_dropped_image', { path })).rejects.toThrow('stash full');
+    expect(byBytes.stashes.size).toBe(1);
+    expect(byBytes.stashBytes).toBe(limit);
+  });
+
   it('discards only owned allocations and reuses committed bytes without granting deletion rights', async () => {
     const native = createNativeMocks();
     const first = (await native.invoke('save_image_asset', asset)) as {
@@ -428,6 +466,85 @@ describe('strict pure-browser native fixtures', () => {
     await expect(
       native.invoke('cache_recovery_image', { ...request, stashKey: 'missing' }),
     ).rejects.toThrow('unknown session image key');
+    expect(native.recoveryImages.size).toBe(1);
+  });
+
+  it('copies a document image into recovery only while it still matches the prepared digest', async () => {
+    const source = 'C:/fixture/img/p.png';
+    const bytes = [...decodeFixtureBase64(png)];
+    const sha256 = (data: number[]) =>
+      createHash('sha256').update(Uint8Array.from(data)).digest('hex');
+    const binaries = new Map([[source, bytes]]);
+    const native = createNativeMocks({ binaries });
+    const request = {
+      id: 'tab',
+      key: 'p.png',
+      docPath: 'C:/fixture/note.md',
+      relativePath: 'img/p.png',
+      digest: sha256(bytes),
+      retainedKeys: [],
+    };
+    const copy = (changes: Record<string, unknown> = {}) =>
+      native.invoke('cache_recovery_document_image', { ...request, ...changes });
+    await expect(copy()).resolves.toEqual({ removedKeys: [], cleanupError: null });
+    expect(native.recoveryImages.get('tab/p.png')).toEqual({ dataBase64: png, mime: 'image/png' });
+    // The copy is owned by recovery alone: no session stash entry is created for it.
+    expect(native.stashes.size).toBe(0);
+    expect(native.stashBytes).toBe(0);
+    await expect(copy()).resolves.toEqual({ removedKeys: [], cleanupError: null });
+
+    const changed = [...bytes.slice(0, -1), bytes[bytes.length - 1] ^ 1];
+    binaries.set(source, changed);
+    await expect(copy()).rejects.toThrow('image changed after it was prepared');
+    await expect(copy({ digest: sha256(changed) })).rejects.toThrow(
+      'immutable recovery image changed',
+    );
+    await expect(copy({ digest: sha256(changed).toUpperCase() })).rejects.toThrow(
+      'invalid image digest',
+    );
+    await expect(copy({ relativePath: 'img/missing.png' })).rejects.toThrow('missing image');
+    await expect(copy({ key: '../p.png' })).rejects.toThrow('invalid recovery image key');
+    await expect(copy({ dataBase64: png })).rejects.toThrow('path and digest only');
+    await expect(copy({ stashKey: 'held' })).rejects.toThrow('path and digest only');
+    expect(native.recoveryImages.size).toBe(1);
+    expect(native.recoveryImages.get('tab/p.png')?.dataBase64).toBe(png);
+    expect(binaries.get(source)).toBe(changed);
+
+    // A changed file is copied under a new key, as a re-prepared image would be.
+    await expect(copy({ key: 'q.png', digest: sha256(changed) })).resolves.toEqual({
+      removedKeys: ['p.png'],
+      cleanupError: null,
+    });
+    expect(native.recoveryImages.get('tab/q.png')?.dataBase64).toBe(encodeFixtureBytes(changed));
+  });
+
+  it('reads a recovery document image through a scenario handler that predates the command', async () => {
+    const bytes = [...decodeFixtureBase64(png)];
+    const failure = new Error('original fixture disk failure');
+    let fail = false;
+    const fallback = vi.fn(async (command: string) => {
+      if (command !== 'read_image_file') throw new Error(`unexpected ${command}`);
+      if (fail) throw failure;
+      return { path: 'C:/fixture/img/p.png', mime: 'image/png', data: bytes };
+    });
+    const native = createNativeMocks({ legacyImagePayloads: true, fallback });
+    const request = {
+      id: 'tab',
+      key: 'p.png',
+      docPath: 'C:/fixture/note.md',
+      relativePath: 'img/p.png',
+      digest: createHash('sha256').update(Uint8Array.from(bytes)).digest('hex'),
+      retainedKeys: [],
+    };
+    await native.invoke('cache_recovery_document_image', request);
+    expect(fallback.mock.calls).toEqual([
+      ['read_image_file', { docPath: 'C:/fixture/note.md', relativePath: 'img/p.png' }],
+    ]);
+    expect(native.recoveryImages.get('tab/p.png')).toEqual({ dataBase64: png, mime: 'image/png' });
+    fail = true;
+    await expect(
+      native.invoke('cache_recovery_document_image', { ...request, key: 'q.png' }),
+    ).rejects.toBe(failure);
     expect(native.recoveryImages.size).toBe(1);
   });
 

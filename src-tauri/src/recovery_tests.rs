@@ -124,6 +124,190 @@ fn rejects_unknown_stash_keys_and_invalid_copy_metadata_before_writing_recovery(
 }
 
 #[test]
+fn copies_a_verified_document_image_and_keeps_recovery_after_the_source_changes_or_is_gone() {
+    let root = Fixture::new();
+    let documents = tempfile::tempdir().unwrap();
+    let document = documents.path().join("note.md");
+    fs::write(&document, "![](img/picture.svg)").unwrap();
+    fs::create_dir(documents.path().join("img")).unwrap();
+    let source = documents.path().join("img/picture.svg");
+    fs::write(&source, SVG).unwrap();
+    let digest = format!("{:x}", Sha256::digest(SVG));
+    let relative = Path::new("img/picture.svg");
+    let cleanup = cache_document_image(
+        &root.0,
+        "test-id",
+        "picture.svg",
+        &document,
+        relative,
+        &digest,
+        &[],
+    )
+    .unwrap();
+    assert!(cleanup.cleanup_error.is_none());
+    assert_eq!(fs::read(root.0.join("test-id/picture.svg")).unwrap(), SVG);
+    save(&root.0, snapshot(), &[]).unwrap();
+
+    // A file edited after it was prepared is neither copied under the digest
+    // it no longer has nor allowed to replace the bytes the snapshot owns.
+    let other = b"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"3\" height=\"3\"/>";
+    fs::write(&source, other).unwrap();
+    assert_eq!(
+        cache_document_image(
+            &root.0,
+            "test-id",
+            "picture.svg",
+            &document,
+            relative,
+            &digest,
+            &[]
+        )
+        .err()
+        .unwrap(),
+        "image changed after it was prepared"
+    );
+    assert!(cache_document_image(
+        &root.0,
+        "test-id",
+        "picture.svg",
+        &document,
+        relative,
+        &format!("{:x}", Sha256::digest(other)),
+        &[]
+    )
+    .is_err());
+    assert_eq!(fs::read(root.0.join("test-id/picture.svg")).unwrap(), SVG);
+
+    fs::remove_file(&source).unwrap();
+    let restored = restore(&root.0, "test-id").unwrap();
+    assert_eq!(
+        crate::image_data::decode_image(&restored.images[0].data_base64).unwrap(),
+        SVG
+    );
+}
+
+#[test]
+fn rejects_unverified_or_escaping_document_images_before_writing_recovery() {
+    let root = Fixture::new();
+    let documents = tempfile::tempdir().unwrap();
+    let docs = documents.path().join("docs");
+    fs::create_dir_all(docs.join("img")).unwrap();
+    let document = docs.join("note.md");
+    fs::write(&document, "document").unwrap();
+    let source = docs.join("img/picture.svg");
+    fs::write(&source, SVG).unwrap();
+    let secret = documents.path().join("secret.svg");
+    fs::write(&secret, SVG).unwrap();
+    let digest = format!("{:x}", Sha256::digest(SVG));
+    let stale = format!("{:x}", Sha256::digest(b"other bytes"));
+    let upper = digest.to_uppercase();
+    let absolute = secret.to_string_lossy().into_owned();
+    for (id, key, relative, expected, retained) in [
+        (
+            "test-id",
+            "picture.svg",
+            "img/picture.svg",
+            stale.as_str(),
+            vec![],
+        ),
+        (
+            "test-id",
+            "picture.svg",
+            "img/picture.svg",
+            "not-a-digest",
+            vec![],
+        ),
+        (
+            "test-id",
+            "picture.svg",
+            "img/picture.svg",
+            upper.as_str(),
+            vec![],
+        ),
+        (
+            "test-id",
+            "picture.svg",
+            "../secret.svg",
+            digest.as_str(),
+            vec![],
+        ),
+        (
+            "test-id",
+            "picture.svg",
+            absolute.as_str(),
+            digest.as_str(),
+            vec![],
+        ),
+        (
+            "test-id",
+            "picture.svg",
+            "img/missing.svg",
+            digest.as_str(),
+            vec![],
+        ),
+        (
+            "../escape",
+            "picture.svg",
+            "img/picture.svg",
+            digest.as_str(),
+            vec![],
+        ),
+        (
+            "test-id",
+            "../picture.svg",
+            "img/picture.svg",
+            digest.as_str(),
+            vec![],
+        ),
+        (
+            "test-id",
+            "picture.svg",
+            "img/picture.svg",
+            digest.as_str(),
+            vec!["../keep.svg".into()],
+        ),
+        (
+            "test-id",
+            "picture.jpg",
+            "img/picture.svg",
+            digest.as_str(),
+            vec![],
+        ),
+    ] {
+        assert!(
+            cache_document_image(
+                &root.0,
+                id,
+                key,
+                &document,
+                Path::new(relative),
+                expected,
+                &retained
+            )
+            .is_err(),
+            "{id} {key} {relative} {expected}"
+        );
+    }
+    assert!(!root.0.join("test-id/picture.svg").exists());
+    assert!(!root.0.join("test-id/picture.jpg").exists());
+    assert_eq!(fs::read(&source).unwrap(), SVG);
+    assert_eq!(fs::read(secret).unwrap(), SVG);
+    // The fixture itself is valid, so each refusal above came from the one
+    // argument that case varied.
+    cache_document_image(
+        &root.0,
+        "test-id",
+        "picture.svg",
+        &document,
+        Path::new("img/picture.svg"),
+        &digest,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(fs::read(root.0.join("test-id/picture.svg")).unwrap(), SVG);
+}
+
+#[test]
 fn reclaims_orphan_images_before_the_cache_capacity_check() {
     let root = Fixture::new();
     let dir = tab_dir(&root.0, "test-id", true).unwrap();

@@ -135,6 +135,10 @@ function token(): string {
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('');
 }
+async function digestHex(bytes: Uint8Array): Promise<string> {
+  const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes)));
+  return [...hash].map((value) => value.toString(16).padStart(2, '0')).join('');
+}
 function normalized(path: string): string {
   const parts: string[] = [];
   for (const part of path.replace(/\\/g, '/').split('/')) {
@@ -229,6 +233,54 @@ export function createNativeMocks(options: NativeMockOptions = {}) {
     }
     return { removedKeys, cleanupError: null };
   };
+  const storeRecoveryImage = (
+    id: string,
+    imageKey: string,
+    retained: string[],
+    source: { dataBase64: string; mime: string },
+  ) => {
+    const cleanup = pruneRecoveryImages(id, [...retained, imageKey]);
+    const key = `${id}/${imageKey}`;
+    const image = { dataBase64: source.dataBase64, mime: filenameMime(imageKey) };
+    check(image.mime === source.mime, 'recovery image type does not match its source');
+    const previous = recoveryImages.get(key);
+    check(
+      !previous || previous.dataBase64 === image.dataBase64,
+      'immutable recovery image changed',
+    );
+    const total = [...recoveryImages].reduce(
+      (size, [cachedKey, cached]) =>
+        size +
+        (cachedKey.startsWith(`${id}/`) && cachedKey !== key
+          ? decodeFixtureBase64(cached.dataBase64).length
+          : 0),
+      decodeFixtureBase64(source.dataBase64).length,
+    );
+    check(
+      total <= 2 * LIMITS.snapshotImageBytes + LIMITS.textFileBytes + 1024 * 1024,
+      'recovery cache full',
+    );
+    recoveryImages.set(key, image);
+    return cleanup;
+  };
+  // The bytes a document read returns: a scenario's own handler with its delay
+  // or failure, otherwise the shared binaries.
+  const documentImage = async (args: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    const docPath = string(args.docPath, 'docPath');
+    const relativePath = string(args.relativePath, 'relativePath');
+    if (options.fallback) {
+      const result = await delegate('read_image_file', { docPath, relativePath });
+      return options.legacyImagePayloads ? compactImage(result) : record(result);
+    }
+    const path = normalized(`${directory(docPath)}/${relativePath}`);
+    const bytes = binaries.get(path);
+    check(bytes, `missing image: ${path}`);
+    return {
+      path,
+      mime: filenameMime(path.split('/').pop()!),
+      dataBase64: encodeFixtureBytes(bytes),
+    };
+  };
 
   const invoke = async (command: string, payload?: unknown): Promise<unknown> => {
     const args = record(payload ?? {});
@@ -278,14 +330,14 @@ export function createNativeMocks(options: NativeMockOptions = {}) {
       check(!('data' in args), 'stash accepts dataBase64 only');
       const bytes = decodeFixtureBase64(args.dataBase64);
       const mime = filenameMime(string(args.filename, 'filename'));
-      check(
-        stashBytes + bytes.length <= (options.stashByteLimit ?? LIMITS.imageStashBytes),
-        'session stash full',
-      );
-      check(
-        stashes.size < (options.stashEntryLimit ?? LIMITS.imageStashEntries),
-        'too many session images',
-      );
+      // Same shape as the native StashError: exhausted capacity is the only
+      // rejection carrying the code that lets a document image stay on disk.
+      const full = (message: string) =>
+        Object.assign(new Error(`Native fixture: ${message}`), { code: 'STASH_FULL' });
+      if (stashBytes + bytes.length > (options.stashByteLimit ?? LIMITS.imageStashBytes))
+        throw full('session stash full');
+      if (stashes.size >= (options.stashEntryLimit ?? LIMITS.imageStashEntries))
+        throw full('too many session images');
       const key = token();
       const dataBase64 = args.dataBase64 as string;
       stashes.set(key, { dataBase64, mime, length: bytes.length });
@@ -423,29 +475,29 @@ export function createNativeMocks(options: NativeMockOptions = {}) {
       const retained = retainedRecoveryKeys(args.retainedKeys);
       if (options.fallback)
         await delegate(command, options.legacyImagePayloads ? { ...args, data: [...bytes] } : args);
-      const cleanup = pruneRecoveryImages(id, [...retained, imageKey]);
-      const key = `${id}/${imageKey}`;
-      const image = { dataBase64: stashed.dataBase64, mime: filenameMime(imageKey) };
-      check(image.mime === stashed.mime, 'recovery image type does not match the stash');
-      const previous = recoveryImages.get(key);
+      return storeRecoveryImage(id, imageKey, retained, stashed);
+    }
+    if (command === 'cache_recovery_document_image') {
       check(
-        !previous || previous.dataBase64 === image.dataBase64,
-        'immutable recovery image changed',
+        !('data' in args) && !('dataBase64' in args) && !('stashKey' in args),
+        'recovery document image accepts a path and digest only',
       );
-      const total = [...recoveryImages].reduce(
-        (size, [cachedKey, cached]) =>
-          size +
-          (cachedKey.startsWith(`${id}/`) && cachedKey !== key
-            ? decodeFixtureBase64(cached.dataBase64).length
-            : 0),
-        bytes.length,
-      );
+      const id = string(args.id, 'id');
+      const imageKey = retainedRecoveryKeys([args.key])[0];
+      const retained = retainedRecoveryKeys(args.retainedKeys);
+      const digest = string(args.digest, 'digest');
+      check(/^[0-9a-f]{64}$/.test(digest), 'invalid image digest');
+      // Scenario handlers predate this command, so only the read reaches them.
+      const source = await documentImage(args);
+      const dataBase64 = string(source.dataBase64, 'dataBase64');
       check(
-        total <= 2 * LIMITS.snapshotImageBytes + LIMITS.textFileBytes + 1024 * 1024,
-        'recovery cache full',
+        (await digestHex(decodeFixtureBase64(dataBase64))) === digest,
+        'image changed after it was prepared',
       );
-      recoveryImages.set(key, image);
-      return cleanup;
+      return storeRecoveryImage(id, imageKey, retained, {
+        dataBase64,
+        mime: string(source.mime, 'mime'),
+      });
     }
     if (command === 'write_recovery_snapshot') {
       const snapshot = structuredClone(record(args.snapshot));
@@ -534,18 +586,8 @@ export function createNativeMocks(options: NativeMockOptions = {}) {
           if (key.startsWith(`${id}/`)) recoveryImages.delete(key);
         return;
       }
-      case 'read_image_file': {
-        const path = normalized(
-          `${directory(string(args.docPath, 'docPath'))}/${string(args.relativePath, 'relativePath')}`,
-        );
-        const bytes = binaries.get(path);
-        check(bytes, `missing image: ${path}`);
-        return {
-          path,
-          mime: filenameMime(path.split('/').pop()!),
-          dataBase64: encodeFixtureBytes(bytes),
-        };
-      }
+      case 'read_image_file':
+        return documentImage(args);
       case 'plugin:path|dirname':
         return directory(string(args.path, 'path'));
       case 'plugin:path|join': {
