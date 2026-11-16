@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useDialogFocus } from '../lib/useDialogFocus';
 import { clearRecovery, type RecoveryEntry } from '../lib/recovery';
 import { confirmDialog, showMessage } from '../lib/dialog';
+import { displayPath } from '../lib/pathDisplay';
 
 export function RecoveryModal({
   entries,
@@ -55,7 +56,7 @@ export function RecoveryModal({
             <section className="recovery-entry" key={entry.id}>
               <strong>{entry.damaged ? '未完成或损坏的恢复缓存' : entry.title}</strong>
               <p>
-                {entry.originalPath ?? '未保存的新文档'} ·{' '}
+                {entry.originalPath ? displayPath(entry.originalPath) : '未保存的新文档'} ·{' '}
                 {new Date(entry.updatedAt).toLocaleString()}
               </p>
               <div className="modal-actions">

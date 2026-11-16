@@ -1,9 +1,16 @@
 [package]
 name = "mdplus"
-version = "0.2.5"
+version = "0.2.6"
 description = "简洁好用的 Markdown 编辑器"
 authors = ["MDPlus"]
 edition = "2021"
+
+[profile.release]
+# Measured with the packaged NSIS payload; keep unwinding for existing error paths.
+opt-level = "s"
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -21,16 +28,18 @@ serde_json = "1"
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
-tauri-plugin-store = "2"
 tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 encoding_rs = "0.8"
 infer = "0.19"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 quick-xml = "0.41"
 # Already present in Cargo.lock via Tauri; also used directly for safe file receipts/staging.
 sha2 = "0.10.9"
 tempfile = "3.27.0"
+base64 = "0.22.1"
+uuid = { version = "1.24.0", features = ["v4"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
@@ -39,3 +48,6 @@ windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32
 # 否则 PlatformWebview::controller() 返回的类型来自另一个 crate 实例,编译期类型不匹配。
 webview2-com = "0.38"
 windows-core = "0.61"
+
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MDPlus performance fixture</title>
+    <style>
+      #perf-root {
+        position: relative;
+        width: 960px;
+        height: 620px;
+        overflow: auto;
+        margin: 16px;
+      }
+      #perf-status {
+        margin: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <main
+      id="perf-root"
+      class="milkdown-container"
+      data-body-font="misans"
+      data-code-font="jetbrains-sarasa"
+      aria-label="Performance fixture document"
+    ></main>
+    <p id="perf-status" role="status">Loading performance fixture</p>
+    <script type="module" src="./browser.ts"></script>
+  </body>
+</html>

@@ -1,6 +1,17 @@
 import type { ReactElement } from 'react';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 
+const imageNative = vi.hoisted(() => ({ invoke: vi.fn() }));
+vi.mock('@tauri-apps/api/core', () => ({ invoke: imageNative.invoke }));
+vi.mock('@tauri-apps/api/path', () => ({
+  dirname: async (file: string) => file.slice(0, file.lastIndexOf('/')),
+  join: async (...parts: string[]) => parts.join('/'),
+}));
+vi.mock('../src/lib/imagePaths', async (original) => {
+  const actual = await original<typeof import('../src/lib/imagePaths')>();
+  return { ...actual, getImageUrls: vi.fn(actual.getImageUrls) };
+});
+
 // Run the component's handlers and layout effects without a WebView dependency.
 const hooks = vi.hoisted(() => ({
   slots: [] as any[],
@@ -43,7 +54,18 @@ vi.mock('react', async (original) => {
 });
 
 import { SourceEditor } from '../src/components/SourceEditor';
-import type { PendingImageReference } from '../src/lib/imagePaths';
+import { getImageUrls, type PendingImageReference } from '../src/lib/imagePaths';
+import {
+  clearPendingImages,
+  collectUnusedImages,
+  commitImageMigration,
+  finalizeImageMigration,
+  getPendingImages,
+  loadImageReferences,
+  migratePendingImages,
+  prepareImageReferences,
+  resolveImageSource,
+} from '../src/lib/imageOps';
 
 function mount(initial = 'abc', saveImage = vi.fn(async () => 'image.png')) {
   let value = initial;
@@ -71,7 +93,7 @@ function mount(initial = 'abc', saveImage = vi.fn(async () => 'image.png')) {
       const tree = SourceEditor({
         tabId: 'tab',
         value,
-        onChange: (next) => {
+        onChange: (_tabId, next) => {
           value = next;
           changes(next);
         },
@@ -148,8 +170,35 @@ beforeEach(() => {
   hooks.dirty = false;
   vi.useFakeTimers();
   vi.setSystemTime(10000);
+  imageNative.invoke.mockReset();
+  imageNative.invoke.mockImplementation(async (command: string, args: Record<string, any>) => {
+    if (command === 'read_image_file')
+      return {
+        path: `${args.docPath.slice(0, args.docPath.lastIndexOf('/'))}/${args.relativePath}`,
+        mime: 'image/png',
+        dataBase64: args.docPath.startsWith('D:') ? 'Qg==' : 'QQ==',
+      };
+    if (command === 'stash_image')
+      return {
+        key: args.dataBase64,
+        mime: 'image/png',
+        previewUrl: `http://mdplus-image-stash.localhost/${args.dataBase64}`,
+      };
+    if (command === 'read_stashed_image') return { mime: 'image/png', dataBase64: args.key };
+    if (command === 'save_image_asset')
+      return {
+        filename: args.filename,
+        path: `D:/new/assets/${args.filename}`,
+        relativePath: `./assets/${args.filename}`,
+        allocationId: null,
+      };
+  });
 });
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  for (const slot of hooks.slots) slot?.cleanup?.();
+  clearPendingImages('tab');
+  vi.useRealTimers();
+});
 
 describe('SourceEditor history', () => {
   it('coalesces continuous typing using the time of the last edit', () => {
@@ -297,6 +346,72 @@ describe('SourceEditor history', () => {
     expect(editor.input.value).not.toContain(' edit');
   });
 
+  it('keeps a deleted relative image reachable through empty SaveAs, undo, redo and another save', async () => {
+    const original = '![photo](./img/pic.png)\n\n中文 text';
+    await loadImageReferences('tab', original, 'C:/old/note.md');
+    const oldToken = getPendingImages('tab')[0].placeholder;
+    const oldPreview = resolveImageSource('tab', oldToken);
+    const editor = mount(original);
+    const caret = original.indexOf('中文');
+    editor.select(caret, caret + 2);
+    editor.change('image removed', 0, 'deleteContentBackward');
+    const migration = await migratePendingImages('tab', 'D:/new/note.md', editor.input.value);
+    expect(migration.references).toEqual([]);
+    commitImageMigration(migration);
+    editor.migrate(migration.markdown, [...migration.historyReferences, ...migration.references]);
+    await finalizeImageMigration(migration, 'committed');
+    await collectUnusedImages('tab');
+    expect(getPendingImages('tab')).toHaveLength(1);
+    editor.key('z');
+    expect(getImageUrls(editor.input.value)).toEqual([oldToken]);
+    expect(resolveImageSource('tab', oldToken)).toBe(oldPreview);
+    expect(editor.input.value.slice(editor.input.selectionStart, editor.input.selectionEnd)).toBe(
+      '中文',
+    );
+    editor.key('y');
+    expect(editor.input.value).toBe('image removed');
+    await collectUnusedImages('tab');
+    expect(getPendingImages('tab')).toHaveLength(1);
+    editor.key('z');
+    const saved = await migratePendingImages('tab', 'D:/new/note.md', editor.input.value);
+    expect(saved.markdown).toContain('![photo](./assets/pic.png)');
+    expect(imageNative.invoke).toHaveBeenCalledWith(
+      'save_image_asset',
+      expect.objectContaining({ dataBase64: 'QQ==' }),
+    );
+    commitImageMigration(saved);
+    editor.migrate(saved.markdown, [...saved.historyReferences, ...saved.references]);
+    await finalizeImageMigration(saved, 'committed');
+    editor.key('y');
+    editor.key('z');
+    expect(getImageUrls(editor.input.value)).toEqual(['./assets/pic.png']);
+    expect(resolveImageSource('tab', './assets/pic.png')).toBe(oldPreview);
+  });
+
+  it('does not let the same raw URL in the new directory replace an older source undo image', async () => {
+    const original = '![photo](./img/pic.png)';
+    await loadImageReferences('tab', original, 'C:/old/note.md');
+    const oldToken = getPendingImages('tab')[0].placeholder;
+    const editor = mount(original);
+    editor.change('removed');
+    const migration = await migratePendingImages('tab', 'D:/new/note.md', editor.input.value);
+    commitImageMigration(migration);
+    editor.migrate(migration.markdown, [...migration.historyReferences, ...migration.references]);
+    await finalizeImageMigration(migration, 'committed');
+    editor.change(original, original.length, 'insertFromPaste');
+    const prepared = await prepareImageReferences('tab', original, 'D:/new/note.md');
+    expect(prepared.commit()).toBe(true);
+    const livePreview = resolveImageSource('tab', './img/pic.png');
+    expect(livePreview).not.toBe(resolveImageSource('tab', oldToken));
+    editor.key('z');
+    editor.key('z');
+    expect(getImageUrls(editor.input.value)).toEqual([oldToken]);
+    expect(resolveImageSource('tab', oldToken)).toBe('http://mdplus-image-stash.localhost/QQ==');
+    editor.external('real external replacement clears source history');
+    await collectUnusedImages('tab');
+    expect(getPendingImages('tab')).toEqual([]);
+  });
+
   it('maps the actual DOM selection even before its selection event was delivered', () => {
     const editor = mount('prefix current suffix');
     editor.input.setSelectionRange(15, 21);
@@ -304,5 +419,24 @@ describe('SourceEditor history', () => {
     expect(editor.input.value.slice(editor.input.selectionStart, editor.input.selectionEnd)).toBe(
       'suffix',
     );
+  });
+
+  it('reuses image scans for unchanged undo snapshots', async () => {
+    const original = '![photo](./img/pic.png)\n\ntext';
+    await loadImageReferences('tab', original, 'C:/old/note.md');
+    const editor = mount(original);
+    editor.change(`${original}\n\none`);
+    vi.advanceTimersByTime(500);
+    editor.change(`${original}\n\none two`);
+    const scan = vi.mocked(getImageUrls);
+    scan.mockClear();
+
+    await collectUnusedImages('tab');
+    expect(scan).toHaveBeenCalledTimes(3);
+    scan.mockClear();
+
+    await collectUnusedImages('tab');
+    expect(scan).toHaveBeenCalledTimes(1);
+    expect(scan).toHaveBeenCalledWith(`${original}\n\none two`);
   });
 });

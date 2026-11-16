@@ -10,7 +10,7 @@ param(
 $repository = Get-LocalPath (Join-Path $PSScriptRoot '../..')
 function Get-AllBrowserCases {
     $catalog = @('editor-sync')
-    foreach ($entry in @(@('export.ts','exportCases'), @('media.tsx','mediaCases'), @('typography.tsx','typographyCases'), @('continuity.tsx','continuityCases'), @('recovery.tsx','recoveryCases'), @('appearance.tsx','appearanceCases'), @('markdownRoundtrip.ts','markdownCases'), @('mermaidCommit.ts','mermaidCases'), @('appSafety.tsx','safetyCases'), @('interface.tsx','interfaceCases'), @('codeBlock.ts','codeBlockCases'))) {
+    foreach ($entry in @(@('export.ts','exportCases'), @('media.tsx','mediaCases'), @('typography.tsx','typographyCases'), @('continuity.tsx','continuityCases'), @('recovery.tsx','recoveryCases'), @('appearance.tsx','appearanceCases'), @('markdownRoundtrip.ts','markdownCases'), @('mermaidCommit.ts','mermaidCases'), @('appSafety.tsx','safetyCases'), @('interface.tsx','interfaceCases'), @('codeBlock.ts','codeBlockCases'), @('replace.ts','replaceCases'), @('session.ts','sessionCases'), @('imageDrop.ts','imageDropCases'), @('polish.tsx','polishCases'), @('performance.ts','performanceCases'))) {
         $source = Get-Content -LiteralPath (Join-Path $repository "tests/browser/$($entry[0])") -Raw -Encoding UTF8
         $array = [regex]::Match($source, "(?s)export const $($entry[1]) = \[(.*?)\]").Groups[1].Value
         $found = @([regex]::Matches($array, "'([^']+)'") | ForEach-Object { $_.Groups[1].Value })
@@ -45,7 +45,7 @@ if ($ListCases) {
 }
 if (!$EvidenceDirectory) { $EvidenceDirectory = Join-Path $repository ('.audit/browser-' + [guid]::NewGuid().ToString('N')) }
 $evidence = New-EmptyDirectory $EvidenceDirectory
-$Browser = (Get-Command $Browser -CommandType Application).Source
+$Browser = (Get-Command $Browser -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 if ([IO.Path]::GetExtension($Browser) -ine '.exe') { throw 'Pass the native agent-browser Windows EXE, not a cmd wrapper.' }
 $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
 $listener.Start(); $port = $listener.LocalEndpoint.Port; $listener.Stop()
@@ -73,7 +73,8 @@ function Invoke-Browser([string[]]$Arguments) {
     } finally { $command.Dispose() }
 }
 try {
-    $server = Start-Process -FilePath (Get-Command node.exe).Source -WorkingDirectory $repository -WindowStyle Hidden -PassThru `
+    $serverNode = (Get-Command node.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+    $server = Start-Process -FilePath $serverNode -WorkingDirectory $repository -WindowStyle Hidden -PassThru `
         -ArgumentList @('node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', $port, '--strictPort') `
         -RedirectStandardOutput (Join-Path $evidence 'vite.log') -RedirectStandardError (Join-Path $evidence 'vite-error.log')
     Write-AtomicJson (Join-Path $evidence 'server.json') @{ pid = $server.Id; port = $port }
@@ -90,12 +91,12 @@ try {
     foreach ($case in $Cases) {
         if ($case -notmatch '^[a-z0-9-]+$') { throw 'Invalid browser case name.' }
         $width = '1280'; $height = '800'
-        if ($case -match '^(?:interface|code-block)-layout-(\d+)-(\d+)$') { $width = $Matches[1]; $height = $Matches[2] }
+        if ($case -match '^(?:interface|code-block|typography(?:-width)?)-layout-(\d+)-(\d+)$') { $width = $Matches[1]; $height = $Matches[2] }
         if ($viewport -ne "$width-$height") {
             $null = Invoke-Browser @('set', 'viewport', $width, $height)
             $viewport = "$width-$height"
         }
-        $reduce = $case -in @('interface-reduced-motion', 'interface-tab-scroll-reduced', 'theme-reduced-motion', 'export-diagram-bounds-reduced')
+        $reduce = $case -in @('interface-reduced-motion', 'interface-tab-scroll-reduced', 'theme-reduced-motion', 'export-diagram-bounds-reduced', 'polish-source-outline-reduced')
         if ($reduce -ne $reducedMotion) {
             $arguments = @('set', 'media', 'light')
             if ($reduce) { $arguments += 'reduced-motion' }
@@ -105,10 +106,33 @@ try {
         $url = "http://127.0.0.1:$port/tests/browser/index.html?case=$case"
         $opened = $true
         $null = Invoke-Browser @('open', $url)
+        if ($case -in @('media-image-drag', 'media-image-drag-reverse', 'media-image-text-drag', 'media-app-marquee') -or $case.StartsWith('media-image-marquee')) {
+            $end = (Get-Date).AddSeconds(30)
+            do {
+                $raw = Invoke-Browser @('eval', '({url:location.href,drag:window.mdplusDrag})', '--json')
+                $pointer = ($raw | ConvertFrom-Json).data.result
+            } while (!$pointer.drag.ready -and (Get-Date) -lt $end)
+            if ($pointer.url -ne $url -or !$pointer.drag.ready) { throw 'Image drag fixture did not become ready.' }
+            foreach ($point in @($pointer.drag.from, $pointer.drag.to)) {
+                if ($null -eq $point -or $null -eq $point.x -or $null -eq $point.y -or [double]::IsNaN([double]$point.x) -or [double]::IsInfinity([double]$point.x) -or [double]::IsNaN([double]$point.y) -or [double]::IsInfinity([double]$point.y) -or $point.x -lt 0 -or $point.x -ge [int]$width -or $point.y -lt 0 -or $point.y -ge [int]$height) { throw 'Image drag coordinates are outside the test viewport.' }
+            }
+            # The native CLI accepts integer pointer coordinates.
+            $null = Invoke-Browser @('mouse', 'move', ([string][int][Math]::Round($pointer.drag.from.x)), ([string][int][Math]::Round($pointer.drag.from.y)))
+            $null = Invoke-Browser @('mouse', 'down', 'left')
+            for ($step = 1; $step -le 8; $step++) {
+                $x = $pointer.drag.from.x + ($pointer.drag.to.x - $pointer.drag.from.x) * $step / 8
+                $y = $pointer.drag.from.y + ($pointer.drag.to.y - $pointer.drag.from.y) * $step / 8
+                $null = Invoke-Browser @('mouse', 'move', ([string][int][Math]::Round($x)), ([string][int][Math]::Round($y)))
+            }
+            $null = Invoke-Browser @('eval', 'window.mdplusDrag.capture?.();true')
+            if ($pointer.drag.PSObject.Properties['cancel'] -and $pointer.drag.cancel) { $null = Invoke-Browser @('press', 'Escape') }
+            $null = Invoke-Browser @('mouse', 'up', 'left')
+            $null = Invoke-Browser @('eval', 'window.mdplusDrag.done=true')
+        }
         $end = (Get-Date).AddSeconds(60)
         do {
             Start-Sleep -Milliseconds 400
-            $script = '({url:location.href,status:document.querySelector("#regression-result")?.dataset.status,detail:document.querySelector("#regression-result")?.textContent,reducedMotion:matchMedia("(prefers-reduced-motion: reduce)").matches,userAgent:navigator.userAgent})'
+            $script = '({url:location.href,status:document.querySelector("#regression-result")?.dataset.status??"running",detail:document.querySelector("#regression-result")?.textContent,reducedMotion:matchMedia("(prefers-reduced-motion: reduce)").matches,userAgent:navigator.userAgent})'
             $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($script))
             $raw = Invoke-Browser @('eval', "eval(atob('$encoded'))", '--json')
             $report = ($raw | ConvertFrom-Json).data.result

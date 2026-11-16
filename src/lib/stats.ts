@@ -10,13 +10,32 @@ import type { DocStats } from './types';
  * 富文本模式和源码模式都必须走这里，否则两种模式的统计口径会不一致。
  */
 export function computeStats(markdown: string): DocStats {
-  const text = markdown.replace(/\s/g, '');
-  const chineseChars = (text.match(/[一-龥]/g) || []).length;
-  const englishWords = (markdown.match(/[a-zA-Z]+/g) || []).length;
+  let chars = 0;
+  let words = 0;
+  let lines = 1;
+  let inWord = false;
+  for (let index = 0; index < markdown.length; index++) {
+    const code = markdown.charCodeAt(index);
+    const letter = (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+    if ((letter && !inWord) || (code >= 0x4e00 && code <= 0x9fa5)) words++;
+    inWord = letter;
+    if (code === 10) lines++;
+    // Match JavaScript \s without allocating whole-document replacements or match arrays.
+    if (!(
+      code === 32 ||
+      (code >= 9 && code <= 13) ||
+      code === 0xa0 ||
+      code === 0x1680 ||
+      (code >= 0x2000 && code <= 0x200a) ||
+      code === 0x2028 ||
+      code === 0x2029 ||
+      code === 0x202f ||
+      code === 0x205f ||
+      code === 0x3000 ||
+      code === 0xfeff
+    ))
+      chars++;
+  }
 
-  return {
-    chars: text.length,
-    words: chineseChars + englishWords,
-    lines: markdown.split('\n').length,
-  };
+  return { chars, words, lines };
 }

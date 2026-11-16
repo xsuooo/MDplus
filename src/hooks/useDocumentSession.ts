@@ -2,12 +2,17 @@ import type { Editor } from '@milkdown/kit/core';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { setMarkdown } from '../lib/editor';
 import {
+  captureRenderedSessionPlace,
+  captureSourceSessionPlace,
   renderedPlace,
+  renderedSessionPlace,
   sourcePlace,
+  sourceSessionPlace,
   type ModeExchange,
   type RenderedPlace,
   type SourcePlace,
 } from '../lib/editorPosition';
+import { textAnchor, type SessionEditorPlace } from '../lib/sessionPosition';
 import { clearPendingImages } from '../lib/imageOps';
 import { type PendingImageReference } from '../lib/imagePaths';
 import { type ImagePreparation } from '../lib/imagePreparation';
@@ -23,8 +28,9 @@ export function makeId(): string {
 export function useDocumentSession(initialTabs: Tab[] = []) {
   const [tabs, setTabs] = useState<Tab[]>(initialTabs);
   const [activeId, setActiveId] = useState<string | null>(initialTabs[0]?.id ?? null);
-  const [sourceMode, setSourceMode] = useState(false);
+  const [sourceMode, setSourceModeState] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [positionVersion, setPositionVersion] = useState(0);
   const editorRegistry = useRef<Record<string, Editor | null>>({});
   const tabMirror = useRef<Record<string, EditorUpdate>>({});
   const tabsRef = useRef<Tab[]>(initialTabs);
@@ -52,6 +58,7 @@ export function useDocumentSession(initialTabs: Tab[] = []) {
   const externalPrompts = useRef(new Set<string>());
   const tabRenderTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const currentView = useRef({ activeId, sourceMode });
+  const modeGenerations = useRef<Record<string, number>>({});
   const sourceRegistry = useRef<Record<string, HTMLTextAreaElement | null>>({});
   const sourceRewrites = useRef<Record<string, PendingImageReference[]>>({});
   const positions = useRef<
@@ -62,11 +69,22 @@ export function useDocumentSession(initialTabs: Tab[] = []) {
         source?: SourcePlace;
         rendered?: RenderedPlace;
         exchange?: ModeExchange;
+        sessionPlace?: SessionEditorPlace;
+        sessionCapture?: () => SessionEditorPlace;
+        pendingSessionPlace?: SessionEditorPlace;
       }
     >
   >({});
   const enteringSource = useRef(false);
   currentView.current = { activeId, sourceMode };
+  const setSourceMode = useCallback((source: boolean) => {
+    const current = currentView.current;
+    if (current.activeId && current.sourceMode !== source)
+      modeGenerations.current[current.activeId] =
+        (modeGenerations.current[current.activeId] ?? 0) + 1;
+    current.sourceMode = source;
+    setSourceModeState(source);
+  }, []);
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeId) ?? null, [tabs, activeId]);
   const syncEditor = useCallback((id: string, markdown: string, history = true) => {
     const editor = editorRegistry.current[id];
@@ -82,21 +100,100 @@ export function useDocumentSession(initialTabs: Tab[] = []) {
     const input = sourceRegistry.current[id];
     const editor = editorRegistry.current[id];
     if (source && input) saved.source = sourcePlace(input);
-    else if (editor) saved.rendered = renderedPlace(editor);
+    else if (editor) {
+      try {
+        saved.rendered = renderedPlace(editor);
+      } catch (error) {
+        console.warn('文稿位置读取暂不可用', error);
+      }
+    }
+  }, []);
+  const captureTabPlace = useCallback((id: string): SessionEditorPlace | undefined => {
+    const tab = tabsRef.current.find((candidate) => candidate.id === id);
+    if (!tab) return;
+    const saved = (positions.current[id] ??= {});
+    const source =
+      currentView.current.activeId === id
+        ? currentView.current.sourceMode
+        : (saved.sourceMode ?? false);
+    // A restored tab whose view has not mounted still owns its original anchors.
+    if (saved.pendingSessionPlace) return saved.pendingSessionPlace;
+    const active = currentView.current.activeId === id;
+    if (!active && saved.sessionPlace && !saved.sessionCapture) return saved.sessionPlace;
+    const markdown = tabMirror.current[id]?.markdown ?? tab.markdown;
+    const input = sourceRegistry.current[id];
+    const editor = editorRegistry.current[id];
+    try {
+      if (!active && saved.sessionCapture) {
+        saved.sessionPlace = saved.sessionCapture();
+        delete saved.sessionCapture;
+      } else if (source && input && active)
+        saved.sessionPlace = sourceSessionPlace(input, markdown);
+      else if (!source && editor) saved.sessionPlace = renderedSessionPlace(editor, markdown);
+      else if (source && saved.source)
+        saved.sessionPlace = {
+          sourceMode: true,
+          start: textAnchor(markdown, saved.source.start),
+          end: textAnchor(markdown, saved.source.end),
+          direction: saved.source.direction,
+          top: saved.source.top,
+          left: saved.source.left,
+        };
+      if (active) delete saved.sessionCapture;
+    } catch (error) {
+      // The editor can be registering or tearing down. Keep its last usable position.
+      console.warn('文稿位置读取暂不可用', error);
+    }
+    return saved.sessionPlace;
   }, []);
   const selectTab = useCallback(
     (id: string | null) => {
       if (currentView.current.activeId === id) return;
       rememberActive();
+      const previousId = currentView.current.activeId;
+      const previous = tabsRef.current.find((tab) => tab.id === previousId);
+      if (previous) {
+        const saved = positions.current[previous.id];
+        const markdown = tabMirror.current[previous.id]?.markdown ?? previous.markdown;
+        const input = sourceRegistry.current[previous.id];
+        const editor = editorRegistry.current[previous.id];
+        // Switching only freezes inputs; persistence and close flush the exact same snapshot.
+        if (!saved.pendingSessionPlace)
+          try {
+            if (currentView.current.sourceMode && input)
+              saved.sessionCapture = captureSourceSessionPlace(input, markdown);
+            else if (editor) saved.sessionCapture = captureRenderedSessionPlace(editor, markdown);
+          } catch (error) {
+            console.warn('文稿位置读取暂不可用', error);
+          }
+      }
+      const source = id ? (positions.current[id]?.sourceMode ?? false) : false;
+      currentView.current = { activeId: id, sourceMode: source };
       setActiveId(id);
-      setSourceMode(id ? (positions.current[id]?.sourceMode ?? false) : false);
+      setSourceModeState(source);
     },
     [rememberActive],
   );
   const registerSource = useCallback((id: string, input: HTMLTextAreaElement | null) => {
     sourceRegistry.current[id] = input;
   }, []);
-  /** Editor transactions and source input update this mirror before any render throttle. */
+  const installSessionPlace = useCallback(
+    (id: string, place: SessionEditorPlace) => {
+      if ((contentGenerations.current[id] ?? 0) > 0) return;
+      const saved = (positions.current[id] ??= {});
+      // A user's live position takes precedence over a late session read.
+      if ((saved.sessionPlace || saved.sessionCapture) && !saved.pendingSessionPlace) return;
+      saved.sourceMode = place.sourceMode;
+      saved.sessionPlace = place;
+      saved.pendingSessionPlace = place;
+      if (currentView.current.activeId === id) {
+        setSourceMode(place.sourceMode);
+      }
+      setPositionVersion((version) => version + 1);
+    },
+    [setSourceMode],
+  );
+  /** Save, close, export and mode switches flush pending rich edits before reading this mirror. */
   const resolveContent = useCallback((tab: Tab): string => {
     return tabMirror.current[tab.id]?.markdown ?? tab.markdown;
   }, []);
@@ -108,6 +205,11 @@ export function useDocumentSession(initialTabs: Tab[] = []) {
 
   const pauseAutoSave = useCallback((id: string, mtime: number) => {
     blockedExternalMtime.current[id] = mtime;
+    // Keep dirty tied to edits so later disk revisions are still polled, but do
+    // not let close/recovery mistake the retained buffer for a backed-up copy.
+    tabsRef.current = tabsRef.current.map((tab) =>
+      tab.id === id ? { ...tab, preserveLocal: true } : tab,
+    );
     setTabs([...tabsRef.current]);
   }, []);
 
@@ -121,9 +223,16 @@ export function useDocumentSession(initialTabs: Tab[] = []) {
         mtime?: number;
         revision?: string;
         recovered?: boolean;
+        activate?: boolean;
+        place?: SessionEditorPlace;
       },
       id: string = makeId(),
     ) => {
+      // Identity is a session invariant, not a responsibility of each async caller.
+      if (tabsRef.current.some((tab) => tab.id === id)) {
+        selectTab(id);
+        return id;
+      }
       const tab: Tab = {
         id,
         title: init.title,
@@ -133,17 +242,25 @@ export function useDocumentSession(initialTabs: Tab[] = []) {
         externalMtime: init.mtime ?? 0,
         diskRevision: init.revision ?? null,
         externalChanged: false,
+        preserveLocal: false,
         initialContent: init.content,
         savedContent: init.recovered ? '' : init.content,
         markdown: init.content,
         stats: computeStats(init.content),
       };
+      if (init.place)
+        positions.current[id] = {
+          sourceMode: init.place.sourceMode,
+          sessionPlace: init.place,
+          pendingSessionPlace: init.place,
+        };
       contentGenerations.current[id] = 0;
       tabsRef.current = [...tabsRef.current, tab];
       setTabs([...tabsRef.current]);
-      selectTab(id);
-      setSearchOpen(false);
-      setSourceMode(false);
+      if (init.activate !== false) {
+        selectTab(id);
+        setSearchOpen(false);
+      }
       return id;
     },
     [selectTab],
@@ -167,12 +284,15 @@ export function useDocumentSession(initialTabs: Tab[] = []) {
     delete positions.current[id];
     delete sourceRegistry.current[id];
     delete sourceRewrites.current[id];
+    delete modeGenerations.current[id];
     const timer = saveTimers.current[id];
     if (timer) clearTimeout(timer);
     delete saveTimers.current[id];
     if (currentView.current.activeId === id) {
       const next = tabsRef.current[tabsRef.current.length - 1];
-      setSourceMode(next ? (positions.current[next.id]?.sourceMode ?? false) : false);
+      const source = next ? (positions.current[next.id]?.sourceMode ?? false) : false;
+      currentView.current = { activeId: next?.id ?? null, sourceMode: source };
+      setSourceModeState(source);
       setActiveId(next?.id ?? null);
     }
   }, []);
@@ -186,6 +306,7 @@ export function useDocumentSession(initialTabs: Tab[] = []) {
     setSourceMode,
     searchOpen,
     setSearchOpen,
+    positionVersion,
     activeTab,
     editorRegistry,
     tabMirror,
@@ -202,14 +323,17 @@ export function useDocumentSession(initialTabs: Tab[] = []) {
     externalPrompts,
     tabRenderTimers,
     currentView,
+    modeGenerations,
     sourceRegistry,
     sourceRewrites,
     positions,
     enteringSource,
     syncEditor,
     rememberActive,
+    captureTabPlace,
     selectTab,
     registerSource,
+    installSessionPlace,
     resolveContent,
     updateTab,
     pauseAutoSave,

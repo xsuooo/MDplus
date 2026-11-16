@@ -29,12 +29,24 @@ import {
 
 const document = 'C:\\notes\\note.md';
 const original = '![](./img/pic.png)';
+const imageWrites = () =>
+  mocks.invoke.mock.calls.filter(([command]) => command === 'save_image_asset');
 
 beforeEach(() => {
   clearPendingImages('tab');
   vi.clearAllMocks();
   mocks.invoke.mockImplementation(
-    async (command: string, args: { docPath: string; filename: string }) => {
+    async (
+      command: string,
+      args: { docPath: string; filename: string; dataBase64: string; key: string },
+    ) => {
+      if (command === 'stash_image')
+        return {
+          key: args.dataBase64,
+          mime: 'image/png',
+          previewUrl: `http://mdplus-image-stash.localhost/${args.dataBase64}`,
+        };
+      if (command === 'read_stashed_image') return { mime: 'image/png', dataBase64: args.key };
       if (command === 'save_image_asset')
         return {
           filename: args.filename,
@@ -47,7 +59,7 @@ beforeEach(() => {
   mocks.readImageFile.mockResolvedValue({
     path: '\\\\?\\C:\\notes\\img\\pic.png',
     mime: 'image/png',
-    data: [65, 66, 67],
+    dataBase64: 'QUJD',
   });
 });
 
@@ -57,7 +69,7 @@ describe('document image loading and migration', () => {
     const placeholder = display.slice(4, -1);
     expect(placeholder).toMatch(/^mdplus-image:[\w-]+$/);
     expect(display).not.toContain('base64');
-    const preview = 'data:image/png;base64,QUJD';
+    const preview = 'http://mdplus-image-stash.localhost/QUJD';
     expect(resolveImageSource('tab', placeholder)).toBe(preview);
     expect(resolveImageSource('tab', './img/pic.png')).toBe(preview);
     expect(resolveImageSource('other-tab', './img/pic.png')).toBe('./img/pic.png');
@@ -84,7 +96,7 @@ describe('document image loading and migration', () => {
     const edited = display.replace('caption', 'edited caption');
     const saved = await migratePendingImages('tab', document, edited);
     expect(saved.markdown).toBe('![photo](./img/pic.png "edited caption")');
-    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(imageWrites()).toHaveLength(0);
     commitImageMigration(saved);
 
     const savedAs = await migratePendingImages('tab', 'D:\\new\\note.md', saved.markdown);
@@ -92,7 +104,7 @@ describe('document image loading and migration', () => {
     expect(mocks.invoke).toHaveBeenCalledWith('save_image_asset', {
       docPath: 'D:\\new\\note.md',
       filename: 'pic.png',
-      data: [65, 66, 67],
+      dataBase64: 'QUJD',
     });
   });
 
@@ -121,14 +133,16 @@ describe('document image loading and migration', () => {
     mocks.readImageFile.mockResolvedValue({
       path: path.win32.join('C:\\notes', relativePath),
       mime: 'image/png',
-      data: [65, 66, 67],
+      dataBase64: 'QUJD',
     });
     const display = await loadImageReferences('tab', markdown, document);
     expect(display).toContain('mdplus-image:');
     expect(mocks.readImageFile).toHaveBeenCalledExactlyOnceWith(document, relativePath);
     const savedAs = await migratePendingImages('tab', 'D:\\new\\note.md', display);
     expect(savedAs.markdown).toBe(expected);
-    expect(resolveImageSource('tab', `./${relativePath}`)).toBe('data:image/png;base64,QUJD');
+    expect(resolveImageSource('tab', `./${relativePath}`)).toBe(
+      'http://mdplus-image-stash.localhost/QUJD',
+    );
     expect(savedAs.markdown).not.toContain('mdplus-image:');
   });
 
@@ -144,7 +158,7 @@ describe('document image loading and migration', () => {
     expect(mocks.invoke).toHaveBeenCalledWith('save_image_asset', {
       docPath: 'D:\\new\\note.md',
       filename: 'pic.png',
-      data: [65, 66, 67],
+      dataBase64: 'QUJD',
     });
   });
 
@@ -160,7 +174,7 @@ describe('document image loading and migration', () => {
     expect(mocks.invoke).toHaveBeenCalledWith('save_image_asset', {
       docPath: 'D:\\new\\note.md',
       filename: 'pic.png',
-      data: [65, 66, 67],
+      dataBase64: 'QUJD',
     });
   });
 
@@ -173,7 +187,7 @@ describe('document image loading and migration', () => {
     expect(mocks.invoke).toHaveBeenCalledWith('save_image_asset', {
       docPath: 'D:\\new\\note.md',
       filename: 'pic.png',
-      data: [65, 66, 67],
+      dataBase64: 'QUJD',
     });
   });
 
@@ -182,7 +196,7 @@ describe('document image loading and migration', () => {
     await expect(migratePendingImages('tab', document, markdown)).rejects.toThrow(
       /图片.*mdplus-image:missing/,
     );
-    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(imageWrites()).toHaveLength(0);
   });
 
   it.each([
@@ -193,7 +207,7 @@ describe('document image loading and migration', () => {
     const migration = await migratePendingImages('tab', document, markdown);
     expect(migration.markdown).toBe(markdown);
     expect(migration.updates).toEqual([]);
-    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(imageWrites()).toHaveLength(0);
   });
 
   it.each([false, true])(
@@ -205,7 +219,7 @@ describe('document image loading and migration', () => {
       await expect(migratePendingImages('tab', 'D:\\new\\note.md', markdown)).rejects.toThrow(
         /图片.*mdplus-image:missing/,
       );
-      expect(mocks.invoke).not.toHaveBeenCalled();
+      expect(imageWrites()).toHaveLength(0);
     },
   );
 
@@ -227,7 +241,7 @@ describe('document image loading and migration', () => {
     const migration = await migratePendingImages('tab', document, markdown);
     expect(migration.markdown).toBe(markdown);
     expect(migration.updates).toEqual([]);
-    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(imageWrites()).toHaveLength(0);
   });
 
   it('rejects unknown tokens in image reference definitions, not just inline images', async () => {
@@ -238,7 +252,7 @@ describe('document image loading and migration', () => {
         '![lost][photo]\n\n[photo]: <mdplus-image:missing> "caption"',
       ),
     ).rejects.toThrow(/图片.*mdplus-image:missing/);
-    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(imageWrites()).toHaveLength(0);
   });
 
   it('passes document-relative references to the validated backend reader', async () => {
@@ -246,7 +260,7 @@ describe('document image loading and migration', () => {
     const markdown = '![](../../private/secret.txt)';
     expect(await loadImageReferences('tab', markdown, document)).toBe(markdown);
     expect(mocks.readImageFile).toHaveBeenCalledWith(document, '../../private/secret.txt');
-    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(imageWrites()).toHaveLength(0);
   });
 
   it('does not send compact tokens to the file reader', async () => {
@@ -267,7 +281,7 @@ describe('document image loading and migration', () => {
     const saved = await migratePendingImages('tab', document, display);
     commitImageMigration(saved);
     expect(saved.markdown).toBe(original);
-    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(imageWrites()).toHaveLength(0);
 
     const savedAs = await migratePendingImages('tab', 'D:\\new\\note.md', saved.markdown);
     commitImageMigration(savedAs);
@@ -275,19 +289,19 @@ describe('document image loading and migration', () => {
     expect(mocks.invoke).toHaveBeenCalledWith('save_image_asset', {
       docPath: 'D:\\new\\note.md',
       filename: 'pic.png',
-      data: [65, 66, 67],
+      dataBase64: 'QUJD',
     });
     mocks.invoke.mockClear();
     const repeated = await migratePendingImages('tab', 'D:\\new\\note.md', savedAs.markdown);
     expect(repeated.markdown).toBe(savedAs.markdown);
-    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(imageWrites()).toHaveLength(0);
 
     const third = await migratePendingImages('tab', 'E:\\third\\note.md', repeated.markdown);
     expect(third.markdown).toBe('![](./assets/pic.png)');
     expect(mocks.invoke).toHaveBeenCalledWith('save_image_asset', {
       docPath: 'E:\\third\\note.md',
       filename: 'pic.png',
-      data: [65, 66, 67],
+      dataBase64: 'QUJD',
     });
   });
 
@@ -297,12 +311,13 @@ describe('document image loading and migration', () => {
     mocks.invoke.mockClear();
     const retry = await migratePendingImages('tab', document, display);
     expect(retry.markdown).toBe(original);
-    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(imageWrites()).toHaveLength(0);
   });
 
   it('leaves cached sources unchanged when an image migration fails', async () => {
     const display = await loadImageReferences('tab', original, document);
-    mocks.invoke.mockImplementation(async (command: string) => {
+    mocks.invoke.mockImplementation(async (command: string, args: { key: string }) => {
+      if (command === 'read_stashed_image') return { mime: 'image/png', dataBase64: args.key };
       if (command === 'save_image_asset') throw new Error('disk full');
     });
     await expect(migratePendingImages('tab', 'D:\\failed\\note.md', display)).rejects.toThrow(
@@ -312,7 +327,7 @@ describe('document image loading and migration', () => {
     mocks.invoke.mockClear();
     const retry = await migratePendingImages('tab', document, display);
     expect(retry.markdown).toBe(original);
-    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(imageWrites()).toHaveLength(0);
   });
 
   it('migrates both saved references and retained preview placeholders', async () => {
@@ -334,7 +349,7 @@ describe('document image loading and migration', () => {
     mocks.readImageFile.mockImplementation(async (_doc: string, relative: string) => ({
       path: path.win32.join('C:\\notes', relative),
       mime: 'image/png',
-      data: [65, 66, 67],
+      dataBase64: 'QUJD',
     }));
     const markdown = '![](./img/one.png)\n![](./img/two.png)';
     const display = await loadImageReferences('tab', markdown, document);
@@ -353,7 +368,7 @@ describe('document image loading and migration', () => {
 
   it('retains pasted image data after its first save', async () => {
     class TestFileReader {
-      result = 'data:image/png;base64,QUJD';
+      result = 'http://mdplus-image-stash.localhost/QUJD';
       onload: (() => void) | null = null;
       readAsDataURL() {
         this.onload?.();
@@ -364,8 +379,10 @@ describe('document image loading and migration', () => {
       const placeholder = await saveImage(new Blob(['ABC'], { type: 'image/png' }), 'tab');
       expect(placeholder).toMatch(/^mdplus-image:[\w-]+$/);
       expect(placeholder.length).toBeLessThan(70);
-      expect(resolveImageSource('tab', placeholder)).toBe('data:image/png;base64,QUJD');
-      expect(mocks.invoke).not.toHaveBeenCalled();
+      expect(resolveImageSource('tab', placeholder)).toBe(
+        'http://mdplus-image-stash.localhost/QUJD',
+      );
+      expect(imageWrites()).toHaveLength(0);
       const first = await migratePendingImages('tab', document, `![](${placeholder})`);
       expect(first.markdown).not.toContain('mdplus-image:');
       commitImageMigration(first);
@@ -377,7 +394,7 @@ describe('document image loading and migration', () => {
         expect.objectContaining({
           docPath: 'D:\\new\\note.md',
           filename: expect.stringMatching(/^image-.+\.png$/),
-          data: [65, 66, 67],
+          dataBase64: 'QUJD',
         }),
       );
     } finally {

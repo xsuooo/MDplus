@@ -56,6 +56,14 @@ export const IconSaveAs = (p: IconProps) => (
   </svg>
 );
 
+export const IconImage = (p: IconProps) => (
+  <svg {...base(p.size, p)}>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <circle cx="8" cy="8" r="1.5" />
+    <path d="m3 17 5-5 4 4 4-6 5 7" />
+  </svg>
+);
+
 export const IconSearch = (p: IconProps) => (
   <svg {...base(p.size, p)}>
     <circle cx="11" cy="11" r="7" />

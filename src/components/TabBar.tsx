@@ -1,9 +1,12 @@
-import { memo, useEffect, useRef } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef } from 'react';
 import type { Tab } from '../lib/types';
 import { TAB_WHEEL_INITIAL, wheelStep, type TabWheelDirection } from '../lib/tabWheel';
 import { IconClose } from './icons';
+import { displayPath } from '../lib/pathDisplay';
+import { formatActionShortcuts, type ShortcutBindings } from '../lib/shortcuts';
 
 interface TabBarProps {
+  bindings: ShortcutBindings;
   tabs: Tab[];
   activeId: string | null;
   onSelect: (id: string) => void;
@@ -13,6 +16,7 @@ interface TabBarProps {
 }
 
 export const TabBar = memo(function TabBar({
+  bindings,
   tabs,
   activeId,
   onSelect,
@@ -25,10 +29,16 @@ export const TabBar = memo(function TabBar({
   const stripRef = useRef<HTMLDivElement | null>(null);
   const wheelState = useRef({ ...TAB_WHEEL_INITIAL });
   const wheelHandler = useRef(onWheelSwitch);
+  const pendingFocus = useRef<{ id: string; frame: number } | null>(null);
   wheelHandler.current = onWheelSwitch;
   const tabCount = tabs.length;
+  const newShortcut = formatActionShortcuts(bindings, 'new');
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (pendingFocus.current && pendingFocus.current.id !== activeId) {
+      cancelAnimationFrame(pendingFocus.current.frame);
+      pendingFocus.current = null;
+    }
     const tab = activeId ? tabRefs.current[activeId] : null;
     const strip = stripRef.current;
     if (!tab || !strip) return;
@@ -39,11 +49,22 @@ export const TabBar = memo(function TabBar({
     if (delta)
       strip.scrollTo({
         left: strip.scrollLeft + delta,
-        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
-          ? 'instant'
-          : 'smooth',
+        behavior: 'instant',
       });
   }, [activeId, tabCount]);
+
+  useEffect(() => {
+    const cancelPendingFocus = () => {
+      if (!pendingFocus.current) return;
+      cancelAnimationFrame(pendingFocus.current.frame);
+      pendingFocus.current = null;
+    };
+    window.addEventListener('pointerdown', cancelPendingFocus, true);
+    return () => {
+      window.removeEventListener('pointerdown', cancelPendingFocus, true);
+      cancelPendingFocus();
+    };
+  }, []);
 
   // 滚轮监听需要 passive: false 才能阻止页面滚动,而 React 的 onWheel 是 passive 的,
   // 所以这里自己挂原生监听。
@@ -64,7 +85,15 @@ export const TabBar = memo(function TabBar({
   }, [tabCount]);
 
   const focusTab = (id: string) => {
-    requestAnimationFrame(() => tabRefs.current[id]?.focus({ preventScroll: true }));
+    if (pendingFocus.current) cancelAnimationFrame(pendingFocus.current.frame);
+    pendingFocus.current = {
+      id,
+      frame: requestAnimationFrame(() => {
+        pendingFocus.current = null;
+        const tab = tabRefs.current[id];
+        if (tab?.getAttribute('aria-selected') === 'true') tab.focus({ preventScroll: true });
+      }),
+    };
   };
 
   const selectRelative = (index: number, offset: number) => {
@@ -84,15 +113,22 @@ export const TabBar = memo(function TabBar({
             key={tab.id}
             role="tab"
             className={`tab${tab.id === activeId ? ' active' : ''}`}
-            onClick={() => onSelect(tab.id)}
+            onClick={() => {
+              if (pendingFocus.current) {
+                cancelAnimationFrame(pendingFocus.current.frame);
+                pendingFocus.current = null;
+              }
+              onSelect(tab.id);
+            }}
             ref={(element) => {
               tabRefs.current[tab.id] = element;
             }}
-            title={tab.path ?? tab.title}
+            title={tab.path ? displayPath(tab.path) : tab.title}
             tabIndex={tab.id === activeId ? 0 : -1}
             aria-selected={tab.id === activeId}
-            aria-label={`${tab.title}${tab.path ? `,${tab.path}` : ',尚未保存到磁盘'}${tab.dirty || tab.isNew ? ',尚未保存' : ''}${tab.externalChanged ? ',文件已在外部修改' : ''}`}
+            aria-label={`${tab.title}${tab.path ? `,${displayPath(tab.path)}` : ',尚未保存到磁盘'}${tab.dirty || tab.isNew ? ',尚未保存' : ''}${tab.externalChanged ? ',文件已在外部修改' : ''}`}
             onKeyDown={(event) => {
+              if (event.target !== event.currentTarget) return;
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
                 onSelect(tab.id);
@@ -129,7 +165,7 @@ export const TabBar = memo(function TabBar({
               title={`关闭 ${tab.title}`}
               aria-label={`关闭 ${tab.title}`}
             >
-              <IconClose size={12} />
+              <IconClose size={16} strokeWidth={2} aria-hidden="true" />
             </button>
           </div>
         ))}
@@ -137,7 +173,7 @@ export const TabBar = memo(function TabBar({
       <button
         className="tabbar-new"
         onClick={onNew}
-        title="新建文档 (Ctrl+N)"
+        title={`新建文档${newShortcut ? ` (${newShortcut})` : ''}`}
         aria-label="新建文档"
       >
         +

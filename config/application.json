@@ -12,7 +12,11 @@
   },
   "limits": {
     "textFileBytes": 33554432,
+    "htmlExportBytes": 536870912,
     "imageFileBytes": 67108864,
+    "imageMemoryBytes": 134217728,
+    "imageStashBytes": 1073741824,
+    "imageStashEntries": 4096,
     "settingsFileBytes": 1048576,
     "snapshotImageBytes": 268435456,
     "recoveryImages": 128,
@@ -20,6 +24,8 @@
     "imageCacheCharacters": 4194304,
     "imageCacheEntries": 4,
     "sourceHistory": 200,
+    "searchHighlightMatches": 1000,
+    "searchCheckpointMatches": 1024,
     "recentFiles": 10,
     "chunkWarningKb": 1600
   }
