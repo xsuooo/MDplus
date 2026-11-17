@@ -23,6 +23,8 @@ import { useDocumentFiles } from './hooks/useDocumentFiles';
 import { useDocumentSave } from './hooks/useDocumentSave';
 import { useWorkspace } from './hooks/useWorkspace';
 import { useEditorView } from './hooks/useEditorView';
+import { useSourceOutline } from './hooks/useSourceOutline';
+import { useTypography } from './hooks/useTypography';
 import { useExternalChanges } from './hooks/useExternalChanges';
 import { useImageDrop } from './hooks/useImageDrop';
 import { usePreferences } from './hooks/usePreferences';
@@ -153,14 +155,10 @@ export default function App() {
     recovery,
     setRecentFiles,
   );
+  const { bodyFont, codeFont, editorWidth, changeBodyFont, changeCodeFont, changeEditorWidth } =
+    useTypography(workspace);
   const {
     editorAreaRef,
-    bodyFont,
-    codeFont,
-    editorWidth,
-    changeBodyFont,
-    changeCodeFont,
-    changeEditorWidth,
     handleTabUpdate,
     handleEditorActivity,
     registerEditor,
@@ -169,10 +167,8 @@ export default function App() {
     handleRedo,
     toggleSourceMode,
     handleSourceChange,
-    jumpToOutline,
-    outlineItems,
-    outlineStatus,
-  } = useEditorView(workspace, recovery, scheduleAutoSave, changeSourcePreference, outlineOpen);
+  } = useEditorView(workspace, recovery, scheduleAutoSave, changeSourcePreference);
+  const { outlineItems, outlineStatus, jumpToOutline } = useSourceOutline(workspace, outlineOpen);
   const {
     handle: dropImages,
     pick: pickImages,

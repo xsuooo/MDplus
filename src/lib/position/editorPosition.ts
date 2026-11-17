@@ -603,3 +603,12 @@ export function toRendered(
     scroller.scrollTop = transferTop(source.rect, rendered, current.top);
   });
 }
+
+/** Calls handler as soon as the user scrolls, types or clicks; returns the unsubscribe. */
+export function onUserInput(handler: (event: Event) => void): () => void {
+  const events = ['wheel', 'keydown', 'pointerdown', 'input'];
+  for (const event of events) window.addEventListener(event, handler, true);
+  return () => {
+    for (const event of events) window.removeEventListener(event, handler, true);
+  };
+}
