@@ -71,8 +71,6 @@ export function useWorkspace(initialTabs: Tab[] = []) {
     delete disk.pausedMtime;
     delete disk.detected;
   }, []);
-  const openingPaths = useRef(new Set<string>());
-  const tabRenderTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const currentView = useRef({ activeId, sourceMode });
   const modeGenerations = useRef<Record<string, number>>({});
   const sourceRegistry = useRef<Record<string, HTMLTextAreaElement | null>>({});
@@ -91,7 +89,6 @@ export function useWorkspace(initialTabs: Tab[] = []) {
       }
     >
   >({});
-  const enteringSource = useRef(false);
   currentView.current = { activeId, sourceMode };
   const setSourceMode = useCallback((source: boolean) => {
     const current = currentView.current;
@@ -318,7 +315,6 @@ export function useWorkspace(initialTabs: Tab[] = []) {
     tabs,
     setTabs,
     activeId,
-    setActiveId,
     sourceMode,
     setSourceMode,
     searchOpen,
@@ -337,14 +333,11 @@ export function useWorkspace(initialTabs: Tab[] = []) {
     diskOf,
     isAutoSavePaused,
     resumeAutoSave,
-    openingPaths,
-    tabRenderTimers,
     currentView,
     modeGenerations,
     sourceRegistry,
     sourceRewrites,
     positions,
-    enteringSource,
     syncEditor,
     rememberActive,
     captureTabPlace,

@@ -61,16 +61,16 @@ export function useEditorView(
     tabsRef,
     contentVersions,
     saveGenerations,
-    tabRenderTimers,
     currentView,
     sourceRegistry,
     positions,
     positionVersion,
-    enteringSource,
     syncEditor,
     rememberActive,
     resolveContent,
   } = workspace;
+  const tabRenderTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const enteringSource = useRef(false);
   const { prepareCurrentImages, saveRecoverySnapshot, deleteRecoverySnapshot } = recovery;
   const [codeFont, setCodeFont] = useState(readCodeFont);
   const [bodyFont, setBodyFont] = useState(readBodyFont);
@@ -367,7 +367,6 @@ export function useEditorView(
     activeId,
     currentView,
     editorRegistry,
-    enteringSource,
     positions,
     positionVersion,
     restoreSessionPosition,
@@ -412,7 +411,7 @@ export function useEditorView(
         setTabs([...tabsRef.current]);
       }, TAB_RENDER_MS);
     },
-    [setTabs, tabMirror, tabRenderTimers, tabsRef],
+    [setTabs, tabMirror, tabsRef],
   );
   // 卸载后定时器不能再触发 setTabs。同时删除条目，StrictMode 重放清理后才能重新排入。
   useEffect(() => {
@@ -423,7 +422,7 @@ export function useEditorView(
         delete timers[id];
       }
     };
-  }, [tabRenderTimers]);
+  }, []);
 
   const handleEditorActivity = useCallback(
     (id: string, activity: Pick<EditorUpdate, 'canUndo' | 'canRedo'>) => {
@@ -606,7 +605,6 @@ export function useEditorView(
     resolveContent,
     saveRecoverySnapshot,
     positions,
-    enteringSource,
     setSearchOpen,
   ]);
 
