@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { version } from '../package.json';
-import { BUILD_LABEL } from '../src/lib/buildInfo';
-import { APP_VERSION, APP_VERSION_DETAILS, APP_VERSION_LABEL } from '../src/lib/appVersion';
+import {
+  BUILD_LABEL,
+  APP_VERSION,
+  APP_VERSION_DETAILS,
+  APP_VERSION_LABEL,
+} from '../src/lib/appVersion';
 
 describe('application version metadata', () => {
   it('uses the owning package version for the visible release label', () => {

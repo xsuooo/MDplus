@@ -2,7 +2,7 @@ import { memo } from 'react';
 import type { RecentFile } from '../lib/types';
 import { IconClock, IconClose } from './icons';
 import { useDialogFocus } from '../lib/useDialogFocus';
-import { displayPath } from '../lib/pathDisplay';
+import { displayPath } from '../lib/paths';
 
 interface RecentMenuProps {
   items: RecentFile[];

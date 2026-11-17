@@ -39,6 +39,22 @@ export function useExternalChanges(
   const externalLastChecks = useRef<Record<string, number>>({});
   const previousActiveId = useRef(activeId);
   /* ---------- 外部文件变化检测 ---------- */
+  const reportUnreadable = useCallback(
+    async (tab: Tab) => {
+      if (autosavePausedMtime.current[tab.id] === null) return;
+      pauseAutoSave(tab.id, null);
+      if (tab.id === activeId) {
+        await showMessage(
+          `无法读取「${tab.title}」的磁盘状态,文件可能已被删除或权限已变化。请点击工具栏「保存」手动处理。`,
+          'error',
+        );
+      } else {
+        updateTab(tab.id, { externalChanged: true });
+      }
+    },
+    [activeId, autosavePausedMtime, pauseAutoSave, updateTab],
+  );
+
   const promptExternalReload = useCallback(
     async (tabId: string, detectedMtime: number, detectedRevision: string | null) => {
       if (externalPrompts.current.has(tabId)) return;
@@ -161,17 +177,7 @@ export function useExternalChanges(
         }
       } catch (error) {
         const tab = tabsRef.current.find((candidate) => candidate.id === tabId);
-        if (autosavePausedMtime.current[tabId] !== null) {
-          pauseAutoSave(tabId, null);
-          if (tab?.id === activeId) {
-            await showMessage(
-              `无法读取「${tab.title}」的磁盘状态,文件可能已被删除或权限已变化。请点击工具栏「保存」手动处理。`,
-              'error',
-            );
-          } else {
-            updateTab(tabId, { externalChanged: true });
-          }
-        }
+        if (tab) await reportUnreadable(tab);
         console.warn('检测外部文件变化失败', error);
       } finally {
         externalPrompts.current.delete(tabId);
@@ -189,6 +195,7 @@ export function useExternalChanges(
       contentVersions,
       saveGenerations,
       pauseAutoSave,
+      reportUnreadable,
       tabMirror,
       saveTimers,
       autosavePausedMtime,
@@ -197,7 +204,6 @@ export function useExternalChanges(
       syncEditor,
       setTabs,
       currentView,
-      activeId,
       deleteRecoverySnapshot,
       saveRecoverySnapshot,
     ],
@@ -261,21 +267,7 @@ export function useExternalChanges(
           }
         } catch (error) {
           const latest = tabsRef.current.find((tab) => tab.id === candidate.id);
-          if (
-            latest &&
-            latest.path === candidate.path &&
-            autosavePausedMtime.current[latest.id] !== null
-          ) {
-            pauseAutoSave(latest.id, null);
-            if (latest.id === activeId) {
-              await showMessage(
-                `无法读取「${latest.title}」的磁盘状态,文件可能已被删除或权限已变化。请点击工具栏「保存」手动处理。`,
-                'error',
-              );
-            } else {
-              updateTab(latest.id, { externalChanged: true });
-            }
-          }
+          if (latest && latest.path === candidate.path) await reportUnreadable(latest);
           console.warn('检测外部文件变化失败', error);
         } finally {
           externalChecks.current.delete(candidate.id);
@@ -284,11 +276,10 @@ export function useExternalChanges(
     },
     [
       activeId,
-      autosavePausedMtime,
       detectedExternalStates,
       externalChecks,
       externalPrompts,
-      pauseAutoSave,
+      reportUnreadable,
       promptExternalReload,
       saveQueues,
       tabsRef,

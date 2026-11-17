@@ -3,7 +3,7 @@ import { loadSettingsStore, type SettingsStore as Store } from '../services/sett
 import type { RecentFile, ThemeMode } from './types';
 import type { ShortcutBindings } from './shortcuts';
 import { sanitizeWindowState, type WindowState } from './windowState';
-import { pathKey } from './pathIdentity';
+import { pathKey } from './paths';
 import { sanitizeDocumentSession, type SavedDocumentSession } from './documentSession';
 import {
   sanitizeRecentFiles,

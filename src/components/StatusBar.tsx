@@ -7,7 +7,7 @@ import type { EditorWidth } from '../lib/editorWidth';
 import { TypographyPanel } from './TypographyPanel';
 import type { RecoveryStatus } from '../lib/recovery';
 import { APP_VERSION_DETAILS, APP_VERSION_LABEL } from '../lib/appVersion';
-import { displayPath } from '../lib/pathDisplay';
+import { displayPath } from '../lib/paths';
 import { formatActionShortcuts, type ShortcutBindings } from '../lib/shortcuts';
 
 interface StatusBarProps {

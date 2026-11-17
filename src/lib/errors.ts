@@ -1,4 +1,4 @@
-import { displayPath } from './pathDisplay';
+import { displayPath } from './paths';
 
 /** 将 Tauri 字符串拒绝和普通 Error 统一转换为可读文案。 */
 export function errorMessage(error: unknown): string {

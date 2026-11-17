@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pathKey } from '../src/lib/pathIdentity';
+import { pathKey } from '../src/lib/paths';
 
 describe('Windows document comparison keys', () => {
   it.each([

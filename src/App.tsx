@@ -34,8 +34,7 @@ import type { SourceEditorApi } from './lib/sourceEditorApi';
 import { showMessage } from './lib/dialog';
 import { errorMessage } from './lib/errors';
 import { readOutlineWidth, writeOutlineWidth } from './lib/outlineWidth';
-import { pathKey } from './lib/pathIdentity';
-import { displayPath } from './lib/pathDisplay';
+import { pathKey, displayPath } from './lib/paths';
 import { resolveDocumentLink } from './lib/documentLinks';
 import { Presence } from './lib/presence';
 import {

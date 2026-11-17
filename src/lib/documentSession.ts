@@ -1,4 +1,4 @@
-import { pathKey } from './pathIdentity';
+import { pathKey } from './paths';
 import { sanitizeSessionPlace, type SessionEditorPlace } from './position/sessionPosition';
 
 export interface SessionDocument {

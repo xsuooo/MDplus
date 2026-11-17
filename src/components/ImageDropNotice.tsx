@@ -1,5 +1,5 @@
 import type { ImageDropProgress, ImageDropResult } from '../lib/imageDrop';
-import { displayPath } from '../lib/pathDisplay';
+import { displayPath } from '../lib/paths';
 import { IconClose } from './icons';
 
 interface ImageDropNoticeProps {
