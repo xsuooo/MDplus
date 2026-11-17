@@ -126,6 +126,39 @@ export function useDocumentSave(
     [tabRuntime, runtimeOf, syncEditor],
   );
 
+  /** The written text is still what the editor shows: adopt the migrated image paths everywhere. */
+  const adoptMigration = useCallback(
+    (id: string, migration: ImageMigration, original: string) => {
+      commitImageMigration(migration);
+      runtimeOf(id).sourceRewrites = [
+        ...(migration.historyReferences ?? []),
+        ...(migration.references ?? []),
+      ];
+      applyMigratedContent(id, migration.markdown, original);
+    },
+    [runtimeOf, applyMigratedContent],
+  );
+
+  /** After a clean write the old snapshot is obsolete; a tab that still needs protection gets a new one. */
+  const refreshSnapshotAfterSave = useCallback(
+    async (id: string) => {
+      await deleteRecoverySnapshot(id);
+      const latest = tabsRef.current.find((item) => item.id === id);
+      if (latest && needsDocumentProtection(latest, resolveContent(latest)))
+        saveRecoverySnapshot(latest);
+    },
+    [deleteRecoverySnapshot, tabsRef, resolveContent, saveRecoverySnapshot],
+  );
+
+  const keepUnsaved = useCallback(
+    (id: string) => {
+      updateTab(id, { dirty: true });
+      const latest = tabsRef.current.find((item) => item.id === id);
+      if (latest) saveRecoverySnapshot(latest);
+    },
+    [updateTab, tabsRef, saveRecoverySnapshot],
+  );
+
   const handleSaveAsFor = useCallback(
     async (tab: Tab, generation: number, saveCurrent: () => Promise<boolean>): Promise<boolean> => {
       const isCurrentSave = () =>
@@ -234,14 +267,7 @@ export function useDocumentSave(
           );
           return false;
         }
-        if (!contentChangedDuringWrite) {
-          commitImageMigration(migration);
-          runtimeOf(tab.id).sourceRewrites = [
-            ...(migration.historyReferences ?? []),
-            ...(migration.references ?? []),
-          ];
-          applyMigratedContent(tab.id, migratedContent, content);
-        }
+        if (!contentChangedDuringWrite) adoptMigration(tab.id, migration, content);
         updateTab(tab.id, {
           path: receipt.path,
           title: basename(target),
@@ -255,12 +281,7 @@ export function useDocumentSave(
           dirty: contentChangedDuringWrite ? latestContent !== migratedContent : false,
         });
         resumeAutoSave(tab.id);
-        if (!contentChangedDuringWrite) {
-          await deleteRecoverySnapshot(tab.id);
-          const latest = tabsRef.current.find((item) => item.id === tab.id);
-          if (latest && needsDocumentProtection(latest, resolveContent(latest)))
-            saveRecoverySnapshot(latest);
-        }
+        if (!contentChangedDuringWrite) await refreshSnapshotAfterSave(tab.id);
         try {
           await pushRecentFile(receipt.path, basename(receipt.path), selected);
           setRecentFiles(await getRecentFiles());
@@ -271,9 +292,7 @@ export function useDocumentSave(
       } catch (err) {
         if (!isCurrentSave()) return false;
         console.error('另存为失败', err);
-        updateTab(tab.id, { dirty: true });
-        const latest = tabsRef.current.find((item) => item.id === tab.id);
-        if (latest) saveRecoverySnapshot(latest);
+        keepUnsaved(tab.id);
         await showMessage(`另存为失败:${errorMessage(err)}`, 'error');
         return false;
       } finally {
@@ -285,24 +304,23 @@ export function useDocumentSave(
       tabsRef,
       resolveContent,
       tabRuntime,
-      runtimeOf,
       prepareCurrentImages,
+      adoptMigration,
       updateTab,
       resumeAutoSave,
-      setRecentFiles,
+      refreshSnapshotAfterSave,
       pauseAutoSave,
       saveRecoverySnapshot,
-      applyMigratedContent,
-      deleteRecoverySnapshot,
+      setRecentFiles,
+      keepUnsaved,
     ],
   );
 
   const performSave = useCallback(
     async (
       id: string,
-      manual = false,
-      generation = saveGenerations.current[id] ?? 0,
-      saveAs = false,
+      generation: number,
+      { manual = false, saveAs = false } = {},
     ): Promise<boolean> => {
       const isCurrentSave = () =>
         (saveGenerations.current[id] ?? 0) === generation &&
@@ -315,7 +333,7 @@ export function useDocumentSave(
       if (!tab || (!manual && isAutoSavePaused(id))) return false;
       if (saveAs || !tab.path) {
         return manual
-          ? handleSaveAsFor(tab, generation, () => performSave(id, true, generation))
+          ? handleSaveAsFor(tab, generation, () => performSave(id, generation, { manual: true }))
           : false;
       }
 
@@ -380,14 +398,7 @@ export function useDocumentSave(
         if (!isCurrentSave()) return false;
         const contentChangedDuringWrite =
           (tabRuntime.current[id]?.contentVersion ?? 0) !== contentGeneration;
-        if (!contentChangedDuringWrite) {
-          commitImageMigration(migration);
-          runtimeOf(id).sourceRewrites = [
-            ...(migration.historyReferences ?? []),
-            ...(migration.references ?? []),
-          ];
-          applyMigratedContent(id, content, rawContent);
-        }
+        if (!contentChangedDuringWrite) adoptMigration(id, migration, rawContent);
         const latest = contentChangedDuringWrite
           ? (tabRuntime.current[id]?.mirror?.markdown ?? rawContent)
           : content;
@@ -401,20 +412,13 @@ export function useDocumentSave(
           savedContent: content,
         });
         resumeAutoSave(id);
-        if (!contentChangedDuringWrite) {
-          await deleteRecoverySnapshot(id);
-          const current = tabsRef.current.find((item) => item.id === id);
-          if (current && needsDocumentProtection(current, resolveContent(current)))
-            saveRecoverySnapshot(current);
-        }
+        if (!contentChangedDuringWrite) await refreshSnapshotAfterSave(id);
         return true;
       } catch (err) {
         if (!isCurrentSave()) return false;
         console.error('保存失败', err);
         pauseAutoSave(id, null);
-        updateTab(id, { dirty: true });
-        const latest = tabsRef.current.find((item) => item.id === id);
-        if (latest) saveRecoverySnapshot(latest);
+        keepUnsaved(id);
         await showMessage(`保存失败:${errorMessage(err)}`, 'error');
         return false;
       } finally {
@@ -422,20 +426,19 @@ export function useDocumentSave(
       }
     },
     [
-      saveGenerations,
       tabRuntime,
-      runtimeOf,
       tabsRef,
       isAutoSavePaused,
-      resumeAutoSave,
+      saveGenerations,
       handleSaveAsFor,
       resolveContent,
       prepareCurrentImages,
+      adoptMigration,
       updateTab,
+      resumeAutoSave,
+      refreshSnapshotAfterSave,
       pauseAutoSave,
-      applyMigratedContent,
-      deleteRecoverySnapshot,
-      saveRecoverySnapshot,
+      keepUnsaved,
     ],
   );
 
@@ -449,10 +452,11 @@ export function useDocumentSave(
       setSavingId(id);
       const next = previous
         .catch(() => false)
-        .then(() => performSave(id, manual, generation, saveAs));
+        .then(() => performSave(id, generation, { manual, saveAs }));
       runtimeOf(id).saveQueue = next;
       const finish = () => {
-        if (tabRuntime.current[id]?.saveQueue === next) {
+        const queue = tabRuntime.current[id]?.saveQueue;
+        if (queue === next || queue === undefined) {
           delete tabRuntime.current[id]?.saveQueue;
           setSavingId((current) => (current === id ? null : current));
         }
