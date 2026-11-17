@@ -144,7 +144,7 @@ describe('saving and protecting a document while the image stash is full', () =>
     act(() => hook.result.current.save.scheduleAutoSave(id));
     await act(async () => {
       await vi.advanceTimersByTimeAsync(AUTO_SAVE_MS);
-      await hook.result.current.workspace.saveQueues.current[id];
+      await hook.result.current.workspace.tabRuntime.current[id]?.saveQueue;
     });
 
     expect(mocks.message.mock.calls).toEqual([]);
@@ -186,7 +186,8 @@ describe('saving and protecting a document while the image stash is full', () =>
     act(() =>
       hook.result.current.recovery.saveRecoverySnapshot(hook.result.current.workspace.tabs[0]),
     );
-    const preparation = hook.result.current.workspace.imagePreparations.current[id]?.promise;
+    const preparation =
+      hook.result.current.workspace.tabRuntime.current[id]?.imagePreparation?.promise;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(IMAGE_PREPARATION_MS);
       await expect(preparation).resolves.toBe(true);

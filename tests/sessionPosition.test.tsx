@@ -333,7 +333,9 @@ describe('serialized editor positions', () => {
       hook.result.current.installSessionPlace('a', saved);
     });
     expect(field.value.slice(field.selectionStart, field.selectionEnd)).toBe('selected target');
-    expect(hook.result.current.positions.current.a.pendingSessionPlace).toBeUndefined();
+    expect(
+      hook.result.current.tabRuntime.current['a']?.position?.pendingSessionPlace,
+    ).toBeUndefined();
     field.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     field.setSelectionRange(4, 4);
     await act(async () => {

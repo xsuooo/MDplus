@@ -16,8 +16,7 @@ export function useDocumentExport(
   bodyFont: BodyFont,
   codeFont: CodeFont,
 ) {
-  const { activeTab, editorRegistry, tabsRef, saveQueues, contentVersions, resolveContent } =
-    workspace;
+  const { activeTab, tabRuntime, tabsRef, resolveContent } = workspace;
   const { prepareCurrentImages } = recovery;
   const [exporting, setExporting] = useState(false);
   const exportBusy = useRef(false);
@@ -29,14 +28,14 @@ export function useDocumentExport(
       setExporting(true);
       let images: PendingImageLease | undefined;
       try {
-        const pendingEditor = editorRegistry.current[activeTab.id];
+        const pendingEditor = tabRuntime.current[activeTab.id]?.editor;
         if (pendingEditor) flushEditorUpdate(pendingEditor);
-        await saveQueues.current[activeTab.id];
+        await tabRuntime.current[activeTab.id]?.saveQueue;
         const tab = tabsRef.current.find((candidate) => candidate.id === activeTab.id);
-        const editor = editorRegistry.current[activeTab.id];
+        const editor = tabRuntime.current[activeTab.id]?.editor;
         if (!tab || !editor) throw new Error('编辑器尚未就绪，请稍后重试');
         const content = resolveContent(tab),
-          version = contentVersions.current[tab.id] ?? 0;
+          version = tabRuntime.current[tab.id]?.contentVersion ?? 0;
         const imagesReady = await prepareCurrentImages(tab.id);
         const current = tabsRef.current.find((candidate) => candidate.id === tab.id);
         if (
@@ -44,7 +43,7 @@ export function useDocumentExport(
           !current ||
           current.path !== tab.path ||
           current.diskRevision !== tab.diskRevision ||
-          (contentVersions.current[tab.id] ?? 0) !== version ||
+          (tabRuntime.current[tab.id]?.contentVersion ?? 0) !== version ||
           resolveContent(current) !== content
         ) {
           throw new Error('图片准备期间文稿已变化，请重新导出');
@@ -97,17 +96,7 @@ export function useDocumentExport(
         setExporting(false);
       }
     },
-    [
-      activeTab,
-      saveQueues,
-      tabsRef,
-      editorRegistry,
-      resolveContent,
-      contentVersions,
-      prepareCurrentImages,
-      bodyFont,
-      codeFont,
-    ],
+    [activeTab, tabRuntime, tabsRef, resolveContent, prepareCurrentImages, bodyFont, codeFont],
   );
   const handleExportHTML = useCallback(() => handleExport('html'), [handleExport]);
   const handleExportPDF = useCallback(() => handleExport('pdf'), [handleExport]);

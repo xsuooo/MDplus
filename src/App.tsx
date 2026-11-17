@@ -97,10 +97,8 @@ export default function App() {
     searchOpen,
     setSearchOpen,
     activeTab,
-    editorRegistry,
+    tabRuntime,
     isAutoSavePaused,
-    sourceRegistry,
-    sourceRewrites,
     selectTab,
     registerSource,
     resolveContent,
@@ -516,11 +514,13 @@ export default function App() {
           <Presence key={activeId} present={Boolean(activeTab) && searchOpen}>
             <SearchBar
               documentId={activeId ?? undefined}
-              editor={!sourceMode && activeId ? (editorRegistry.current[activeId] ?? null) : null}
+              editor={
+                !sourceMode && activeId ? (tabRuntime.current[activeId]?.editor ?? null) : null
+              }
               source={
                 sourceMode && activeTab
                   ? {
-                      input: sourceRegistry.current[activeTab.id] ?? null,
+                      input: tabRuntime.current[activeTab.id]?.sourceInput ?? null,
                       text: resolveContent(activeTab),
                       api: getSourceApi(activeTab.id),
                     }
@@ -538,7 +538,7 @@ export default function App() {
               value={resolveContent(tab)}
               onRegister={registerSource}
               onApi={registerSourceApi}
-              imageRewrites={sourceRewrites.current[tab.id]}
+              imageRewrites={tabRuntime.current[tab.id]?.sourceRewrites}
               onChange={handleSourceChange}
               onClose={toggleSourceMode}
               onImagePaste={handleImagePaste}

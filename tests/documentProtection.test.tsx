@@ -172,7 +172,7 @@ describe('local versions without a matching disk copy', () => {
     const { workspace } = hook.result.current;
     expect(workspace.tabsRef.current[0].markdown).toBe('local original A');
     // The detected disk mtime, not -1: the file is known to exist.
-    expect(workspace.diskSync.current.a?.pausedMtime).toBe(2);
+    expect(workspace.tabRuntime.current['a']?.disk?.pausedMtime).toBe(2);
     const shown = mocks.message.mock.calls.map(([text]) => String(text));
     expect(shown).toHaveLength(1);
     expect(shown[0]).toContain('图片');

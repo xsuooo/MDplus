@@ -56,14 +56,11 @@ export function useEditorView(
     sourceMode,
     setSourceMode,
     setSearchOpen,
-    editorRegistry,
-    tabMirror,
+    tabRuntime,
+    runtimeOf,
     tabsRef,
-    contentVersions,
     saveGenerations,
     currentView,
-    sourceRegistry,
-    positions,
     positionVersion,
     syncEditor,
     rememberActive,
@@ -83,7 +80,7 @@ export function useEditorView(
     items: OutlineItem[];
     error: boolean;
   } | null>(null);
-  const sourceEditor = activeId ? editorRegistry.current[activeId] : null;
+  const sourceEditor = activeId ? tabRuntime.current[activeId]?.editor : null;
   useEffect(() => {
     if (!outlineOpen || !sourceMode || !activeId || !sourceEditor) return;
     let worker: Worker | undefined;
@@ -131,7 +128,7 @@ export function useEditorView(
   const outlineItems = sourceMode
     ? (currentSourceOutline?.items ?? [])
     : activeId
-      ? (tabMirror.current[activeId]?.outline ?? [])
+      ? (tabRuntime.current[activeId]?.mirror?.outline ?? [])
       : [];
   const outlineStatus =
     sourceMode && outlineOpen && activeId
@@ -160,13 +157,13 @@ export function useEditorView(
   const restoreSessionPosition = useCallback(
     (id: string) => {
       if (currentView.current.activeId !== id) return;
-      const saved = positions.current[id];
+      const saved = tabRuntime.current[id]?.position;
       const pending = saved?.pendingSessionPlace;
       if (!pending) return;
-      const input = sourceRegistry.current[id];
-      const editor = editorRegistry.current[id];
+      const input = tabRuntime.current[id]?.sourceInput;
+      const editor = tabRuntime.current[id]?.editor;
       const markdown =
-        tabMirror.current[id]?.markdown ??
+        tabRuntime.current[id]?.mirror?.markdown ??
         tabsRef.current.find((tab) => tab.id === id)?.markdown ??
         '';
       if (currentView.current.sourceMode) {
@@ -182,7 +179,7 @@ export function useEditorView(
       delete saved.pendingSessionPlace;
       sessionRestoreCleanups.current[id]?.();
       const source = currentView.current.sourceMode;
-      const generation = contentVersions.current[id] ?? 0;
+      const generation = tabRuntime.current[id]?.contentVersion ?? 0;
       let cancelled = false;
       let frame: number | undefined;
       let remaining = 2;
@@ -200,12 +197,12 @@ export function useEditorView(
           !cancelled &&
           currentView.current.activeId === id &&
           currentView.current.sourceMode === source &&
-          (contentVersions.current[id] ?? 0) === generation
+          (tabRuntime.current[id]?.contentVersion ?? 0) === generation
         ) {
           if (source && input?.isConnected) {
             restoreSessionSource(input, pending);
             saved.source = sourcePlace(input);
-          } else if (editor && editorRegistry.current[id] === editor) {
+          } else if (editor && tabRuntime.current[id]?.editor === editor) {
             restoreSessionRendered(editor, markdown, pending);
             saved.rendered = renderedPlace(editor);
           }
@@ -223,20 +220,20 @@ export function useEditorView(
         if (--remaining === 0) cancel();
       });
     },
-    [contentVersions, currentView, editorRegistry, positions, sourceRegistry, tabMirror, tabsRef],
+    [tabRuntime, currentView, tabsRef],
   );
   const captureFontPosition = useCallback(() => {
     rememberActive();
     const { activeId: id, sourceMode: source } = currentView.current;
     if (id) {
-      const saved = positions.current[id];
+      const saved = tabRuntime.current[id]?.position;
       fontPosition.current = {
         id,
         source: source ? saved?.source : undefined,
         rendered: source ? undefined : saved?.rendered,
       };
     }
-  }, [currentView, positions, rememberActive]);
+  }, [currentView, tabRuntime, rememberActive]);
   const changeBodyFont = useCallback(
     (font: BodyFont) => {
       if (font === bodyFont) return;
@@ -277,8 +274,8 @@ export function useEditorView(
     fontPosition.current = null;
     if (!saved || saved.id !== activeId) return;
     const restore = () => {
-      const input = sourceRegistry.current[saved.id];
-      const editor = editorRegistry.current[saved.id];
+      const input = tabRuntime.current[saved.id]?.sourceInput;
+      const editor = tabRuntime.current[saved.id]?.editor;
       if (input && saved.source) restoreSource(input, saved.source);
       if (editor && saved.rendered) restoreRendered(editor, saved.rendered);
     };
@@ -314,15 +311,15 @@ export function useEditorView(
       for (const event of ['wheel', 'keydown', 'pointerdown', 'input'])
         window.removeEventListener(event, cancel, true);
     };
-  }, [bodyFont, codeFont, editorWidth, activeId, sourceMode, sourceRegistry, editorRegistry]);
+  }, [bodyFont, codeFont, editorWidth, activeId, sourceMode, tabRuntime, runtimeOf]);
 
   useLayoutEffect(() => {
     if (!activeId) return;
-    const input = sourceRegistry.current[activeId];
-    const editor = editorRegistry.current[activeId];
-    const saved = (positions.current[activeId] ??= {});
+    const input = tabRuntime.current[activeId]?.sourceInput;
+    const editor = tabRuntime.current[activeId]?.editor;
+    const saved = (runtimeOf(activeId).position ??= {});
     const markdown =
-      tabMirror.current[activeId]?.markdown ??
+      tabRuntime.current[activeId]?.mirror?.markdown ??
       tabsRef.current.find((tab) => tab.id === activeId)?.markdown ??
       '';
     if (saved.pendingSessionPlace) {
@@ -366,14 +363,12 @@ export function useEditorView(
   }, [
     activeId,
     currentView,
-    editorRegistry,
-    positions,
+    tabRuntime,
+    runtimeOf,
     positionVersion,
     restoreSessionPosition,
     sourceMode,
-    sourceRegistry,
     syncEditor,
-    tabMirror,
     tabsRef,
   ]);
   useEffect(() => {
@@ -404,14 +399,14 @@ export function useEditorView(
             tabsRef.current = tabsRef.current.map((candidate) =>
               candidate.id === id ? { ...candidate, stats } : candidate,
             );
-            const mirror = tabMirror.current[id];
-            if (mirror) tabMirror.current[id] = { ...mirror, stats };
+            const mirror = tabRuntime.current[id]?.mirror;
+            if (mirror) runtimeOf(id).mirror = { ...mirror, stats };
           }
         }
         setTabs([...tabsRef.current]);
       }, TAB_RENDER_MS);
     },
-    [setTabs, tabMirror, tabsRef],
+    [setTabs, tabRuntime, runtimeOf, tabsRef],
   );
   // 卸载后定时器不能再触发 setTabs。同时删除条目，StrictMode 重放清理后才能重新排入。
   useEffect(() => {
@@ -428,23 +423,23 @@ export function useEditorView(
     (id: string, activity: Pick<EditorUpdate, 'canUndo' | 'canRedo'>) => {
       const tab = tabsRef.current.find((candidate) => candidate.id === id);
       if (!tab) return;
-      contentVersions.current[id] = (contentVersions.current[id] ?? 0) + 1;
-      const mirror = tabMirror.current[id];
-      if (mirror) tabMirror.current[id] = { ...mirror, ...activity };
+      runtimeOf(id).contentVersion = (tabRuntime.current[id]?.contentVersion ?? 0) + 1;
+      const mirror = tabRuntime.current[id]?.mirror;
+      if (mirror) runtimeOf(id).mirror = { ...mirror, ...activity };
       tabsRef.current = tabsRef.current.map((candidate) =>
         candidate.id === id ? { ...candidate, dirty: true } : candidate,
       );
       scheduleAutoSave(id);
       scheduleTabRender(id);
     },
-    [contentVersions, scheduleAutoSave, scheduleTabRender, tabMirror, tabsRef],
+    [tabRuntime, runtimeOf, scheduleAutoSave, scheduleTabRender, tabsRef],
   );
 
   const handleTabUpdate = useCallback(
     (id: string, update: EditorUpdate, isInitial = false, coalesced = false) => {
       const prev = tabsRef.current.find((t) => t.id === id);
-      const generation = contentVersions.current[id] ?? 0;
-      const latest = tabMirror.current[id]?.markdown;
+      const generation = tabRuntime.current[id]?.contentVersion ?? 0;
+      const latest = tabRuntime.current[id]?.mirror?.markdown;
       // Save As can rewrite image URLs before registration without a user edit.
       // Compare the mirror with the fixed creation source, not its serialization.
       if (
@@ -465,11 +460,11 @@ export function useEditorView(
             stats: markdown === update.markdown ? update.stats : computeStats(markdown),
           }
         : update;
-      tabMirror.current[id] = currentUpdate;
+      runtimeOf(id).mirror = currentUpdate;
       if (isInitial) {
-        contentVersions.current[id] ??= 0;
+        runtimeOf(id).contentVersion ??= 0;
       } else if (!coalesced) {
-        contentVersions.current[id] = (contentVersions.current[id] ?? 0) + 1;
+        runtimeOf(id).contentVersion = (tabRuntime.current[id]?.contentVersion ?? 0) + 1;
       }
       // 以「最近一次保存成功的内容」为基线判定 dirty,避免编辑又回到打开时内容后误判为已保存
       const dirty = isInitial
@@ -495,9 +490,9 @@ export function useEditorView(
       scheduleTabRender(id);
     },
     [
-      contentVersions,
+      tabRuntime,
+      runtimeOf,
       tabsRef,
-      tabMirror,
       prepareCurrentImages,
       scheduleAutoSave,
       saveRecoverySnapshot,
@@ -510,11 +505,11 @@ export function useEditorView(
 
   const registerEditor = useCallback(
     (id: string, editor: Editor | null) => {
-      editorRegistry.current[id] = editor;
+      runtimeOf(id).editor = editor;
       if (editor) restoreSessionPosition(id);
       else sessionRestoreCleanups.current[id]?.();
     },
-    [editorRegistry, restoreSessionPosition],
+    [runtimeOf, restoreSessionPosition],
   );
 
   /* ---------- 图片粘贴处理 ---------- */
@@ -549,27 +544,27 @@ export function useEditorView(
 
   /* ---------- 撤销 / 重做 ---------- */
   const handleUndo = useCallback(() => {
-    const editor = activeId ? editorRegistry.current[activeId] : null;
+    const editor = activeId ? tabRuntime.current[activeId]?.editor : null;
     if (editor) undo(editor);
-  }, [activeId, editorRegistry]);
+  }, [activeId, tabRuntime]);
 
   const handleRedo = useCallback(() => {
-    const editor = activeId ? editorRegistry.current[activeId] : null;
+    const editor = activeId ? tabRuntime.current[activeId]?.editor : null;
     if (editor) redo(editor);
-  }, [activeId, editorRegistry]);
+  }, [activeId, tabRuntime]);
 
   /* ---------- 源码模式 ---------- */
   const toggleSourceMode = useCallback(() => {
     const { activeId: id, sourceMode: wasSource } = currentView.current;
-    const pendingEditor = id ? editorRegistry.current[id] : null;
+    const pendingEditor = id ? tabRuntime.current[id]?.editor : null;
     if (pendingEditor) flushEditorUpdate(pendingEditor);
     rememberActive();
     if (id && wasSource) {
       const tab = tabsRef.current.find((tab) => tab.id === id);
-      const input = sourceRegistry.current[id];
-      const editor = editorRegistry.current[id];
-      const markdown = tabMirror.current[id]?.markdown ?? tab?.markdown ?? '';
-      const saved = (positions.current[id] ??= {});
+      const input = tabRuntime.current[id]?.sourceInput;
+      const editor = tabRuntime.current[id]?.editor;
+      const markdown = tabRuntime.current[id]?.mirror?.markdown ?? tab?.markdown ?? '';
+      const saved = (runtimeOf(id).position ??= {});
       if (
         !editor ||
         saved.exchange?.markdown !== markdown ||
@@ -598,13 +593,11 @@ export function useEditorView(
     setSourceMode,
     changeSourcePreference,
     tabsRef,
-    sourceRegistry,
-    editorRegistry,
-    tabMirror,
+    tabRuntime,
+    runtimeOf,
     syncEditor,
     resolveContent,
     saveRecoverySnapshot,
-    positions,
     setSearchOpen,
   ]);
 
@@ -612,11 +605,12 @@ export function useEditorView(
     (id: string, text: string) => {
       const activeId = id;
       if (activeId) {
-        contentVersions.current[activeId] = (contentVersions.current[activeId] ?? 0) + 1;
+        runtimeOf(activeId).contentVersion =
+          (tabRuntime.current[activeId]?.contentVersion ?? 0) + 1;
         const prev = tabsRef.current.find((t) => t.id === activeId);
         const dirty = prev ? text !== prev.savedContent : true;
-        tabMirror.current[activeId] = {
-          ...(tabMirror.current[activeId] ?? {
+        runtimeOf(activeId).mirror = {
+          ...(tabRuntime.current[activeId]?.mirror ?? {
             markdown: text,
             outline: [],
             stats: { chars: 0, words: 0, lines: 1 },
@@ -640,9 +634,9 @@ export function useEditorView(
       }
     },
     [
-      contentVersions,
+      tabRuntime,
+      runtimeOf,
       tabsRef,
-      tabMirror,
       prepareCurrentImages,
       scheduleAutoSave,
       saveRecoverySnapshot,
@@ -656,7 +650,7 @@ export function useEditorView(
     (pos: number) => {
       const { activeId: id, sourceMode: source } = currentView.current;
       if (source) {
-        const input = id ? sourceRegistry.current[id] : null;
+        const input = id ? tabRuntime.current[id]?.sourceInput : null;
         if (!input?.isConnected || pos < 0 || pos > input.value.length) return;
         const top = measureSourceText(input, input.value, (at) => Math.max(0, at(pos) - 24));
         input.focus({ preventScroll: true });
@@ -669,7 +663,7 @@ export function useEditorView(
         });
         return;
       }
-      const editor = id ? editorRegistry.current[id] : null;
+      const editor = id ? tabRuntime.current[id]?.editor : null;
       if (!editor) return;
       editor.action((ctx) => {
         const view = ctx.get(editorViewCtx);
@@ -684,7 +678,7 @@ export function useEditorView(
           if (
             currentView.current.activeId !== id ||
             currentView.current.sourceMode ||
-            editorRegistry.current[id!] !== editor
+            tabRuntime.current[id!]?.editor !== editor
           )
             return;
           const dom = view.nodeDOM(pos);
@@ -704,7 +698,7 @@ export function useEditorView(
         });
       });
     },
-    [currentView, sourceRegistry, editorRegistry],
+    [currentView, tabRuntime],
   );
 
   return {

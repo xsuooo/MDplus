@@ -65,14 +65,8 @@ export function useDocumentSave(
   const {
     tabsRef,
     saveGenerations,
-    saveTimers,
-    saveQueues,
-    contentVersions,
-    tabMirror,
-    positions,
-    sourceRewrites,
-    editorRegistry,
-    diskSync,
+    tabRuntime,
+    runtimeOf,
     isAutoSavePaused,
     resumeAutoSave,
     activeId,
@@ -95,8 +89,8 @@ export function useDocumentSave(
     (tabId: string, migratedContent: string, originalContent: string): void => {
       if (migratedContent === originalContent) return;
       syncEditor(tabId, migratedContent, false);
-      const saved = positions.current[tabId];
-      const references = sourceRewrites.current[tabId] ?? [];
+      const saved = tabRuntime.current[tabId]?.position;
+      const references = tabRuntime.current[tabId]?.sourceRewrites ?? [];
       if (saved?.source) {
         saved.source = rebaseSourcePlace(
           saved.source,
@@ -114,11 +108,11 @@ export function useDocumentSave(
           references,
         );
         exchange.markdown = migratedContent;
-        const editor = editorRegistry.current[tabId];
+        const editor = tabRuntime.current[tabId]?.editor;
         if (editor) exchange.rendered.doc = renderedPlace(editor).doc;
       }
-      tabMirror.current[tabId] = {
-        ...(tabMirror.current[tabId] ?? {
+      runtimeOf(tabId).mirror = {
+        ...(tabRuntime.current[tabId]?.mirror ?? {
           markdown: migratedContent,
           outline: [],
           stats: computeStats(migratedContent),
@@ -129,7 +123,7 @@ export function useDocumentSave(
         stats: computeStats(migratedContent),
       };
     },
-    [editorRegistry, positions, sourceRewrites, syncEditor, tabMirror],
+    [tabRuntime, runtimeOf, syncEditor],
   );
 
   const handleSaveAsFor = useCallback(
@@ -174,10 +168,13 @@ export function useDocumentSave(
           return false;
         if (!isCurrentSave()) return false;
         const content = resolveContent(latestBeforeWrite);
-        const contentGeneration = contentVersions.current[tab.id] ?? 0;
+        const contentGeneration = tabRuntime.current[tab.id]?.contentVersion ?? 0;
         const imagesReady = await prepareCurrentImages(tab.id);
         if (!isCurrentSave()) return false;
-        if (!imagesReady || (contentVersions.current[tab.id] ?? 0) !== contentGeneration) {
+        if (
+          !imagesReady ||
+          (tabRuntime.current[tab.id]?.contentVersion ?? 0) !== contentGeneration
+        ) {
           await showMessage(
             '图片准备期间文稿已变化，本次另存为已取消。编辑内容仍保留，请重试。',
             'info',
@@ -217,7 +214,7 @@ export function useDocumentSave(
         );
         if (!isCurrentSave()) return false;
         const contentChangedDuringWrite =
-          (contentVersions.current[tab.id] ?? 0) !== contentGeneration;
+          (tabRuntime.current[tab.id]?.contentVersion ?? 0) !== contentGeneration;
         const latestContent = resolveContent(latestBeforeWrite);
         if (
           contentChangedDuringWrite &&
@@ -226,8 +223,8 @@ export function useDocumentSave(
         ) {
           // The snapshot exists, but adopting its path would rebase a newer draft's relative images.
           saveGenerations.current[tab.id] = (saveGenerations.current[tab.id] ?? 0) + 1;
-          clearTimeout(saveTimers.current[tab.id]);
-          delete saveTimers.current[tab.id];
+          clearTimeout(tabRuntime.current[tab.id]?.saveTimer);
+          delete tabRuntime.current[tab.id]?.saveTimer;
           pauseAutoSave(tab.id, null);
           updateTab(tab.id, { dirty: true });
           saveRecoverySnapshot(tabsRef.current.find((candidate) => candidate.id === tab.id)!);
@@ -239,7 +236,7 @@ export function useDocumentSave(
         }
         if (!contentChangedDuringWrite) {
           commitImageMigration(migration);
-          sourceRewrites.current[tab.id] = [
+          runtimeOf(tab.id).sourceRewrites = [
             ...(migration.historyReferences ?? []),
             ...(migration.references ?? []),
           ];
@@ -287,15 +284,14 @@ export function useDocumentSave(
       saveGenerations,
       tabsRef,
       resolveContent,
-      contentVersions,
+      tabRuntime,
+      runtimeOf,
       prepareCurrentImages,
       updateTab,
       resumeAutoSave,
       setRecentFiles,
-      saveTimers,
       pauseAutoSave,
       saveRecoverySnapshot,
-      sourceRewrites,
       applyMigratedContent,
       deleteRecoverySnapshot,
     ],
@@ -313,7 +309,7 @@ export function useDocumentSave(
         tabsRef.current.some((tab) => tab.id === id);
 
       if (!isCurrentSave()) return false;
-      const editor = editorRegistry.current[id];
+      const editor = tabRuntime.current[id]?.editor;
       if (editor) flushEditorUpdate(editor);
       const tab = tabsRef.current.find((candidate) => candidate.id === id);
       if (!tab || (!manual && isAutoSavePaused(id))) return false;
@@ -328,12 +324,12 @@ export function useDocumentSave(
       try {
         const disk = await documentRevision(tab.path);
         const diskMtime = disk.mtime ?? 0;
-        const blockedMtime = diskSync.current[id]?.pausedMtime;
+        const blockedMtime = tabRuntime.current[id]?.disk?.pausedMtime;
         const hasBlockedExternalChange = diskMtime === blockedMtime;
         const hasExternalConflict = disk.revision !== tab.diskRevision || hasBlockedExternalChange;
         if (hasExternalConflict) {
           if (!manual) {
-            if (diskSync.current[id]?.pausedMtime !== diskMtime) {
+            if (tabRuntime.current[id]?.disk?.pausedMtime !== diskMtime) {
               pauseAutoSave(id, diskMtime);
               await showMessage(
                 `「${tab.title}」的磁盘版本已变化，自动保存已暂停。请点击工具栏「保存」确认，或另存为保留两份。`,
@@ -353,10 +349,10 @@ export function useDocumentSave(
 
         if (!isCurrentSave()) return false;
         const rawContent = resolveContent(tab);
-        const contentGeneration = contentVersions.current[id] ?? 0;
+        const contentGeneration = tabRuntime.current[id]?.contentVersion ?? 0;
         const imagesReady = await prepareCurrentImages(id);
         if (!isCurrentSave()) return false;
-        if (!imagesReady || (contentVersions.current[id] ?? 0) !== contentGeneration) {
+        if (!imagesReady || (tabRuntime.current[id]?.contentVersion ?? 0) !== contentGeneration) {
           if (manual)
             await showMessage(
               '图片准备期间文稿已变化，本次保存已取消。编辑内容仍保留，请重试。',
@@ -382,17 +378,18 @@ export function useDocumentSave(
           writeState = state;
         });
         if (!isCurrentSave()) return false;
-        const contentChangedDuringWrite = (contentVersions.current[id] ?? 0) !== contentGeneration;
+        const contentChangedDuringWrite =
+          (tabRuntime.current[id]?.contentVersion ?? 0) !== contentGeneration;
         if (!contentChangedDuringWrite) {
           commitImageMigration(migration);
-          sourceRewrites.current[id] = [
+          runtimeOf(id).sourceRewrites = [
             ...(migration.historyReferences ?? []),
             ...(migration.references ?? []),
           ];
           applyMigratedContent(id, content, rawContent);
         }
         const latest = contentChangedDuringWrite
-          ? (tabMirror.current[id]?.markdown ?? rawContent)
+          ? (tabRuntime.current[id]?.mirror?.markdown ?? rawContent)
           : content;
         updateTab(id, {
           dirty: latest !== content,
@@ -426,19 +423,16 @@ export function useDocumentSave(
     },
     [
       saveGenerations,
-      editorRegistry,
+      tabRuntime,
+      runtimeOf,
       tabsRef,
-      diskSync,
       isAutoSavePaused,
       resumeAutoSave,
       handleSaveAsFor,
       resolveContent,
-      contentVersions,
       prepareCurrentImages,
-      tabMirror,
       updateTab,
       pauseAutoSave,
-      sourceRewrites,
       applyMigratedContent,
       deleteRecoverySnapshot,
       saveRecoverySnapshot,
@@ -447,35 +441,35 @@ export function useDocumentSave(
 
   const doSave = useCallback(
     (id: string, { manual = false, saveAs = false } = {}): Promise<boolean> => {
-      const timer = saveTimers.current[id];
+      const timer = tabRuntime.current[id]?.saveTimer;
       if (timer) clearTimeout(timer);
-      delete saveTimers.current[id];
-      const previous = saveQueues.current[id] ?? Promise.resolve(true);
+      delete tabRuntime.current[id]?.saveTimer;
+      const previous = tabRuntime.current[id]?.saveQueue ?? Promise.resolve(true);
       const generation = saveGenerations.current[id] ?? 0;
       setSavingId(id);
       const next = previous
         .catch(() => false)
         .then(() => performSave(id, manual, generation, saveAs));
-      saveQueues.current[id] = next;
+      runtimeOf(id).saveQueue = next;
       const finish = () => {
-        if (saveQueues.current[id] === next) {
-          delete saveQueues.current[id];
+        if (tabRuntime.current[id]?.saveQueue === next) {
+          delete tabRuntime.current[id]?.saveQueue;
           setSavingId((current) => (current === id ? null : current));
         }
       };
       void next.then(finish, finish);
       return next;
     },
-    [performSave, saveGenerations, saveQueues, saveTimers],
+    [performSave, saveGenerations, tabRuntime, runtimeOf],
   );
 
   const scheduleAutoSave = useCallback(
     (id: string) => {
-      const timer = saveTimers.current[id];
+      const timer = tabRuntime.current[id]?.saveTimer;
       if (timer) clearTimeout(timer);
-      saveTimers.current[id] = setTimeout(() => void doSave(id), AUTO_SAVE_MS);
+      runtimeOf(id).saveTimer = setTimeout(() => void doSave(id), AUTO_SAVE_MS);
     },
-    [doSave, saveTimers],
+    [doSave, tabRuntime, runtimeOf],
   );
 
   const handleSave = useCallback(async () => {

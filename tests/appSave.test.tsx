@@ -747,10 +747,10 @@ describe('App initialization preserves authoritative source', () => {
     expect(tabState().dirty).toBe(true);
     expect(tabState().stats).toEqual(computeStats(raw));
     const mirrorRef = mocks.refs.find((ref) => {
-      const value = (ref.current as Record<string, EditorUpdate> | null)?.tab;
+      const value = (ref.current as Record<string, { mirror?: EditorUpdate }> | null)?.tab?.mirror;
       return value && Array.isArray(value.outline) && typeof value.canUndo === 'boolean';
     });
-    expect((mirrorRef!.current as Record<string, EditorUpdate>).tab).toEqual({
+    expect((mirrorRef!.current as Record<string, { mirror?: EditorUpdate }>).tab.mirror).toEqual({
       ...initial,
       markdown: raw,
       stats: computeStats(raw),

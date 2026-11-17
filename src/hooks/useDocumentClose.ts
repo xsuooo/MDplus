@@ -19,7 +19,7 @@ export function useDocumentClose(
   onClosing: () => void,
   sessionController?: WindowSessionController,
 ) {
-  const { tabsRef, contentVersions, editorRegistry, resolveContent, removeTab } = workspace;
+  const { tabsRef, tabRuntime, resolveContent, removeTab } = workspace;
   const { deleteRecoverySnapshot, saveRecoverySnapshot } = recovery;
   const [pendingCloseTab, setPendingCloseState] = useState<Tab | null>(null);
   const [closeBusy, setCloseBusy] = useState(false);
@@ -35,10 +35,10 @@ export function useDocumentClose(
   const pendingWindowClose = useRef(false);
   const flushEditor = useCallback(
     (id: string) => {
-      const editor = editorRegistry.current[id];
+      const editor = tabRuntime.current[id]?.editor;
       if (editor) flushEditorUpdate(editor);
     },
-    [editorRegistry],
+    [tabRuntime],
   );
 
   const closeTabRequest = useCallback(
@@ -54,13 +54,13 @@ export function useDocumentClose(
         saveRecoverySnapshot(tab);
         setPendingCloseTab(tab);
       } else {
-        const generation = contentVersions.current[id];
+        const generation = tabRuntime.current[id]?.contentVersion;
         void deleteRecoverySnapshot(id).then((clean) => {
           if (closeGeneration.current !== request) return;
           const current = tabsRef.current.find((item) => item.id === id);
           if (
             current &&
-            (contentVersions.current[id] !== generation ||
+            (tabRuntime.current[id]?.contentVersion !== generation ||
               needsDocumentProtection(current, resolveContent(current)))
           ) {
             saveRecoverySnapshot(current);
@@ -76,7 +76,7 @@ export function useDocumentClose(
       tabsRef,
       flushEditor,
       setPendingCloseTab,
-      contentVersions,
+      tabRuntime,
       deleteRecoverySnapshot,
       removeTab,
       saveRecoverySnapshot,
@@ -176,7 +176,7 @@ export function useDocumentClose(
             return;
           if (pendingWindowClose.current) sessionController?.updateClosingTab(savedTab);
         }
-        const closingGeneration = contentVersions.current[closedId];
+        const closingGeneration = tabRuntime.current[closedId]?.contentVersion;
         const clean = await deleteRecoverySnapshot(closedId);
         const current = tabsRef.current.find((tab) => tab.id === closedId);
         if (!isCurrent()) {
@@ -189,7 +189,7 @@ export function useDocumentClose(
           return;
         }
         if (
-          contentVersions.current[closedId] !== closingGeneration ||
+          tabRuntime.current[closedId]?.contentVersion !== closingGeneration ||
           (action === 'save' &&
             current &&
             needsDocumentProtection(current, resolveContent(current)))
@@ -223,7 +223,7 @@ export function useDocumentClose(
     },
     [
       setPendingCloseTab,
-      contentVersions,
+      tabRuntime,
       deleteRecoverySnapshot,
       tabsRef,
       removeTab,
