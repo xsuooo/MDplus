@@ -1,6 +1,6 @@
 # Stage 6: continuous native acceptance and deployment readiness
 
-> Historical execution record. Current status: [README](../README.md); current delivery/rollback: [Windows runbook](ops/windows-delivery.md). Conclusions below describe this report's original run.
+> Historical execution record. Current status: [README](../../README.md); current delivery/rollback: [Windows runbook](../ops/windows-delivery.md). Conclusions below describe this report's original run.
 
 Final candidate: `0.2.5-phase6.1` / `phase6-20261030.1`.
 The phase5.8 candidate was rejected during exported-PDF inspection: consecutive

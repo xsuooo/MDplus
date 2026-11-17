@@ -1,6 +1,6 @@
 # Global font host update
 
-> Historical execution record. Current status: [README](../README.md); current delivery/rollback: [Windows runbook](ops/windows-delivery.md). Conclusions below describe this report's original run.
+> Historical execution record. Current status: [README](../../README.md); current delivery/rollback: [Windows runbook](../ops/windows-delivery.md). Conclusions below describe this report's original run.
 
 Version: `0.2.5-phase6.2`
 Build: `global-font-20261031.1`

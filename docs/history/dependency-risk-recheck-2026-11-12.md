@@ -17,7 +17,7 @@
 
 ## 当前源码与锁定版本
 
-已读取 [Cargo.toml](../src-tauri/Cargo.toml#L24-L53) 和完整 [Cargo.lock](../src-tauri/Cargo.lock)。源码声明 Tauri、tauri-build、single-instance 为 2，没有直接声明 Tokio 或 urlpattern；源码声明范围不等于已锁定版本。
+已读取 [Cargo.toml](../../src-tauri/Cargo.toml#L24-L53) 和完整 [Cargo.lock](../../src-tauri/Cargo.lock)。源码声明 Tauri、tauri-build、single-instance 为 2，没有直接声明 Tokio 或 urlpattern；源码声明范围不等于已锁定版本。
 
 | 依赖组             | 当前锁定版本                                                                                                    |
 | ------------------ | --------------------------------------------------------------------------------------------------------------- |
@@ -61,7 +61,7 @@ Tokio 公告列出的函数为 AsyncFd::new、with_interest（自 0.3.2 起）�
 
 1. **Tokio 在 Windows 使用，但此公告针对 Unix AsyncFd。** 已读锁定 1.53.1 的 io 模块及 cfg_net_unix 宏；实际条件为 cfg(all(unix, feature = "net"))。常规 x86_64-pc-windows-msvc 构建不会编译该模块。这个结论只排除指定函数，不排除 Tokio 的其他 Windows 缺陷，也不适用于将来 Linux 发行。[官方锁定版本条件编译源码](https://raw.githubusercontent.com/tokio-rs/tokio/tokio-1.53.1/tokio/src/macros/cfg.rs)
 2. **glib 与 proc-macro-error 的已查路径属于 GTK 链。** Tauri 2.11.5 在 Linux/BSD target 区域引入 GTK/WebKit；缓存的 GTK 0.18.2 要求 glib 0.18 和 gtk3-macros 0.18，gtk3-macros 0.18.2 再要求 proc-macro-error 1.0。这支持旧笔记对这条链的 Windows 排除判断，不能宣称 glib 本身仅支持 Unix，或证明所有未来依赖路径都不可达。[Tauri 锁定版本原文](https://raw.githubusercontent.com/tauri-apps/tauri/tauri-v2.11.5/crates/tauri/Cargo.toml)；[缓存 GTK 发行源码](D:/Dev/rust/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk-0.18.2/Cargo.toml#L83-L87)；[缓存宏发行源码](D:/Dev/rust/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk3-macros-0.18.2/Cargo.toml#L55-L56)
-3. **zbus 的排除依据是调用方 target 条件，不是 D-Bus 天然不能出现在 Windows。** single-instance 2.4.3 仅在 cfg(target_os = "linux") 依赖 zbus；Windows 使用另一套实现。本次已查插件路径不进入 Windows。锁文件中 zbus 的 Windows 相关依赖也说明不能靠包名做全局平台判断。[插件锁定版本原文](https://raw.githubusercontent.com/tauri-apps/plugins-workspace/single-instance-v2.4.3/plugins/single-instance/Cargo.toml)；[锁文件](../src-tauri/Cargo.lock)
+3. **zbus 的排除依据是调用方 target 条件，不是 D-Bus 天然不能出现在 Windows。** single-instance 2.4.3 仅在 cfg(target_os = "linux") 依赖 zbus；Windows 使用另一套实现。本次已查插件路径不进入 Windows。锁文件中 zbus 的 Windows 相关依赖也说明不能靠包名做全局平台判断。[插件锁定版本原文](https://raw.githubusercontent.com/tauri-apps/plugins-workspace/single-instance-v2.4.3/plugins/single-instance/Cargo.toml)；[锁文件](../../src-tauri/Cargo.lock)
 4. **unic 不能按平台排除。** 当前 tauri-utils 对 urlpattern 的依赖没有 Unix target gate，urlpattern 对 unic-ucd-ident 的依赖也没有；五个 unic 包继续属于 Windows 相关的构建/运行依赖维护风险。[缓存 tauri-utils 原文](D:/Dev/rust/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-utils-2.9.3/Cargo.toml#L202-L203)；[缓存 urlpattern 原文](D:/Dev/rust/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/urlpattern-0.3.0/Cargo.toml#L41-L43)
 
 本次没有重算完整 Windows normal/build 依赖图、feature 合并或所有调用点，没有复现未定义行为，也没有运行原生/浏览器回归。以上为锁定版本源码静态证据及旧笔记路径复核，不是新的动态“不可利用”证明。即使发行范围保持 Windows，也不能用平台排除解释为锁文件已修复。
@@ -119,7 +119,7 @@ cargo tree --manifest-path src-tauri/Cargo.toml --locked --offline --target all 
 git -C .audit/triage-2-rustsec-28d4819b-aeb7-4e58-941d-159c4b8525b5 rev-parse HEAD
 ```
 
-[本地审计 JSON](../.audit/triage-2-rustsec-28d4819b-aeb7-4e58-941d-159c4b8525b5-audit.json)来自 --no-fetch 重读，数据库提交/时间字段为 null；数据库身份由首次成功获取结果及独立 git rev-parse 确认，不手改原始 JSON。
+[本地审计 JSON](../../.audit/triage-2-rustsec-28d4819b-aeb7-4e58-941d-159c4b8525b5-audit.json)来自 --no-fetch 重读，数据库提交/时间字段为 null；数据库身份由首次成功获取结果及独立 git rev-parse 确认，不手改原始 JSON。
 
 主诊断建议最小执行边界是先单独验证 Tokio 同 minor 补丁，再单独验证仅更新 tauri-utils 至正式去 unic 链是否可行；不预设必须升级 Tauri 核心或插件，不强行覆盖 zbus 6。Windows-only 范围和 2026-12-03 复查点已经在票面给定，不重复询问这两个前提。实际升级和正式 Agent Brief 均等待维护者确认分流，研究不构成实施授权。
 

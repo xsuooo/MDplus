@@ -8,7 +8,7 @@
 - 上轮原有 37 个已修改/未跟踪源文件及补丁已保留在本地 `.audit/completion-20261102/baseline/`；不重置、不覆盖用户已有工作。
 - Chief 负责前端接线、搜索、反馈和整体验收；架构线负责原生文件命令及随后图片缓存；质检线负责检查门禁、源码摘要及独立审查。
 - 只构建隔离候选，不提交、推送、公开发布或自动覆盖本机安装。用户文档和正常配置不作为测试材料。
-- 新 IPC 的唯一规范是 [file_contract.json](../src-tauri/src/file_contract.json)。文稿不会在条件写失败后回退到旧的无条件写入。
+- 新 IPC 的唯一规范是 [file_contract.json](../../src-tauri/src/file_contract.json)。文稿不会在条件写失败后回退到旧的无条件写入。
 
 ## 验收目标
 

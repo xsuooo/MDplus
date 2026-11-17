@@ -1,6 +1,6 @@
 # Stage 5: theme and portable export consistency
 
-> Historical execution record. Current status: [README](../README.md); current delivery/rollback: [Windows runbook](ops/windows-delivery.md). Conclusions below describe this report's original run.
+> Historical execution record. Current status: [README](../../README.md); current delivery/rollback: [Windows runbook](../ops/windows-delivery.md). Conclusions below describe this report's original run.
 
 Candidate: `0.2.5-phase5.8`\
 Build identity: `phase5-20261030.8`
