@@ -1,6 +1,4 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
-import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { makeId } from '../hooks/useWorkspace';
 import { showMessage } from '../lib/dialog';
@@ -13,12 +11,13 @@ import {
 } from '../lib/imageOps';
 import { pathKey } from '../lib/paths';
 import type { SessionDocument } from '../lib/documentSession';
-import { getRecentFiles, pushRecentFile, removeRecentFile } from '../lib/store';
+import { pushRecentFile, removeRecentFile } from '../lib/store';
 import { getTemplate } from '../lib/templates';
-import { isDroppedImagePath } from '../lib/imageDrop';
-import type { RecentFile, Tab } from '../lib/types';
+import type { Tab } from '../lib/types';
 import { waitForWindowReady } from '../services/windowPersistence';
 
+import { useNativeOpenRequests } from './useNativeOpenRequests';
+import { useRecentFiles } from './useRecentFiles';
 import type { Workspace } from './useWorkspace';
 import { useSessionPersistence } from './useSessionPersistence';
 
@@ -31,6 +30,7 @@ interface OpenOptions {
   restore?: SessionDocument;
 }
 
+/** Opening documents: the open pipeline, the file picker, new documents and startup session restore. */
 export function useDocumentFiles(workspace: Workspace, options: DocumentFileOptions = {}) {
   // Paths whose open is in flight, so a second request for the same file is dropped.
   const openingPaths = useRef(new Set<string>());
@@ -46,8 +46,8 @@ export function useDocumentFiles(workspace: Workspace, options: DocumentFileOpti
     getFailedSessionDocuments,
     getSavedSession,
   } = persistence;
-  const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
-  const [recentFilesReady, setRecentFilesReady] = useState(false);
+  const { recentFiles, recentFilesReady, setRecentFiles, refreshRecentFiles, handleRemoveRecent } =
+    useRecentFiles();
   const [fileDialogBusy, setFileDialogBusy] = useState(false);
   const [startupResolved, setStartupResolved] = useState(() => !isTauri());
   const startupInitStarted = useRef(false);
@@ -56,36 +56,10 @@ export function useDocumentFiles(workspace: Workspace, options: DocumentFileOpti
   const alive = useRef(true);
   const [sessionRestoreBusy, setSessionRestoreBusy] = useState(() => isTauri());
   const retrying = useRef<Promise<void> | null>(null);
-  const imageDrop = useRef(options.onImageDrop);
-  imageDrop.current = options.onImageDrop;
   useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
-    };
-  }, []);
-  /* ---------- 最近打开初始化 ---------- */
-  useEffect(() => {
-    let disposed = false;
-    void getRecentFiles()
-      .then((files) => {
-        if (!disposed) setRecentFiles(files);
-      })
-      .catch((error) => {
-        console.warn('最近文件读取不可用', error);
-        void waitForWindowReady().then(() => {
-          if (!disposed)
-            void showMessage(
-              `无法读取最近列表：${errorMessage(error)}。文稿文件未受影响。`,
-              'error',
-            );
-        });
-      })
-      .finally(() => {
-        if (!disposed) setRecentFilesReady(true);
-      });
-    return () => {
-      disposed = true;
     };
   }, []);
 
@@ -185,10 +159,7 @@ export function useDocumentFiles(workspace: Workspace, options: DocumentFileOpti
           }
           // 最近文件持久化不应阻塞文档标签创建或启动窗口显示。
           void pushRecentFile(canonicalPath, basename(canonicalPath), path)
-            .then(async () => {
-              const files = await getRecentFiles();
-              if (alive.current) setRecentFiles(files);
-            })
+            .then(refreshRecentFiles)
             .catch(async (error) => {
               console.warn('最近文件写入不可用', error);
               await waitForWindowReady();
@@ -214,8 +185,7 @@ export function useDocumentFiles(workspace: Workspace, options: DocumentFileOpti
           if (missing) {
             try {
               await removeRecentFile(path);
-              const recent = await getRecentFiles();
-              if (alive.current) setRecentFiles(recent);
+              await refreshRecentFiles();
               recentNote = '如果该文件来自最近列表，已将失效记录移除。';
             } catch (recentError) {
               console.warn('最近文件清理暂不可用', recentError);
@@ -247,6 +217,7 @@ export function useDocumentFiles(workspace: Workspace, options: DocumentFileOpti
       adoptSessionPath,
       installSessionPlace,
       recordSessionFailure,
+      refreshRecentFiles,
       resolveSessionFailure,
       selectTab,
       tabsRef,
@@ -409,62 +380,6 @@ export function useDocumentFiles(workspace: Workspace, options: DocumentFileOpti
     tabsRef,
   ]);
 
-  /* ---------- 监听单实例传递的文件 ---------- */
-  useEffect(() => {
-    if (!isTauri()) return;
-
-    let unlisten: (() => void) | undefined;
-    let disposed = false;
-    let drainQueue = Promise.resolve();
-    const drainPendingFiles = async () => {
-      if (startupWork.current) await startupWork.current;
-      const openFiles = await invoke<string[]>('take_pending_open_files');
-      if (Array.isArray(openFiles) && openFiles.length > 0) {
-        // 打开新传递的文件
-        for (const filePath of openFiles) {
-          await openDocumentPath(filePath, { silent: true });
-        }
-      }
-    };
-    const enqueueDrain = () => {
-      drainQueue = drainQueue
-        .then(drainPendingFiles)
-        .catch((err) => console.error('读取单实例文件队列失败', err));
-    };
-
-    void listen('open-files', enqueueDrain)
-      .then((dispose) => {
-        if (disposed) {
-          dispose();
-          return;
-        }
-        unlisten = dispose;
-        // 监听注册前到达的事件会留在后端队列,注册完成后主动补取一次。
-        enqueueDrain();
-      })
-      .catch((err) => {
-        console.error('注册单实例文件监听失败', err);
-      });
-
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, [openDocumentPath]);
-
-  const handleRemoveRecent = useCallback(async (path: string) => {
-    try {
-      await removeRecentFile(path);
-      if (alive.current) setRecentFiles(await getRecentFiles());
-    } catch (error) {
-      if (alive.current)
-        await showMessage(
-          `最近列表更新失败，记录未确认移除：${errorMessage(error)}。请重试。`,
-          'error',
-        );
-    }
-  }, []);
-
   const createDocument = useCallback(
     (kind: 'blank' | 'basic') => {
       const content = getTemplate(kind);
@@ -477,52 +392,7 @@ export function useDocumentFiles(workspace: Workspace, options: DocumentFileOpti
     [addTab, tabsRef],
   );
 
-  /* ---------- 拖拽打开 ---------- */
-  useEffect(() => {
-    if (!isTauri()) return;
-    let unlisten: (() => void) | undefined;
-    let disposed = false;
-    void (async () => {
-      try {
-        unlisten = await getCurrentWebview().onDragDropEvent((event) => {
-          if (event.payload.type === 'over') {
-            document.body.classList.add('dragging');
-          } else if (event.payload.type === 'drop') {
-            document.body.classList.remove('dragging');
-            const md = event.payload.paths.filter((p) => /\.(md|markdown)$/i.test(p));
-            const images = event.payload.paths.filter(isDroppedImagePath);
-            const ignored =
-              event.payload.paths.length - md.length - (imageDrop.current ? images.length : 0);
-            const position = { x: event.payload.position.x, y: event.payload.position.y };
-            void (async () => {
-              if (images.length && imageDrop.current) await imageDrop.current(images, position);
-              for (const path of md) await openFileFromPath(path);
-              if (ignored)
-                await showMessage(
-                  imageDrop.current
-                    ? `已忽略 ${ignored} 个不支持的路径。支持 .md、.markdown、.png、.jpg 和 .jpeg 文件。`
-                    : `已忽略 ${ignored} 个非 Markdown 路径。仅支持 .md 和 .markdown 文件。`,
-                  'info',
-                );
-            })().catch((error) => console.warn('拖放处理失败', error));
-          } else if (event.payload.type === 'leave') {
-            document.body.classList.remove('dragging');
-          }
-        });
-        if (disposed) {
-          unlisten();
-          unlisten = undefined;
-        }
-      } catch (err) {
-        console.warn('拖拽监听不可用', err);
-      }
-    })();
-    return () => {
-      disposed = true;
-      unlisten?.();
-      document.body.classList.remove('dragging');
-    };
-  }, [openFileFromPath]);
+  useNativeOpenRequests(openDocumentPath, startupWork, options.onImageDrop);
 
   return {
     recentFiles,
