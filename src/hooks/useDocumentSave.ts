@@ -228,7 +228,7 @@ export function useDocumentSave(
           saveGenerations.current[tab.id] = (saveGenerations.current[tab.id] ?? 0) + 1;
           clearTimeout(saveTimers.current[tab.id]);
           delete saveTimers.current[tab.id];
-          pauseAutoSave(tab.id, -1);
+          pauseAutoSave(tab.id, null);
           updateTab(tab.id, { dirty: true });
           saveRecoverySnapshot(tabsRef.current.find((candidate) => candidate.id === tab.id)!);
           await showMessage(
@@ -331,8 +331,7 @@ export function useDocumentSave(
         const disk = await documentRevision(tab.path);
         const diskMtime = disk.mtime ?? 0;
         const blockedMtime = autosavePausedMtime.current[id];
-        const hasBlockedExternalChange =
-          blockedMtime !== undefined && blockedMtime >= 0 && diskMtime === blockedMtime;
+        const hasBlockedExternalChange = diskMtime === blockedMtime;
         const hasExternalConflict = disk.revision !== tab.diskRevision || hasBlockedExternalChange;
         if (hasExternalConflict) {
           if (!manual) {
@@ -418,7 +417,7 @@ export function useDocumentSave(
       } catch (err) {
         if (!isCurrentSave()) return false;
         console.error('保存失败', err);
-        pauseAutoSave(id, -1);
+        pauseAutoSave(id, null);
         updateTab(id, { dirty: true });
         const latest = tabsRef.current.find((item) => item.id === id);
         if (latest) saveRecoverySnapshot(latest);
@@ -449,7 +448,7 @@ export function useDocumentSave(
   );
 
   const doSave = useCallback(
-    (id: string, manual = false, saveAs = false): Promise<boolean> => {
+    (id: string, { manual = false, saveAs = false } = {}): Promise<boolean> => {
       const timer = saveTimers.current[id];
       if (timer) clearTimeout(timer);
       delete saveTimers.current[id];
@@ -482,12 +481,12 @@ export function useDocumentSave(
   );
 
   const handleSave = useCallback(async () => {
-    if (activeId) await doSave(activeId, true);
+    if (activeId) await doSave(activeId, { manual: true });
   }, [activeId, doSave]);
 
   const handleSaveAs = useCallback(async () => {
     if (!activeTab) return;
-    await doSave(activeTab.id, true, true);
+    await doSave(activeTab.id, { manual: true, saveAs: true });
   }, [activeTab, doSave]);
 
   return { doSave, scheduleAutoSave, handleSave, handleSaveAs, savingId };

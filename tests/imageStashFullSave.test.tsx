@@ -121,7 +121,7 @@ describe('saving and protecting a document while the image stash is full', () =>
 
     let saved = false;
     await act(async () => {
-      saved = await hook.result.current.save.doSave(id, true);
+      saved = await hook.result.current.save.doSave(id, { manual: true });
     });
 
     expect(mocks.message.mock.calls).toEqual([]);
@@ -164,7 +164,7 @@ describe('saving and protecting a document while the image stash is full', () =>
 
     let saved = false;
     await act(async () => {
-      saved = await hook.result.current.save.doSave(id, true, true);
+      saved = await hook.result.current.save.doSave(id, { manual: true, saveAs: true });
     });
 
     expect(mocks.message.mock.calls).toEqual([]);

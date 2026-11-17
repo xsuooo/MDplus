@@ -1,3 +1,4 @@
+import { serialQueue } from './serialQueue';
 import { RECOVERY_DELAY_MS } from '../config/constants';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import {
@@ -44,7 +45,7 @@ interface Journal {
   generation: number;
   timer?: ReturnType<typeof setTimeout>;
   pending?: PendingCapture;
-  tail: Promise<unknown>;
+  enqueue: ReturnType<typeof serialQueue>;
   cached: Set<string>;
 }
 function releasePendingCapture(entry: Journal): void {
@@ -59,15 +60,13 @@ const journals = new Map<string, Journal>();
 function journal(id: string): Journal {
   let value = journals.get(id);
   if (!value) {
-    value = { generation: 0, tail: Promise.resolve(), cached: new Set() };
+    value = { generation: 0, enqueue: serialQueue(), cached: new Set() };
     journals.set(id, value);
   }
   return value;
 }
 function enqueue<T>(entry: Journal, task: () => Promise<T>): Promise<T> {
-  const operation = entry.tail.catch(() => {}).then(task);
-  entry.tail = operation;
-  return operation;
+  return entry.enqueue(task);
 }
 
 function imageKey(image: { placeholder: string; filename: string }): string {

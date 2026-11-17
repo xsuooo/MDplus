@@ -49,7 +49,8 @@ export function useWorkspace(initialTabs: Tab[] = []) {
       }
     >
   >({});
-  const autosavePausedMtime = useRef<Record<string, number>>({});
+  // Key present = autosave paused; the value is the disk mtime that caused it, null when none is known.
+  const autosavePausedMtime = useRef<Record<string, number | null>>({});
   const detectedExternalStates = useRef<Record<string, { revision: string | null; mtime: number }>>(
     {},
   );
@@ -203,7 +204,7 @@ export function useWorkspace(initialTabs: Tab[] = []) {
     setTabs([...tabsRef.current]);
   }, []);
 
-  const pauseAutoSave = useCallback((id: string, mtime: number) => {
+  const pauseAutoSave = useCallback((id: string, mtime: number | null) => {
     autosavePausedMtime.current[id] = mtime;
     // Keep dirty tied to edits so later disk revisions are still polled, but do
     // not let close/recovery mistake the retained buffer for a backed-up copy.

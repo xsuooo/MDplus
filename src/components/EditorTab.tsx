@@ -44,33 +44,12 @@ export const EditorTab = memo(function EditorTab(props: EditorTabProps) {
   );
 });
 
-function EditorTabInner({
-  tabId,
-  initialContent,
-  active,
-  sourceMode,
-  onUpdate,
-  onActivity,
-  onRegister,
-  onImagePaste,
-  onMediaPreview,
-  onDocumentLink,
-}: EditorTabProps) {
-  const previewRef = useRef(onMediaPreview);
-  previewRef.current = onMediaPreview;
-  const onUpdateRef = useRef(onUpdate);
-  onUpdateRef.current = onUpdate;
-  const onActivityRef = useRef(onActivity);
-  onActivityRef.current = onActivity;
-  const onRegisterRef = useRef(onRegister);
-  onRegisterRef.current = onRegister;
-  const onImagePasteRef = useRef(onImagePaste);
-  onImagePasteRef.current = onImagePaste;
-  const linkRef = useRef(onDocumentLink);
-  linkRef.current = onDocumentLink;
-  const tabIdRef = useRef(tabId);
-  tabIdRef.current = tabId;
-  const initialContentRef = useRef(initialContent);
+function EditorTabInner(props: EditorTabProps) {
+  const { tabId, active, sourceMode } = props;
+  // The editor is created once; its callbacks read the newest props through this ref.
+  const latest = useRef(props);
+  latest.current = props;
+  const initialContentRef = useRef(props.initialContent);
   const initializedRef = useRef(false);
   const activity = useRef(0);
   useLayoutEffect(() => {
@@ -83,23 +62,24 @@ function EditorTabInner({
   const { get, loading } = useEditor(
     (root) =>
       createEditor(root, initialContentRef.current, {
-        onUpdate: (u, coalesced) => onUpdateRef.current(tabIdRef.current, u, false, coalesced),
-        onActivity: (u) => onActivityRef.current(tabIdRef.current, u),
+        onUpdate: (u, coalesced) =>
+          latest.current.onUpdate(latest.current.tabId, u, false, coalesced),
+        onActivity: (u) => latest.current.onActivity(latest.current.tabId, u),
         deferUpdates: true,
-        imagePreviewUrl: (url) => imagePreviewUrl(tabIdRef.current, url),
-        subscribeImageSources: (listener) => subscribeImageSources(tabIdRef.current, listener),
-        imageTokenForUrl: (url) => imageTokenForUrl(tabIdRef.current, url),
-        imageUrlForToken: (token) => imageUrlForToken(tabIdRef.current, token),
-        onImageReferencesChanged: () => imageReferencesChanged(tabIdRef.current),
-        onImagePasteSettled: (token) => settleImageInsertion(tabIdRef.current, token),
-        onMediaPreview: (media) => previewRef.current?.(media),
-        onDocumentLink: (href) => linkRef.current?.(tabIdRef.current, href),
+        imagePreviewUrl: (url) => imagePreviewUrl(latest.current.tabId, url),
+        subscribeImageSources: (listener) => subscribeImageSources(latest.current.tabId, listener),
+        imageTokenForUrl: (url) => imageTokenForUrl(latest.current.tabId, url),
+        imageUrlForToken: (token) => imageUrlForToken(latest.current.tabId, token),
+        onImageReferencesChanged: () => imageReferencesChanged(latest.current.tabId),
+        onImagePasteSettled: (token) => settleImageInsertion(latest.current.tabId, token),
+        onMediaPreview: (media) => latest.current.onMediaPreview?.(media),
+        onDocumentLink: (href) => latest.current.onDocumentLink?.(latest.current.tabId, href),
         captureImagePaste: () => {
           const current = activity.current;
           return () => activity.current === current;
         },
         onImagePaste: (file) =>
-          onImagePasteRef.current?.(tabIdRef.current, file) ??
+          latest.current.onImagePaste?.(latest.current.tabId, file) ??
           Promise.reject(new Error('图片处理不可用')),
       }),
     [],
@@ -107,8 +87,8 @@ function EditorTabInner({
   const editor = loading ? null : (get() ?? null);
 
   useEffect(() => {
-    onRegisterRef.current(tabId, editor);
-    return () => onRegisterRef.current(tabId, null);
+    latest.current.onRegister(tabId, editor);
+    return () => latest.current.onRegister(tabId, null);
   }, [editor, tabId]);
 
   useEffect(() => {
@@ -120,7 +100,7 @@ function EditorTabInner({
   useEffect(() => {
     if (!editor || initializedRef.current) return;
     initializedRef.current = true;
-    onUpdateRef.current(tabId, getCurrentState(editor, initialContentRef.current), true);
+    latest.current.onUpdate(tabId, getCurrentState(editor, initialContentRef.current), true);
   }, [editor, tabId]);
 
   return (
