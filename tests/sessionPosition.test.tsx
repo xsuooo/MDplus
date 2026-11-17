@@ -325,7 +325,7 @@ describe('serialized editor positions', () => {
     } as unknown as RecoveryController;
     const hook = renderHook(() => {
       const workspace = useWorkspace([initial(markdown)]);
-      useEditorView(workspace, recovery, vi.fn(), vi.fn(), false);
+      useEditorView(workspace, recovery, vi.fn(), vi.fn());
       return workspace;
     });
     await act(async () => {

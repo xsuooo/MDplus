@@ -1,24 +1,12 @@
 import type { Editor } from '@milkdown/kit/core';
-import { editorViewCtx } from '@milkdown/kit/core';
-import { TextSelection } from '@milkdown/prose/state';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { IMAGE_PREPARATION_MS, TAB_RENDER_MS } from '../config/constants';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { TAB_RENDER_MS } from '../config/constants';
 import { showMessage } from '../lib/dialog';
 import { needsDocumentProtection } from '../lib/documentProtection';
 import { redo, undo } from '../lib/editor';
 import { flushEditorUpdate } from '../lib/editorUpdates';
 import {
-  BODY_FONTS,
-  CODE_FONTS,
-  readBodyFont,
-  readCodeFont,
-  writeBodyFont,
-  writeCodeFont,
-  type BodyFont,
-  type CodeFont,
-} from '../lib/editorFont';
-import {
-  extractSourceOutline,
+  onUserInput,
   renderedPlace,
   restoreRendered,
   restoreSource,
@@ -27,28 +15,22 @@ import {
   sourcePlace,
   toRendered,
   toSource,
-  type Ast,
-  type RenderedPlace,
-  type SourcePlace,
 } from '../lib/position/editorPosition';
-import { measureSourceText } from '../lib/position/sourcePosition';
-import { readEditorWidth, writeEditorWidth, type EditorWidth } from '../lib/editorWidth';
 import { errorMessage } from '../lib/errors';
 import { saveImage, settleImageInsertion } from '../lib/imageOps';
-import { refreshMermaidTheme } from '../lib/mermaid';
 import { protectPastedImage } from '../lib/recovery';
 import { computeStats } from '../lib/stats';
-import type { EditorUpdate, OutlineItem } from '../lib/types';
+import type { EditorUpdate } from '../lib/types';
 
 import type { Workspace } from './useWorkspace';
 import type { RecoveryController } from './useRecovery';
 
+/** Editor content flow: edits into the mirror, rich/source switching and cursor position restore. */
 export function useEditorView(
   workspace: Workspace,
   recovery: RecoveryController,
   scheduleAutoSave: (id: string) => void,
   changeSourcePreference: (source: boolean) => void,
-  outlineOpen: boolean,
 ) {
   const {
     setTabs,
@@ -69,84 +51,7 @@ export function useEditorView(
   const tabRenderTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const enteringSource = useRef(false);
   const { prepareCurrentImages, saveRecoverySnapshot, deleteRecoverySnapshot } = recovery;
-  const [codeFont, setCodeFont] = useState(readCodeFont);
-  const [bodyFont, setBodyFont] = useState(readBodyFont);
-  const [editorWidth, setEditorWidth] = useState(readEditorWidth);
-  // Worker inputs follow committed state; discarded renders must not consume newer mirror content.
-  const sourceMarkdown = workspace.activeTab?.markdown ?? '';
-  const [sourceOutline, setSourceOutline] = useState<{
-    id: string;
-    markdown: string;
-    items: OutlineItem[];
-    error: boolean;
-  } | null>(null);
-  const sourceEditor = activeId ? tabRuntime.current[activeId]?.editor : null;
-  useEffect(() => {
-    if (!outlineOpen || !sourceMode || !activeId || !sourceEditor) return;
-    let worker: Worker | undefined;
-    const fail = (error: unknown) => {
-      worker?.terminate();
-      console.warn('源码目录读取失败', error);
-      setSourceOutline({ id: activeId, markdown: sourceMarkdown, items: [], error: true });
-    };
-    const timer = setTimeout(() => {
-      try {
-        worker = new Worker(new URL('../lib/sourceOutline.worker.ts', import.meta.url), {
-          type: 'module',
-        });
-        worker.onmessage = (event: MessageEvent<Ast>) => {
-          worker?.terminate();
-          try {
-            setSourceOutline({
-              id: activeId,
-              markdown: sourceMarkdown,
-              items: extractSourceOutline(sourceEditor, sourceMarkdown, event.data),
-              error: false,
-            });
-          } catch (error) {
-            fail(error);
-          }
-        };
-        worker.onerror = (event) => {
-          event.preventDefault();
-          fail(event.message);
-        };
-        worker.postMessage(sourceMarkdown);
-      } catch (error) {
-        fail(error);
-      }
-    }, IMAGE_PREPARATION_MS);
-    return () => {
-      clearTimeout(timer);
-      worker?.terminate();
-    };
-  }, [outlineOpen, sourceMode, activeId, sourceMarkdown, sourceEditor]);
-  const currentSourceOutline =
-    sourceOutline?.id === activeId && sourceOutline.markdown === sourceMarkdown
-      ? sourceOutline
-      : null;
-  const outlineItems = sourceMode
-    ? (currentSourceOutline?.items ?? [])
-    : activeId
-      ? (tabRuntime.current[activeId]?.mirror?.outline ?? [])
-      : [];
-  const outlineStatus =
-    sourceMode && outlineOpen && activeId
-      ? currentSourceOutline
-        ? currentSourceOutline.error
-          ? ('error' as const)
-          : undefined
-        : ('loading' as const)
-      : undefined;
-  useEffect(() => {
-    void refreshMermaidTheme();
-  }, [bodyFont]);
   const editorAreaRef = useRef<HTMLElement | null>(null);
-  const fontPosition = useRef<{
-    id: string;
-    source?: SourcePlace;
-    rendered?: RenderedPlace;
-  } | null>(null);
   const sessionRestoreCleanups = useRef<Record<string, () => void>>({});
   useEffect(
     () => () => {
@@ -183,12 +88,12 @@ export function useEditorView(
       let cancelled = false;
       let frame: number | undefined;
       let remaining = 2;
+      let stopListening = () => {};
       const cancel = () => {
         if (cancelled) return;
         cancelled = true;
         if (frame !== undefined) cancelAnimationFrame(frame);
-        for (const event of ['wheel', 'keydown', 'pointerdown', 'input'])
-          window.removeEventListener(event, cancel, true);
+        stopListening();
         if (sessionRestoreCleanups.current[id] === cancel)
           delete sessionRestoreCleanups.current[id];
       };
@@ -210,8 +115,7 @@ export function useEditorView(
         if (--remaining === 0) cancel();
       };
       sessionRestoreCleanups.current[id] = cancel;
-      for (const event of ['wheel', 'keydown', 'pointerdown', 'input'])
-        window.addEventListener(event, cancel, true);
+      stopListening = onUserInput(cancel);
       // The first restore works even in a hidden WebView; these bounded repeats
       // account for the first visible layout and bundled-font metrics settling.
       if (typeof requestAnimationFrame === 'function') frame = requestAnimationFrame(settle);
@@ -222,96 +126,6 @@ export function useEditorView(
     },
     [tabRuntime, currentView, tabsRef],
   );
-  const captureFontPosition = useCallback(() => {
-    rememberActive();
-    const { activeId: id, sourceMode: source } = currentView.current;
-    if (id) {
-      const saved = tabRuntime.current[id]?.position;
-      fontPosition.current = {
-        id,
-        source: source ? saved?.source : undefined,
-        rendered: source ? undefined : saved?.rendered,
-      };
-    }
-  }, [currentView, tabRuntime, rememberActive]);
-  const changeBodyFont = useCallback(
-    (font: BodyFont) => {
-      if (font === bodyFont) return;
-      captureFontPosition();
-      setBodyFont(font);
-    },
-    [bodyFont, captureFontPosition],
-  );
-  const changeCodeFont = useCallback(
-    (font: CodeFont) => {
-      if (font === codeFont) return;
-      captureFontPosition();
-      setCodeFont(font);
-    },
-    [codeFont, captureFontPosition],
-  );
-  const changeEditorWidth = useCallback(
-    (width: EditorWidth) => {
-      if (width === editorWidth) return;
-      captureFontPosition();
-      setEditorWidth(width);
-    },
-    [editorWidth, captureFontPosition],
-  );
-
-  useLayoutEffect(() => {
-    const body = BODY_FONTS.find((font) => font.id === bodyFont)!;
-    const code = CODE_FONTS.find((font) => font.id === codeFont)!;
-    // Dialogs, drag overlays and the error fallback share these document-wide roles.
-    const style = document.documentElement.style;
-    style.setProperty('--font-body', `${body.family}, var(--font-sans)`);
-    style.setProperty('--body-strong-weight', String(body.strongWeight));
-    style.setProperty('--font-code', `${code.family}, var(--font-mono)`);
-  }, [bodyFont, codeFont]);
-
-  useLayoutEffect(() => {
-    const saved = fontPosition.current;
-    fontPosition.current = null;
-    if (!saved || saved.id !== activeId) return;
-    const restore = () => {
-      const input = tabRuntime.current[saved.id]?.sourceInput;
-      const editor = tabRuntime.current[saved.id]?.editor;
-      if (input && saved.source) restoreSource(input, saved.source);
-      if (editor && saved.rendered) restoreRendered(editor, saved.rendered);
-    };
-    restore();
-    let cancelled = false;
-    const cancel = (event: Event) => {
-      const target = event.target;
-      // Radio selection emits input after React installs this effect; it is not a document edit.
-      if (
-        event.type === 'input' &&
-        target instanceof HTMLInputElement &&
-        target.type === 'radio' &&
-        target.name === 'code-font'
-      )
-        return;
-      cancelled = true;
-    };
-    for (const event of ['wheel', 'keydown', 'pointerdown', 'input'])
-      window.addEventListener(event, cancel, true);
-    const body = BODY_FONTS.find((font) => font.id === bodyFont)!;
-    const families = [
-      body.family,
-      ...CODE_FONTS.find((font) => font.id === codeFont)!.family.split(', '),
-    ];
-    void Promise.allSettled([
-      ...families.map((family) => document.fonts.load(`400 16px ${family}`, '中文 Mixed')),
-      document.fonts.load(`${body.strongWeight} 16px ${body.family}`, '中文 Bold'),
-    ]).then(() => {
-      if (!cancelled) restore();
-    });
-    return () => {
-      cancelled = true;
-      for (const event of ['wheel', 'keydown', 'pointerdown', 'input'])
-        window.removeEventListener(event, cancel, true);
-    };
-  }, [bodyFont, codeFont, editorWidth, activeId, sourceMode, tabRuntime, runtimeOf]);
 
   useLayoutEffect(() => {
     if (!activeId) return;
@@ -371,15 +185,6 @@ export function useEditorView(
     syncEditor,
     tabsRef,
   ]);
-  useEffect(() => {
-    writeCodeFont(codeFont);
-  }, [codeFont]);
-  useEffect(() => {
-    writeBodyFont(bodyFont);
-  }, [bodyFont]);
-  useEffect(() => {
-    writeEditorWidth(editorWidth);
-  }, [editorWidth]);
 
   /* ---------- 编辑器更新回传 ---------- */
   // dirty 和 generation 即时更新，Markdown、统计和大纲按 120ms 合并。
@@ -418,6 +223,27 @@ export function useEditorView(
       }
     };
   }, []);
+
+  /** What every content edit owes: image references, autosave, recovery snapshot, repaint. */
+  const afterEdit = useCallback(
+    (id: string, dirty: boolean, autosave: boolean, refreshStats = false) => {
+      void prepareCurrentImages(id, true).catch((error) => console.warn('图片引用准备失败', error));
+      if (autosave) scheduleAutoSave(id);
+      const changed = tabsRef.current.find((tab) => tab.id === id);
+      if (changed && (dirty || changed.isNew || changed.preserveLocal))
+        saveRecoverySnapshot(changed);
+      else if (changed) void deleteRecoverySnapshot(id);
+      scheduleTabRender(id, refreshStats);
+    },
+    [
+      tabsRef,
+      prepareCurrentImages,
+      scheduleAutoSave,
+      saveRecoverySnapshot,
+      deleteRecoverySnapshot,
+      scheduleTabRender,
+    ],
+  );
 
   const handleEditorActivity = useCallback(
     (id: string, activity: Pick<EditorUpdate, 'canUndo' | 'canRedo'>) => {
@@ -481,25 +307,17 @@ export function useEditorView(
         setTabs([...tabsRef.current]);
         return;
       }
-      void prepareCurrentImages(id, true).catch((error) => console.warn('图片引用准备失败', error));
-      if (dirty && !coalesced) scheduleAutoSave(id);
-      const changed = tabsRef.current.find((tab) => tab.id === id);
-      if (changed && (dirty || changed.isNew || changed.preserveLocal))
-        saveRecoverySnapshot(changed);
-      else if (changed) void deleteRecoverySnapshot(id);
-      scheduleTabRender(id);
+      afterEdit(id, dirty, dirty && !coalesced);
     },
     [
       tabRuntime,
       runtimeOf,
       tabsRef,
-      prepareCurrentImages,
-      scheduleAutoSave,
       saveRecoverySnapshot,
-      deleteRecoverySnapshot,
       scheduleTabRender,
       syncEditor,
       setTabs,
+      afterEdit,
     ],
   );
 
@@ -621,93 +439,14 @@ export function useEditorView(
         tabsRef.current = tabsRef.current.map((t) =>
           t.id === activeId ? { ...t, markdown: text, dirty } : t,
         );
-        void prepareCurrentImages(activeId, true).catch((error) =>
-          console.warn('图片引用准备失败', error),
-        );
-        if (dirty) scheduleAutoSave(activeId);
-        const changed = tabsRef.current.find((tab) => tab.id === activeId);
-        if (changed && (dirty || changed.isNew || changed.preserveLocal))
-          saveRecoverySnapshot(changed);
-        else if (changed) void deleteRecoverySnapshot(activeId);
-        scheduleTabRender(activeId, true);
+        afterEdit(activeId, dirty, dirty, true);
       }
     },
-    [
-      tabRuntime,
-      runtimeOf,
-      tabsRef,
-      prepareCurrentImages,
-      scheduleAutoSave,
-      saveRecoverySnapshot,
-      deleteRecoverySnapshot,
-      scheduleTabRender,
-    ],
-  );
-
-  /* ---------- 大纲跳转 ---------- */
-  const jumpToOutline = useCallback(
-    (pos: number) => {
-      const { activeId: id, sourceMode: source } = currentView.current;
-      if (source) {
-        const input = id ? tabRuntime.current[id]?.sourceInput : null;
-        if (!input?.isConnected || pos < 0 || pos > input.value.length) return;
-        const top = measureSourceText(input, input.value, (at) => Math.max(0, at(pos) - 24));
-        input.focus({ preventScroll: true });
-        input.setSelectionRange(pos, pos);
-        input.scrollTo({
-          top,
-          behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
-            ? 'instant'
-            : 'smooth',
-        });
-        return;
-      }
-      const editor = id ? tabRuntime.current[id]?.editor : null;
-      if (!editor) return;
-      editor.action((ctx) => {
-        const view = ctx.get(editorViewCtx);
-        const target = pos + 1;
-        if (target < 0 || target > view.state.doc.content.size) return;
-        view.dispatch(
-          view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(target))),
-        );
-        view.focus();
-        // Navigate once; normal editing and selection restoration remain instant.
-        requestAnimationFrame(() => {
-          if (
-            currentView.current.activeId !== id ||
-            currentView.current.sourceMode ||
-            tabRuntime.current[id!]?.editor !== editor
-          )
-            return;
-          const dom = view.nodeDOM(pos);
-          const scroller = view.dom.closest<HTMLElement>('.milkdown-container');
-          if (dom instanceof HTMLElement && scroller) {
-            scroller.scrollTo({
-              top:
-                scroller.scrollTop +
-                dom.getBoundingClientRect().top -
-                scroller.getBoundingClientRect().top -
-                24,
-              behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
-                ? 'instant'
-                : 'smooth',
-            });
-          }
-        });
-      });
-    },
-    [currentView, tabRuntime],
+    [tabRuntime, runtimeOf, tabsRef, afterEdit],
   );
 
   return {
     editorAreaRef,
-    bodyFont,
-    codeFont,
-    editorWidth,
-    changeBodyFont,
-    changeCodeFont,
-    changeEditorWidth,
     handleTabUpdate,
     handleEditorActivity,
     registerEditor,
@@ -716,8 +455,5 @@ export function useEditorView(
     handleRedo,
     toggleSourceMode,
     handleSourceChange,
-    jumpToOutline,
-    outlineItems,
-    outlineStatus,
   };
 }

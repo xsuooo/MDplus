@@ -117,7 +117,7 @@ function setup(tabs: Tab[]) {
   } as unknown as RecoveryController;
   const hook = renderHook(() => {
     const workspace = useWorkspace(tabs);
-    const view = useEditorView(workspace, recovery, vi.fn(), vi.fn(), false);
+    const view = useEditorView(workspace, recovery, vi.fn(), vi.fn());
     return { workspace, view };
   });
   return { ...hook, recovery };
