@@ -35,6 +35,7 @@ describe('IPC allowlist and contract synchronization', () => {
     const source = [
       'lib.rs',
       'safe_files.rs',
+      'image_assets.rs',
       'recovery.rs',
       'settings.rs',
       'image_stash.rs',
