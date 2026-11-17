@@ -98,7 +98,7 @@ export default function App() {
     setSearchOpen,
     activeTab,
     editorRegistry,
-    autosavePausedMtime,
+    isAutoSavePaused,
     sourceRegistry,
     sourceRewrites,
     selectTab,
@@ -363,7 +363,7 @@ export default function App() {
     ? 'idle'
     : savingId === activeTab.id
       ? 'saving'
-      : activeTab.id in autosavePausedMtime.current || activeTab.externalChanged
+      : isAutoSavePaused(activeTab.id) || activeTab.externalChanged
         ? 'paused'
         : activeTab.isNew
           ? 'unsaved'
