@@ -32,7 +32,9 @@ interface OpenOptions {
 }
 
 export function useDocumentFiles(workspace: Workspace, options: DocumentFileOptions = {}) {
-  const { tabsRef, openingPaths, selectTab, addTab, installSessionPlace, setTabs } = workspace;
+  // Paths whose open is in flight, so a second request for the same file is dropped.
+  const openingPaths = useRef(new Set<string>());
+  const { tabsRef, selectTab, addTab, installSessionPlace, setTabs } = workspace;
   const persistence = useSessionPersistence(workspace);
   const {
     readStoredSession,
@@ -244,7 +246,6 @@ export function useDocumentFiles(workspace: Workspace, options: DocumentFileOpti
       addTab,
       adoptSessionPath,
       installSessionPlace,
-      openingPaths,
       recordSessionFailure,
       resolveSessionFailure,
       selectTab,
