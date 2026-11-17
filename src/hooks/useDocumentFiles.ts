@@ -11,10 +11,11 @@ import {
   prepareImageReferences,
   type PreparedImageReferences,
 } from '../lib/imageOps';
-import { pathKey } from '../lib/pathIdentity';
+import { pathKey } from '../lib/paths';
 import type { SessionDocument } from '../lib/documentSession';
 import { getRecentFiles, pushRecentFile, removeRecentFile } from '../lib/store';
 import { getTemplate } from '../lib/templates';
+import { isDroppedImagePath } from '../lib/imageDrop';
 import type { RecentFile, Tab } from '../lib/types';
 import { waitForWindowReady } from '../services/windowPersistence';
 
@@ -90,20 +91,21 @@ export function useDocumentFiles(workspace: Workspace, options: DocumentFileOpti
   const openDocumentPath = useCallback(
     async (path: string, openOptions: OpenOptions = {}): Promise<Tab | undefined> => {
       const key = pathKey(path);
+      const reveal = (tab: Tab | undefined) => {
+        if (!tab) return;
+        if (openOptions.restore?.place) installSessionPlace(tab.id, openOptions.restore.place);
+        if (openOptions.activate !== false) selectTab(tab.id);
+      };
       const alreadyOpen = tabsRef.current.find((t) => t.path && pathKey(t.path) === key);
       if (alreadyOpen) {
-        if (openOptions.restore?.place)
-          installSessionPlace(alreadyOpen.id, openOptions.restore.place);
-        if (openOptions.activate !== false) selectTab(alreadyOpen.id);
+        reveal(alreadyOpen);
         resolveSessionFailure(path, alreadyOpen.path!);
         return alreadyOpen;
       }
       const pending = pendingOpens.current.get(key);
       if (pending) {
         const opened = await pending;
-        if (opened && openOptions.restore?.place)
-          installSessionPlace(opened.id, openOptions.restore.place);
-        if (opened && openOptions.activate !== false) selectTab(opened.id);
+        reveal(opened);
         return opened;
       }
       if (openingPaths.current.has(key)) return;
@@ -119,9 +121,7 @@ export function useDocumentFiles(workspace: Workspace, options: DocumentFileOpti
               const canonicalPending = pendingOpens.current.get(canonicalKey);
               if (!canonicalPending) return;
               const opened = await canonicalPending;
-              if (opened && openOptions.restore?.place)
-                installSessionPlace(opened.id, openOptions.restore.place);
-              if (opened && openOptions.activate !== false) selectTab(opened.id);
+              reveal(opened);
               return opened;
             }
             openingPaths.current.add(canonicalKey);
@@ -132,9 +132,7 @@ export function useDocumentFiles(workspace: Workspace, options: DocumentFileOpti
           const existing = tabsRef.current.find((t) => t.path && pathKey(t.path) === canonicalKey);
           let result: Tab | undefined;
           if (existing) {
-            if (openOptions.restore?.place)
-              installSessionPlace(existing.id, openOptions.restore.place);
-            if (openOptions.activate !== false) selectTab(existing.id);
+            reveal(existing);
             result = existing;
           } else {
             const id = makeId();
@@ -158,9 +156,7 @@ export function useDocumentFiles(workspace: Workspace, options: DocumentFileOpti
               );
               if (opened) {
                 clearPendingImages(id);
-                if (openOptions.restore?.place)
-                  installSessionPlace(opened.id, openOptions.restore.place);
-                if (openOptions.activate !== false) selectTab(opened.id);
+                reveal(opened);
                 result = opened;
               } else {
                 addTab(
@@ -493,7 +489,7 @@ export function useDocumentFiles(workspace: Workspace, options: DocumentFileOpti
           } else if (event.payload.type === 'drop') {
             document.body.classList.remove('dragging');
             const md = event.payload.paths.filter((p) => /\.(md|markdown)$/i.test(p));
-            const images = event.payload.paths.filter((path) => /\.(png|jpe?g)$/i.test(path));
+            const images = event.payload.paths.filter(isDroppedImagePath);
             const ignored =
               event.payload.paths.length - md.length - (imageDrop.current ? images.length : 0);
             const position = { x: event.payload.position.x, y: event.payload.position.y };

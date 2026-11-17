@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useDialogFocus } from '../lib/useDialogFocus';
 import { deleteSnapshot, type RecoveryEntry } from '../lib/recovery';
 import { confirmDialog, showMessage } from '../lib/dialog';
-import { displayPath } from '../lib/pathDisplay';
+import { displayPath } from '../lib/paths';
 
 export function RecoveryModal({
   entries,

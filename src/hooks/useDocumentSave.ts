@@ -12,8 +12,7 @@ import {
   type ImageMigration,
 } from '../lib/imageOps';
 import { getImageUrls, isRelativeImageUrl } from '../lib/imagePaths';
-import { pathKey } from '../lib/pathIdentity';
-import { displayPath } from '../lib/pathDisplay';
+import { pathKey, displayPath } from '../lib/paths';
 import { computeStats } from '../lib/stats';
 import { getRecentFiles, pushRecentFile } from '../lib/store';
 import type { RecentFile, Tab } from '../lib/types';

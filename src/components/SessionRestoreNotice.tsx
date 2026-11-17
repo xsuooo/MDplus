@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { IconClose } from './icons';
-import { displayPath } from '../lib/pathDisplay';
+import { displayPath } from '../lib/paths';
 
 interface SessionFailure {
   path: string;

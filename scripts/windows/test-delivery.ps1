@@ -50,7 +50,7 @@ Test-Case 'version drift is refused' {
     $fixture = New-EmptyDirectory (Join-Path $root 'repo')
     $null = [IO.Directory]::CreateDirectory((Join-Path $fixture 'src-tauri'))
     $null = [IO.Directory]::CreateDirectory((Join-Path $fixture 'src/lib'))
-    foreach ($file in @('package.json', 'package-lock.json', 'src-tauri/Cargo.toml', 'src-tauri/Cargo.lock', 'src-tauri/tauri.conf.json', 'src/lib/buildInfo.ts')) {
+    foreach ($file in @('package.json', 'package-lock.json', 'src-tauri/Cargo.toml', 'src-tauri/Cargo.lock', 'src-tauri/tauri.conf.json', 'src/lib/appVersion.ts')) {
         Copy-VerifiedFile (Join-Path $repository $file) (Join-Path $fixture $file) (Get-FileHash -LiteralPath (Join-Path $repository $file)).Hash
     }
     $p = Join-Path $fixture 'package.json'

@@ -1,7 +1,7 @@
 import { memo, useState, useEffect, useRef } from 'react';
 import { formatActionShortcuts, isComposingEvent, type ShortcutBindings } from '../lib/shortcuts';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { BUILD_LABEL } from '../lib/buildInfo';
+import { BUILD_LABEL } from '../lib/appVersion';
 import { Presence } from '../lib/presence';
 import {
   IconBrand,

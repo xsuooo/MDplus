@@ -2,7 +2,7 @@ import { serialQueue } from './serialQueue';
 import { invoke } from '@tauri-apps/api/core';
 import { join, dirname } from '@tauri-apps/api/path';
 import { LIMITS } from '../config/constants';
-import { pathKey } from './pathIdentity';
+import { pathKey } from './paths';
 import {
   getImageUrls,
   isRelativeImageUrl,

@@ -1,7 +1,7 @@
 import type { RecentFile, ThemeMode } from './types';
 import type { ShortcutBindings } from './shortcuts';
 import { sanitizeShortcuts } from './shortcuts';
-import { pathKey } from './pathIdentity';
+import { pathKey } from './paths';
 
 /** 过滤持久化数据,避免损坏的设置让界面在启动时崩溃。 */
 export function sanitizeRecentFiles(value: unknown, max = 10): RecentFile[] {

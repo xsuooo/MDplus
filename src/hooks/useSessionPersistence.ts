@@ -9,7 +9,7 @@ import {
 } from '../lib/documentSession';
 import { errorMessage } from '../lib/errors';
 import { flushEditorUpdate } from '../lib/editorUpdates';
-import { pathKey } from '../lib/pathIdentity';
+import { pathKey } from '../lib/paths';
 import { loadDocumentSession, saveDocumentSession, setSessionRestoreEnabled } from '../lib/store';
 import type { Tab } from '../lib/types';
 import type { Workspace } from './useWorkspace';

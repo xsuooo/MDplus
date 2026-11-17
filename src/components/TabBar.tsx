@@ -2,7 +2,7 @@ import { memo, useEffect, useLayoutEffect, useRef } from 'react';
 import type { Tab } from '../lib/types';
 import { TAB_WHEEL_INITIAL, wheelStep, type TabWheelDirection } from '../lib/tabWheel';
 import { IconClose } from './icons';
-import { displayPath } from '../lib/pathDisplay';
+import { displayPath } from '../lib/paths';
 import { formatActionShortcuts, type ShortcutBindings } from '../lib/shortcuts';
 
 interface TabBarProps {
