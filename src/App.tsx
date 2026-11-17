@@ -21,7 +21,7 @@ import { useDocumentClose } from './hooks/useDocumentClose';
 import { useDocumentExport } from './hooks/useDocumentExport';
 import { useDocumentFiles } from './hooks/useDocumentFiles';
 import { useDocumentSave } from './hooks/useDocumentSave';
-import { useDocumentSession } from './hooks/useDocumentSession';
+import { useWorkspace } from './hooks/useWorkspace';
 import { useEditorView } from './hooks/useEditorView';
 import { useExternalChanges } from './hooks/useExternalChanges';
 import { useImageDrop } from './hooks/useImageDrop';
@@ -50,7 +50,7 @@ import './styles/global.css';
 import './styles/workflow.css';
 
 export default function App() {
-  const session = useDocumentSession();
+  const workspace = useWorkspace();
   const sourceApis = useRef<Record<string, SourceEditorApi>>({});
   const imageDropHandler = useRef<
     | ((paths: readonly string[], position: { x: number; y: number }) => Promise<ImageDropResult>)
@@ -90,7 +90,7 @@ export default function App() {
     changeOutlineOpen,
     changeShortcuts,
     changeSourcePreference,
-  } = usePreferences(session.setSourceMode);
+  } = usePreferences(workspace.setSourceMode);
   const {
     tabs,
     activeId,
@@ -105,7 +105,7 @@ export default function App() {
     selectTab,
     registerSource,
     resolveContent,
-  } = session;
+  } = workspace;
   const [mediaPreview, setMediaPreview] = useState<MediaPreview | null>(null);
   useEffect(() => {
     setMediaPreview(null);
@@ -130,10 +130,10 @@ export default function App() {
     retrySessionFailures,
     sessionRestoreBusy,
     sessionController,
-  } = useDocumentFiles(session, { onImageDrop: routeImageDrop });
+  } = useDocumentFiles(workspace, { onImageDrop: routeImageDrop });
   const handleDocumentLink = useCallback(
     async (tabId: string, href: string) => {
-      const tab = session.tabsRef.current.find((candidate) => candidate.id === tabId);
+      const tab = workspace.tabsRef.current.find((candidate) => candidate.id === tabId);
       if (!tab) return;
       try {
         const link = await resolveDocumentLink(href, tab.path);
@@ -144,15 +144,15 @@ export default function App() {
         await showMessage(errorMessage(error), 'error');
       }
     },
-    [session.tabsRef, openFileFromPath],
+    [workspace.tabsRef, openFileFromPath],
   );
   const { persistWindowState, windowReady } = useWindowLifecycle(
     preferencesReady && recentFilesReady,
   );
-  const recovery = useRecovery(session);
-  useExternalChanges(session, recovery);
+  const recovery = useRecovery(workspace);
+  useExternalChanges(workspace, recovery);
   const { doSave, scheduleAutoSave, handleSave, handleSaveAs, savingId } = useDocumentSave(
-    session,
+    workspace,
     recovery,
     setRecentFiles,
   );
@@ -175,24 +175,24 @@ export default function App() {
     jumpToOutline,
     outlineItems,
     outlineStatus,
-  } = useEditorView(session, recovery, scheduleAutoSave, changeSourcePreference, outlineOpen);
+  } = useEditorView(workspace, recovery, scheduleAutoSave, changeSourcePreference, outlineOpen);
   const {
     handle: dropImages,
     pick: pickImages,
     picking: pickingImage,
     progress: imageDropProgress,
-  } = useImageDrop(session, getSourceApi);
+  } = useImageDrop(workspace, getSourceApi);
   imageDropHandler.current = dropImages;
   const undoActiveView = useCallback(() => {
-    const current = session.currentView.current;
+    const current = workspace.currentView.current;
     if (current.sourceMode && current.activeId) sourceApis.current[current.activeId]?.undo();
     else handleUndo();
-  }, [session.currentView, handleUndo]);
+  }, [workspace.currentView, handleUndo]);
   const redoActiveView = useCallback(() => {
-    const current = session.currentView.current;
+    const current = workspace.currentView.current;
     if (current.sourceMode && current.activeId) sourceApis.current[current.activeId]?.redo();
     else handleRedo();
-  }, [session.currentView, handleRedo]);
+  }, [workspace.currentView, handleRedo]);
   const handleSessionRestoreChange = useCallback(
     (enabled: boolean) => {
       void changeSessionRestore(enabled).catch((error) => {
@@ -202,14 +202,14 @@ export default function App() {
     [changeSessionRestore],
   );
   const { exporting, handleExportHTML, handleExportPDF } = useDocumentExport(
-    session,
+    workspace,
     recovery,
     bodyFont,
     codeFont,
   );
   const onClosing = useCallback(() => setMediaPreview(null), []);
   const { pendingCloseTab, closeBusy, closeTabRequest, confirmClose, handleWindowClose } =
-    useDocumentClose(session, recovery, doSave, persistWindowState, onClosing, sessionController);
+    useDocumentClose(workspace, recovery, doSave, persistWindowState, onClosing, sessionController);
   const {
     refreshRecovery,
     handleRestore,

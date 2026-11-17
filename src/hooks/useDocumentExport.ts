@@ -7,17 +7,17 @@ import { assertExportBytes, captureExport, exportHTML, exportPDF } from '../lib/
 import { capturePendingImages, type PendingImageLease } from '../lib/imageOps';
 import { getImageUrls } from '../lib/imagePaths';
 
-import type { DocumentSession } from './useDocumentSession';
+import type { Workspace } from './useWorkspace';
 import type { RecoveryController } from './useRecovery';
 
 export function useDocumentExport(
-  session: DocumentSession,
+  workspace: Workspace,
   recovery: RecoveryController,
   bodyFont: BodyFont,
   codeFont: CodeFont,
 ) {
   const { activeTab, editorRegistry, tabsRef, saveQueues, contentGenerations, resolveContent } =
-    session;
+    workspace;
   const { prepareCurrentImages } = recovery;
   const [exporting, setExporting] = useState(false);
   const exportBusy = useRef(false);

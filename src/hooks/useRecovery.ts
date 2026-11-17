@@ -14,9 +14,9 @@ import {
 } from '../lib/recovery';
 import type { Tab } from '../lib/types';
 
-import type { DocumentSession } from './useDocumentSession';
+import type { Workspace } from './useWorkspace';
 
-export function useRecovery(session: DocumentSession) {
+export function useRecovery(workspace: Workspace) {
   const {
     tabs,
     tabsRef,
@@ -25,7 +25,7 @@ export function useRecovery(session: DocumentSession) {
     imagePreparations,
     resolveContent,
     addTab,
-  } = session;
+  } = workspace;
   const alive = useRef(true);
   const restoring = useRef(new Map<string, Promise<void>>());
   useEffect(() => {

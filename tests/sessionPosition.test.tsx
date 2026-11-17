@@ -17,7 +17,7 @@ import {
   toRendered,
   toSource,
 } from '../src/lib/editorPosition';
-import { useDocumentSession } from '../src/hooks/useDocumentSession';
+import { useWorkspace } from '../src/hooks/useWorkspace';
 import { useEditorView } from '../src/hooks/useEditorView';
 import type { RecoveryController } from '../src/hooks/useRecovery';
 import { computeStats } from '../src/lib/stats';
@@ -324,9 +324,9 @@ describe('serialized editor positions', () => {
       cleanRecovery: vi.fn(async () => true),
     } as unknown as RecoveryController;
     const hook = renderHook(() => {
-      const session = useDocumentSession([initial(markdown)]);
-      useEditorView(session, recovery, vi.fn(), vi.fn(), false);
-      return session;
+      const workspace = useWorkspace([initial(markdown)]);
+      useEditorView(workspace, recovery, vi.fn(), vi.fn(), false);
+      return workspace;
     });
     await act(async () => {
       hook.result.current.registerSource('a', field);

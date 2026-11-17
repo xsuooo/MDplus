@@ -12,7 +12,7 @@ import { flushEditorUpdate } from '../lib/editorUpdates';
 import { pathKey } from '../lib/pathIdentity';
 import { loadDocumentSession, saveDocumentSession, setSessionRestoreEnabled } from '../lib/store';
 import type { Tab } from '../lib/types';
-import type { DocumentSession } from './useDocumentSession';
+import type { Workspace } from './useWorkspace';
 
 export interface WindowSessionController {
   captureClosingSession: () => void;
@@ -33,7 +33,7 @@ interface ClosingSession {
 const POSITION_SAVE_DELAY = 500;
 
 /** Coordinates metadata persistence independently of the manual draft-recovery journal. */
-export function useSessionPersistence(session: DocumentSession) {
+export function useSessionPersistence(workspace: Workspace) {
   const {
     tabs,
     activeId,
@@ -43,7 +43,7 @@ export function useSessionPersistence(session: DocumentSession) {
     editorRegistry,
     rememberActive,
     captureTabPlace,
-  } = session;
+  } = workspace;
   const [sessionRestoreEnabled, setEnabled] = useState(true);
   const enabled = useRef(true);
   const preferenceChanged = useRef(false);

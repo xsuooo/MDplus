@@ -25,7 +25,7 @@ export function makeId(): string {
     : `t-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-export function useDocumentSession(initialTabs: Tab[] = []) {
+export function useWorkspace(initialTabs: Tab[] = []) {
   const [tabs, setTabs] = useState<Tab[]>(initialTabs);
   const [activeId, setActiveId] = useState<string | null>(initialTabs[0]?.id ?? null);
   const [sourceMode, setSourceModeState] = useState(false);
@@ -341,4 +341,4 @@ export function useDocumentSession(initialTabs: Tab[] = []) {
     removeTab,
   };
 }
-export type DocumentSession = ReturnType<typeof useDocumentSession>;
+export type Workspace = ReturnType<typeof useWorkspace>;

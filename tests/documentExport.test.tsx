@@ -2,7 +2,7 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import type { Editor } from '@milkdown/kit/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useDocumentSession } from '../src/hooks/useDocumentSession';
+import { useWorkspace } from '../src/hooks/useWorkspace';
 import { useDocumentExport } from '../src/hooks/useDocumentExport';
 import type { RecoveryController } from '../src/hooks/useRecovery';
 import type { Tab } from '../src/lib/types';
@@ -52,12 +52,12 @@ function deferred() {
 }
 function setup() {
   return renderHook(() => {
-    const session = useDocumentSession([initial()]);
-    if (session.tabsRef.current.length && !session.editorRegistry.current.tab)
-      session.editorRegistry.current.tab = {} as Editor;
+    const workspace = useWorkspace([initial()]);
+    if (workspace.tabsRef.current.length && !workspace.editorRegistry.current.tab)
+      workspace.editorRegistry.current.tab = {} as Editor;
     const recovery = { prepareCurrentImages: mocks.prepare } as unknown as RecoveryController;
-    const exporting = useDocumentExport(session, recovery, 'misans', 'jetbrains-sarasa');
-    return { session, exporting };
+    const exporting = useDocumentExport(workspace, recovery, 'misans', 'jetbrains-sarasa');
+    return { workspace, exporting };
   });
 }
 beforeEach(() => {
@@ -123,15 +123,15 @@ describe('export snapshots with leased native images', () => {
       expect(mocks.html).not.toHaveBeenCalled();
       mocks.parsedToken = 'mdplus-image:later';
       act(() => {
-        if (change === 'close') hook.result.current.session.removeTab('tab');
+        if (change === 'close') hook.result.current.workspace.removeTab('tab');
         else {
-          hook.result.current.session.updateTab('tab', {
+          hook.result.current.workspace.updateTab('tab', {
             path: 'D:/elsewhere/later.md',
             markdown: 'later document',
             diskRevision: 'B',
             dirty: true,
           });
-          hook.result.current.session.contentGenerations.current.tab = 1;
+          hook.result.current.workspace.contentGenerations.current.tab = 1;
         }
       });
       await act(async () => {

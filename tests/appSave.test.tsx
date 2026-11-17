@@ -45,9 +45,9 @@ vi.mock('react', async (importOriginal) => {
   };
 });
 // Seed the public session hook instead of relying on App's useState declaration order.
-vi.mock('../src/hooks/useDocumentSession', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/hooks/useDocumentSession')>();
-  return { ...actual, useDocumentSession: () => actual.useDocumentSession([mocks.initialTab!]) };
+vi.mock('../src/hooks/useWorkspace', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/hooks/useWorkspace')>();
+  return { ...actual, useWorkspace: () => actual.useWorkspace([mocks.initialTab!]) };
 });
 vi.mock('../src/hooks/useDocumentClose', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/hooks/useDocumentClose')>();

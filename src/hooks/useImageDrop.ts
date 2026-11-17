@@ -15,18 +15,18 @@ import {
 } from '../lib/imageDrop';
 import type { SourceEditorApi } from '../lib/sourceEditorApi';
 import { pickImageFiles } from '../lib/fileOps';
-import type { DocumentSession } from './useDocumentSession';
+import type { Workspace } from './useWorkspace';
 
 export type { ImageDropResult } from '../lib/imageDrop';
 
 /** Reuse useDocumentFiles' one native drag listener; capture happens before the
  * first await, so mixed Markdown/image drops cannot redirect the target. */
 export function useImageDrop(
-  session: DocumentSession,
+  workspace: Workspace,
   getSourceApi: (tabId: string) => SourceEditorApi | null,
 ) {
-  const dependencies = useRef({ session, getSourceApi });
-  dependencies.current = { session, getSourceApi };
+  const dependencies = useRef({ workspace, getSourceApi });
+  dependencies.current = { workspace, getSourceApi };
   const pickingRef = useRef(false);
   const [picking, setPicking] = useState(false);
   const batchesRef = useRef(new Map<CapturedImageDrop, ImageDropProgress>());
@@ -57,30 +57,31 @@ export function useImageDrop(
 
   const captureTarget = useCallback(
     (physicalPosition?: DropPosition): CapturedImageDrop | ImageDropReason => {
-      const { session, getSourceApi } = dependencies.current;
-      const { activeId: tabId, sourceMode } = session.currentView.current;
-      if (!tabId || !session.tabsRef.current.some((tab) => tab.id === tabId)) return 'no-document';
+      const { workspace, getSourceApi } = dependencies.current;
+      const { activeId: tabId, sourceMode } = workspace.currentView.current;
+      if (!tabId || !workspace.tabsRef.current.some((tab) => tab.id === tabId))
+        return 'no-document';
       const point = physicalPosition ? physicalToClientPosition(physicalPosition) : null;
       if (physicalPosition && !point) return 'outside-editor';
-      const modeGeneration = session.modeGenerations.current[tabId] ?? 0;
+      const modeGeneration = workspace.modeGenerations.current[tabId] ?? 0;
 
       const sameMode = () => {
-        const current = session.currentView.current;
+        const current = workspace.currentView.current;
         return (
           (current.activeId === tabId
             ? current.sourceMode
-            : (session.positions.current[tabId]?.sourceMode ?? sourceMode)) === sourceMode
+            : (workspace.positions.current[tabId]?.sourceMode ?? sourceMode)) === sourceMode
         );
       };
-      const foreground = () => session.currentView.current.activeId === tabId && sameMode();
+      const foreground = () => workspace.currentView.current.activeId === tabId && sameMode();
       const lifetimeReason = (): ImageDropReason | undefined => {
-        if (!session.tabsRef.current.some((tab) => tab.id === tabId)) return 'target-closed';
-        if (!sameMode() || (session.modeGenerations.current[tabId] ?? 0) !== modeGeneration)
+        if (!workspace.tabsRef.current.some((tab) => tab.id === tabId)) return 'target-closed';
+        if (!sameMode() || (workspace.modeGenerations.current[tabId] ?? 0) !== modeGeneration)
           return 'target-changed';
       };
       let target: CapturedImageDrop;
       if (sourceMode) {
-        const input = session.sourceRegistry.current[tabId];
+        const input = workspace.sourceRegistry.current[tabId];
         const api = getSourceApi(tabId);
         if (!input || !api) return 'editor-unavailable';
         const offset = point ? sourceOffsetAtPoint(input, point) : api.read().end;
@@ -90,7 +91,7 @@ export function useImageDrop(
           tabId,
           invalidReason: () =>
             lifetimeReason() ??
-            (session.sourceRegistry.current[tabId] !== input ||
+            (workspace.sourceRegistry.current[tabId] !== input ||
             getSourceApi(tabId) !== api ||
             !input.isConnected
               ? 'editor-unavailable'
@@ -107,7 +108,7 @@ export function useImageDrop(
           },
         };
       } else {
-        const editor = session.editorRegistry.current[tabId];
+        const editor = workspace.editorRegistry.current[tabId];
         if (!editor) return 'editor-unavailable';
         try {
           const view = editor.action((ctx) => ctx.get(editorViewCtx));
@@ -127,7 +128,7 @@ export function useImageDrop(
             tabId,
             invalidReason: () =>
               lifetimeReason() ??
-              (session.editorRegistry.current[tabId] !== editor || position.read() === null
+              (workspace.editorRegistry.current[tabId] !== editor || position.read() === null
                 ? 'editor-unavailable'
                 : undefined),
             release: position.release,

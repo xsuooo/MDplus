@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useDocumentSession } from '../src/hooks/useDocumentSession';
+import { useWorkspace } from '../src/hooks/useWorkspace';
 import { useDocumentClose } from '../src/hooks/useDocumentClose';
 import type { Tab } from '../src/lib/types';
 
@@ -42,15 +42,15 @@ function deferred<T>() {
 const onClosing = () => {};
 function setup(dirty = true) {
   return renderHook(() => {
-    const session = useDocumentSession([initial(dirty)]);
+    const workspace = useWorkspace([initial(dirty)]);
     const close = useDocumentClose(
-      session,
+      workspace,
       { cleanRecovery: mocks.clean, protectDraft: mocks.protect },
       mocks.save,
       mocks.persist,
       onClosing,
     );
-    return { session, close };
+    return { workspace, close };
   });
 }
 beforeEach(() => {
@@ -75,7 +75,7 @@ describe('close exception and cancellation boundaries', () => {
     await act(async () => {
       await expect(hook.result.current.close.confirmClose('save')).resolves.toBeUndefined();
     });
-    expect(hook.result.current.session.tabsRef.current).toHaveLength(1);
+    expect(hook.result.current.workspace.tabsRef.current).toHaveLength(1);
     expect(hook.result.current.close.pendingCloseTab?.id).toBe('a');
     expect(hook.result.current.close.closeBusy).toBe(false);
     expect(mocks.message).toHaveBeenCalled();
@@ -87,10 +87,10 @@ describe('close exception and cancellation boundaries', () => {
     const hook = setup();
     act(() => hook.result.current.close.closeTabRequest('a'));
     await act(() => hook.result.current.close.confirmClose('discard'));
-    expect(hook.result.current.session.tabsRef.current).toHaveLength(1);
+    expect(hook.result.current.workspace.tabsRef.current).toHaveLength(1);
     expect(hook.result.current.close.closeBusy).toBe(false);
     await act(() => hook.result.current.close.confirmClose('discard'));
-    expect(hook.result.current.session.tabsRef.current).toHaveLength(0);
+    expect(hook.result.current.workspace.tabsRef.current).toHaveLength(0);
   });
 
   it('cancels an awaiting save continuation while allowing the save to finish', async () => {
@@ -104,11 +104,11 @@ describe('close exception and cancellation boundaries', () => {
     });
     await act(() => hook.result.current.close.confirmClose('cancel'));
     await act(async () => {
-      hook.result.current.session.updateTab('a', { dirty: false });
+      hook.result.current.workspace.updateTab('a', { dirty: false });
       gate.resolve(true);
       await saving;
     });
-    expect(hook.result.current.session.tabsRef.current).toHaveLength(1);
+    expect(hook.result.current.workspace.tabsRef.current).toHaveLength(1);
     expect(hook.result.current.close.pendingCloseTab).toBeNull();
   });
 
@@ -118,7 +118,7 @@ describe('close exception and cancellation boundaries', () => {
     const hook = setup(false);
     await act(async () => hook.result.current.close.handleWindowClose());
     await act(async () => {
-      hook.result.current.session.updateTab('a', { dirty: true, markdown: 'latest' });
+      hook.result.current.workspace.updateTab('a', { dirty: true, markdown: 'latest' });
       gate.resolve();
     });
     expect(mocks.destroy).not.toHaveBeenCalled();
@@ -129,7 +129,7 @@ describe('close exception and cancellation boundaries', () => {
     mocks.destroy.mockRejectedValueOnce(new Error('native close failed'));
     const hook = setup(false);
     await act(async () => hook.result.current.close.handleWindowClose());
-    expect(hook.result.current.session.tabsRef.current).toHaveLength(1);
+    expect(hook.result.current.workspace.tabsRef.current).toHaveLength(1);
     await act(async () => hook.result.current.close.handleWindowClose());
     expect(mocks.destroy).toHaveBeenCalledTimes(2);
   });

@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RecoveryModal } from '../src/components/RecoveryModal';
-import { useDocumentSession } from '../src/hooks/useDocumentSession';
+import { useWorkspace } from '../src/hooks/useWorkspace';
 import { useRecovery } from '../src/hooks/useRecovery';
 import { Presence } from '../src/lib/presence';
 import { clearRecovery } from '../src/lib/recovery';
@@ -45,9 +45,9 @@ function restored(id: string) {
 }
 function setup() {
   return renderHook(() => {
-    const session = useDocumentSession();
-    const recovery = useRecovery(session);
-    return { session, recovery };
+    const workspace = useWorkspace();
+    const recovery = useRecovery(workspace);
+    return { workspace, recovery };
   });
 }
 beforeEach(() => {
@@ -81,7 +81,7 @@ describe('recovery identity and publication', () => {
       gate.resolve(restored('shared'));
       await Promise.all([first, second]);
     });
-    expect(hook.result.current.session.tabsRef.current.map((tab) => tab.id)).toEqual(['shared']);
+    expect(hook.result.current.workspace.tabsRef.current.map((tab) => tab.id)).toEqual(['shared']);
     expect(mocks.installImages).toHaveBeenCalledTimes(1);
   });
 
@@ -89,8 +89,8 @@ describe('recovery identity and publication', () => {
     const gate = deferred<ReturnType<typeof restored>>();
     mocks.restore.mockReturnValue(gate.promise);
     function Harness() {
-      const session = useDocumentSession();
-      const recovery = useRecovery(session);
+      const workspace = useWorkspace();
+      const recovery = useRecovery(workspace);
       return (
         <>
           <button onClick={() => recovery.setRecoveryOpen(true)}>恢复管理</button>
@@ -110,7 +110,7 @@ describe('recovery identity and publication', () => {
               onClose={() => recovery.setRecoveryOpen(false)}
             />
           </Presence>
-          <output data-testid="tab-ids">{session.tabs.map((tab) => tab.id).join(',')}</output>
+          <output data-testid="tab-ids">{workspace.tabs.map((tab) => tab.id).join(',')}</output>
         </>
       );
     }
@@ -137,19 +137,19 @@ describe('recovery identity and publication', () => {
     let operation!: Promise<void>;
     act(() => {
       operation = hook.result.current.recovery.handleRestore('taken');
-      hook.result.current.session.addTab(
+      hook.result.current.workspace.addTab(
         { title: 'newer', path: null, isNew: true, content: 'newer content' },
         'taken',
       );
-      hook.result.current.session.contentGenerations.current.taken = 7;
+      hook.result.current.workspace.contentGenerations.current.taken = 7;
     });
     await act(async () => {
       gate.resolve(restored('taken'));
       await operation;
     });
-    expect(hook.result.current.session.tabsRef.current).toHaveLength(1);
-    expect(hook.result.current.session.tabsRef.current[0].markdown).toBe('newer content');
-    expect(hook.result.current.session.contentGenerations.current.taken).toBe(7);
+    expect(hook.result.current.workspace.tabsRef.current).toHaveLength(1);
+    expect(hook.result.current.workspace.tabsRef.current[0].markdown).toBe('newer content');
+    expect(hook.result.current.workspace.contentGenerations.current.taken).toBe(7);
     expect(mocks.installImages).not.toHaveBeenCalled();
   });
 
@@ -166,7 +166,7 @@ describe('recovery identity and publication', () => {
       gate.resolve(restored('deleted'));
       await operation;
     });
-    expect(hook.result.current.session.tabsRef.current).toHaveLength(0);
+    expect(hook.result.current.workspace.tabsRef.current).toHaveLength(0);
     expect(mocks.installImages).not.toHaveBeenCalled();
   });
 
@@ -193,24 +193,24 @@ describe('recovery identity and publication', () => {
     });
     await act(() => hook.result.current.recovery.handleRestore('retry'));
     expect(mocks.restore).toHaveBeenCalledTimes(2);
-    expect(hook.result.current.session.tabsRef.current.map((tab) => tab.id)).toEqual(['retry']);
+    expect(hook.result.current.workspace.tabsRef.current.map((tab) => tab.id)).toEqual(['retry']);
   });
 
   it('does not reset a live tab when addTab is called again with its id', () => {
     const hook = setup();
     act(() => {
-      hook.result.current.session.addTab(
+      hook.result.current.workspace.addTab(
         { title: 'first', path: null, isNew: true, content: 'keep me' },
         'unique',
       );
-      hook.result.current.session.contentGenerations.current.unique = 9;
-      hook.result.current.session.addTab(
+      hook.result.current.workspace.contentGenerations.current.unique = 9;
+      hook.result.current.workspace.addTab(
         { title: 'second', path: null, isNew: true, content: 'do not replace' },
         'unique',
       );
     });
-    expect(hook.result.current.session.tabsRef.current).toHaveLength(1);
-    expect(hook.result.current.session.tabsRef.current[0].markdown).toBe('keep me');
-    expect(hook.result.current.session.contentGenerations.current.unique).toBe(9);
+    expect(hook.result.current.workspace.tabsRef.current).toHaveLength(1);
+    expect(hook.result.current.workspace.tabsRef.current[0].markdown).toBe('keep me');
+    expect(hook.result.current.workspace.contentGenerations.current.unique).toBe(9);
   });
 });

@@ -2,7 +2,7 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EXTERNAL_POLL_MS } from '../src/config/constants';
-import { useDocumentSession } from '../src/hooks/useDocumentSession';
+import { useWorkspace } from '../src/hooks/useWorkspace';
 import { useDocumentClose } from '../src/hooks/useDocumentClose';
 import { useExternalChanges } from '../src/hooks/useExternalChanges';
 import { useRecovery } from '../src/hooks/useRecovery';
@@ -61,11 +61,11 @@ const persist = async () => {};
 const onClosing = () => {};
 function setup(tabs: Tab[] = [initial()]) {
   return renderHook(() => {
-    const session = useDocumentSession(tabs);
-    const recovery = useRecovery(session);
-    useExternalChanges(session, recovery);
-    const close = useDocumentClose(session, recovery, mocks.save, persist, onClosing);
-    return { session, recovery, close };
+    const workspace = useWorkspace(tabs);
+    const recovery = useRecovery(workspace);
+    useExternalChanges(workspace, recovery);
+    const close = useDocumentClose(workspace, recovery, mocks.save, persist, onClosing);
+    return { workspace, recovery, close };
   });
 }
 async function poll() {
@@ -100,9 +100,9 @@ describe('local versions without a matching disk copy', () => {
   it('protects a declined external version and confirms before closing its clean buffer', async () => {
     const hook = setup();
     await poll();
-    expect(hook.result.current.session.tabsRef.current[0].markdown).toBe('local original A');
+    expect(hook.result.current.workspace.tabsRef.current[0].markdown).toBe('local original A');
     // A disk divergence is not a new keystroke: keep polling for later disk versions.
-    expect(hook.result.current.session.tabsRef.current[0].dirty).toBe(false);
+    expect(hook.result.current.workspace.tabsRef.current[0].dirty).toBe(false);
     expect(mocks.schedule).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'a', markdown: 'local original A' }),
       expect.any(Function),
@@ -110,10 +110,10 @@ describe('local versions without a matching disk copy', () => {
     );
     act(() => hook.result.current.close.closeTabRequest('a'));
     expect(hook.result.current.close.pendingCloseTab?.id).toBe('a');
-    expect(hook.result.current.session.tabsRef.current).toHaveLength(1);
+    expect(hook.result.current.workspace.tabsRef.current).toHaveLength(1);
     expect(mocks.clear).not.toHaveBeenCalled();
     await act(() => hook.result.current.close.confirmClose('cancel'));
-    expect(hook.result.current.session.tabsRef.current).toHaveLength(1);
+    expect(hook.result.current.workspace.tabsRef.current).toHaveLength(1);
   });
 
   it('does not destroy the window or delete recovery after declining an external version', async () => {
@@ -141,7 +141,7 @@ describe('local versions without a matching disk copy', () => {
     mocks.revision.mockResolvedValue({ path: 'C:/notes/a.md', revision: 'C', mtime: 2 });
     await poll();
     expect(mocks.confirm).toHaveBeenCalledTimes(2);
-    expect(hook.result.current.session.tabsRef.current[0].markdown).toBe('local original A');
+    expect(hook.result.current.workspace.tabsRef.current[0].markdown).toBe('local original A');
   });
 
   it('clears local-only protection after an accepted and verified reload', async () => {
@@ -156,9 +156,9 @@ describe('local versions without a matching disk copy', () => {
       mtime: 3,
     });
     await poll();
-    expect(hook.result.current.session.tabsRef.current[0].markdown).toBe('external C');
+    expect(hook.result.current.workspace.tabsRef.current[0].markdown).toBe('external C');
     await act(async () => hook.result.current.close.closeTabRequest('a'));
-    expect(hook.result.current.session.tabsRef.current).toHaveLength(0);
+    expect(hook.result.current.workspace.tabsRef.current).toHaveLength(0);
     expect(hook.result.current.close.pendingCloseTab).toBeNull();
   });
 
@@ -169,10 +169,10 @@ describe('local versions without a matching disk copy', () => {
     );
     const hook = setup();
     await poll();
-    const { session } = hook.result.current;
-    expect(session.tabsRef.current[0].markdown).toBe('local original A');
+    const { workspace } = hook.result.current;
+    expect(workspace.tabsRef.current[0].markdown).toBe('local original A');
     // The detected disk mtime, not -1: the file is known to exist.
-    expect(session.blockedExternalMtime.current.a).toBe(2);
+    expect(workspace.blockedExternalMtime.current.a).toBe(2);
     const shown = mocks.message.mock.calls.map(([text]) => String(text));
     expect(shown).toHaveLength(1);
     expect(shown[0]).toContain('图片');
@@ -184,9 +184,9 @@ describe('local versions without a matching disk copy', () => {
     mocks.clear.mockReturnValueOnce(new Promise<void>((resolve) => (release = resolve)));
     const hook = setup();
     act(() => hook.result.current.close.closeTabRequest('a'));
-    act(() => hook.result.current.session.pauseAutoSave('a', -1));
+    act(() => hook.result.current.workspace.pauseAutoSave('a', -1));
     await act(async () => release());
-    expect(hook.result.current.session.tabsRef.current).toHaveLength(1);
+    expect(hook.result.current.workspace.tabsRef.current).toHaveLength(1);
     expect(hook.result.current.close.pendingCloseTab?.id).toBe('a');
   });
 
@@ -195,7 +195,7 @@ describe('local versions without a matching disk copy', () => {
     await poll();
     act(() => hook.result.current.close.closeTabRequest('a'));
     await act(() => hook.result.current.close.confirmClose('discard'));
-    expect(hook.result.current.session.tabsRef.current).toHaveLength(0);
+    expect(hook.result.current.workspace.tabsRef.current).toHaveLength(0);
     expect(mocks.clear).toHaveBeenCalledTimes(1);
   });
 
@@ -228,7 +228,7 @@ describe('local versions without a matching disk copy', () => {
     mocks.revision.mockClear();
 
     await act(async () => {
-      hook.result.current.session.selectTab('b');
+      hook.result.current.workspace.selectTab('b');
       await Promise.resolve();
     });
     expect(mocks.revision).toHaveBeenCalledExactlyOnceWith('C:/notes/b.md');

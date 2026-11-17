@@ -7,19 +7,19 @@ import { needsDocumentProtection } from '../lib/documentProtection';
 import { errorMessage } from '../lib/errors';
 import type { Tab } from '../lib/types';
 
-import type { DocumentSession } from './useDocumentSession';
+import type { Workspace } from './useWorkspace';
 import type { RecoveryController } from './useRecovery';
 import type { WindowSessionController } from './useSessionPersistence';
 
 export function useDocumentClose(
-  session: DocumentSession,
+  workspace: Workspace,
   recovery: Pick<RecoveryController, 'cleanRecovery' | 'protectDraft'>,
   doSave: (id: string, manual?: boolean) => Promise<boolean>,
   persistWindowState: () => Promise<void>,
   onClosing: () => void,
   sessionController?: WindowSessionController,
 ) {
-  const { tabsRef, contentGenerations, editorRegistry, resolveContent, removeTab } = session;
+  const { tabsRef, contentGenerations, editorRegistry, resolveContent, removeTab } = workspace;
   const { cleanRecovery, protectDraft } = recovery;
   const [pendingCloseTab, setPendingCloseState] = useState<Tab | null>(null);
   const [closeBusy, setCloseBusy] = useState(false);
