@@ -120,7 +120,7 @@ It never installs, starts Sandbox, uses coordinate/keyboard fallback, or force-k
 processes. UIA text replacement is not IME coverage; DPI and actual PDF fidelity
 remain manual. A successful automatic smoke still sets `candidateAccepted=false`;
 cleanup only covers its root and recorded descendants, not an unobserved process
-tree. The current completion record is [here](../completion-2026-11-02.md).
+tree. The current completion record is [here](../history/completion-2026-11-02.md).
 
 After reviewing the report, create a **local** JSON approval receipt containing:
 

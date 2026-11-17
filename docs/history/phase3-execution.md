@@ -1,6 +1,6 @@
 # Stage 3: unified typography
 
-> Historical execution record. Current status: [README](../README.md); current delivery/rollback: [Windows runbook](ops/windows-delivery.md). Conclusions below describe this report's original run.
+> Historical execution record. Current status: [README](../../README.md); current delivery/rollback: [Windows runbook](../ops/windows-delivery.md). Conclusions below describe this report's original run.
 
 Candidate: `0.2.5-phase3.1`\
 Build identity: `phase3-20261030.1`

@@ -18,13 +18,13 @@
 | 大量搜索匹配导致重复全量扫描与装饰重建                  | 稀疏索引保留精确匹配计数和导航，高亮数量有界，切换匹配只更新必要装饰                              |
 | 相同字节的外链图片或校验后被替换的文稿叶节点            | 读取拒绝链接／重解析点，Windows 打开使用 `OPEN_REPARSE_POINT`；三项原始实链回归已实际通过         |
 
-文件、图片分配、暂存及设置契约见 [IPC 文档](ipc.md)；新增的 `documentProtection.ts`、`image_data.rs`、`image_stash.rs`、`owned_file.rs` 及对应回归都是本轮必需输入。
+文件、图片分配、暂存及设置契约见 [IPC 文档](../ipc.md)；新增的 `documentProtection.ts`、`image_data.rs`、`image_stash.rs`、`owned_file.rs` 及对应回归都是本轮必需输入。
 
 ## 已执行的验证
 
 本轮源码的前端质量门禁包含 ESLint、Prettier、配置同步、两套 TypeScript 和覆盖率检查：**50 个文件、587 项单测通过**，前端行覆盖率 **58.16%**。完整真实 React／Milkdown 浏览器回归为 **182/182**，原生 IPC 使用测试模拟。
 
-普通 Rust 套件为 **94 passed / 0 failed / 3 ignored**；三项真实 Windows 文件符号链接专项另行显式执行，为 **3 passed / 0 failed / 0 ignored**。原测试、断言与链接夹具均保留。运行方式、Low 完整性进程原因及证据范围见 [开发检查](development-quality.md)。
+普通 Rust 套件为 **94 passed / 0 failed / 3 ignored**；三项真实 Windows 文件符号链接专项另行显式执行，为 **3 passed / 0 failed / 0 ignored**。原测试、断言与链接夹具均保留。运行方式、Low 完整性进程原因及证据范围见 [开发检查](../development-quality.md)。
 
 Rust 格式、Clippy 和 Windows Release 构建已通过。将 `image_data` 的两项测试原样移到独立 `image_data_tests.rs` 后，按 CI 的生产代码口径实际测得行覆盖率 **71.81%（1284/1788）**、函数覆盖率 **54.47%（134/246）**，均超过原门槛 69%／51%；没有调整门槛或排除生产文件。当前候选的构建来源、哈希和验证结果在本轮候选刷新证据及 PR CI 中单独记录。
 
@@ -32,4 +32,4 @@ Rust 格式、Clippy 和 Windows Release 构建已通过。将 `image_data` 的�
 
 早期 0.2.6 候选绑定提交 `549960ad989c60c804b8e070a77e190b920cd12c`，没有包含本轮修复。当前候选必须重新构建，并让检查前、检查后、编译后的源码摘要一致；旧候选体积与浏览器结果继续保留为当时的记录。
 
-本轮没有安装或覆盖用户应用、文稿和设置。新候选的安装／升级／回滚、原生保存和恢复、中文输入法、DPI、真实图片剪贴板、WebView2 PDF 及 Windows 10 验收仍需独立完成，见 [候选验收清单](ops/candidate-0.2.6.md)。GitHub 正式下载仍为 0.2.5。
+本轮没有安装或覆盖用户应用、文稿和设置。新候选的安装／升级／回滚、原生保存和恢复、中文输入法、DPI、真实图片剪贴板、WebView2 PDF 及 Windows 10 验收仍需独立完成，见 [候选验收清单](../ops/candidate-0.2.6.md)。GitHub 正式下载仍为 0.2.5。

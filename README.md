@@ -32,7 +32,7 @@ Windows 上的 Markdown 桌面编辑器，所见即所得。
 - 从正文空白处拖出矩形框选图片，半透明蒙版标明选中范围；仅复制、删除相交图片，保留中间正文，也支持连续拖选与 `Shift+点击` 扩选
 - 双击图片打开查看器，`Ctrl+滚轮` 或 `Ctrl+=` / `Ctrl+-` 缩放，`Esc` 返回。编辑器的 `Ctrl+滚轮` 按帧预览缩放，滚动结束后完成排版
 
-操作方式和恢复／插入边界见 [编辑工作流说明](docs/editor-workflows-2026-11-07.md)，本轮打磨与验证见 [修复记录](docs/quality-fixes-2026-11-08.md)。以上改动尚未包含在当前下载的 v0.2.5 安装包中。
+操作方式和恢复／插入边界见 [编辑工作流说明](docs/editor-workflows-2026-11-07.md)，本轮打磨与验证见 [修复记录](docs/history/quality-fixes-2026-11-08.md)。以上改动尚未包含在当前下载的 v0.2.5 安装包中。
 
 ## 快捷键
 
@@ -81,8 +81,10 @@ Tauri · React · TypeScript · Vite · Milkdown · Mermaid · KaTeX
 - [维护说明](docs/update-notes.md) —— 图标生成、构建检查与常见问题排查
 - [开发与质量检查](docs/development-quality.md) —— 模块职责、回归检查、覆盖率门槛与共享配置
 - [编辑工作流说明](docs/editor-workflows-2026-11-07.md)：候选版的查找替换、会话恢复、图片插入、目录与文稿链接
+- [标签状态模型](docs/state-model.md)：改动保存、关闭、外部变更前必读的规则与状态表
+- [术语表](GLOSSARY.md)
 - [IPC 契约与安全边界](docs/ipc.md) —— 原生命令、参数校验与失败语义
-- [Rust 依赖跟踪](docs/dependency-risk-2026-11-05.md) —— Windows 影响核查与升级窗口
+- [Rust 依赖跟踪](docs/history/dependency-risk-2026-11-05.md) —— Windows 影响核查与升级窗口
 - [文件关联](docs/file-association.md) —— 设置默认打开方式与单实例打开机制
 
 ## 许可证

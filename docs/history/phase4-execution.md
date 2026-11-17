@@ -1,6 +1,6 @@
 # Stage 4: image and diagram interaction
 
-> Historical execution record. Current status: [README](../README.md); current delivery/rollback: [Windows runbook](ops/windows-delivery.md). Conclusions below describe this report's original run.
+> Historical execution record. Current status: [README](../../README.md); current delivery/rollback: [Windows runbook](../ops/windows-delivery.md). Conclusions below describe this report's original run.
 
 Candidate: `0.2.5-phase4.2`\
 Build identity: `phase4-20261030.2`

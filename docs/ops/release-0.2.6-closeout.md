@@ -206,7 +206,7 @@ C:\Users\49995\Downloads\MDPlus-0.2.6-closeout-20261116-077fb6d\current
 
 ### 依赖状态
 
-`Cargo.lock`、`package-lock.json`、`Cargo.toml` 和 `package.json` 自 `adbac67` 以来没有变化，上文 2026-11-13 的完整审计（0 vulnerabilities、2 unsound、9 unmaintained、1 yanked）对应的仍是当前锁文件。2026-11-15 用 cargo-audit 0.22.2 加 `--no-yanked` 重跑：477 个包，0 vulnerabilities、2 unsound、9 unmaintained；没有重做 yanked 检查和 Windows 可达性核对，记录在[依赖风险复查](../dependency-risk-recheck-2026-11-12.md)文末。重建期间没有再次审计。Issue #2 保持开放，原 2026-12-03 节点不变。
+`Cargo.lock`、`package-lock.json`、`Cargo.toml` 和 `package.json` 自 `adbac67` 以来没有变化，上文 2026-11-13 的完整审计（0 vulnerabilities、2 unsound、9 unmaintained、1 yanked）对应的仍是当前锁文件。2026-11-15 用 cargo-audit 0.22.2 加 `--no-yanked` 重跑：477 个包，0 vulnerabilities、2 unsound、9 unmaintained；没有重做 yanked 检查和 Windows 可达性核对，记录在[依赖风险复查](../history/dependency-risk-recheck-2026-11-12.md)文末。重建期间没有再次审计。Issue #2 保持开放，原 2026-12-03 节点不变。
 
 ### 发布门槛（2026-11-16）
 

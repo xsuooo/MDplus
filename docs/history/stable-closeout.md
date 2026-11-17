@@ -1,8 +1,8 @@
 # Stable baseline closeout
 
 Date: 2026-10-31 (Asia/Shanghai).
-Current state: [README](../README.md).
-Operating procedure: [Windows delivery and rollback](ops/windows-delivery.md).
+Current state: [README](../../README.md).
+Operating procedure: [Windows delivery and rollback](../ops/windows-delivery.md).
 
 ## Frozen scope
 
