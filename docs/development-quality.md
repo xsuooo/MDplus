@@ -9,7 +9,7 @@
 | `useWorkspace`                                                  | 标签身份、当前视图、编辑器注册、内容镜像、内容／保存代次及共享队列     |
 | `useDocumentSave`                                               | 自动／手动保存与另存为队列、图片迁移、条件写入与提交基线               |
 | `useDocumentClose`                                              | 标签／窗口关闭协调、独立取消代次、忙碌状态及异步后的重检查             |
-| `useWindowLifecycle` + `services/windowState`                   | 物理像素恢复、窗口监听及几何状态保存                                   |
+| `useWindowLifecycle` + `services/windowPersistence`             | 物理像素恢复、窗口监听及几何状态保存                                   |
 | `usePreferences` + `services/settingsStore`                     | 设置初始化、用户选择优先、失败重试及固定原生资源访问                   |
 | `useRecovery`                                                   | 延迟图片准备、恢复副本、恢复状态与恢复列表                             |
 | `useDocumentFiles`                                              | 打开、新建、原生启动／单实例／拖放输入及最近列表                       |

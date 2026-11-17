@@ -1,5 +1,5 @@
 import { Component, type ReactNode } from 'react';
-import { showInitialWindow } from '../services/windowState';
+import { showInitialWindow } from '../services/windowPersistence';
 
 interface Props {
   children: ReactNode;

@@ -114,7 +114,7 @@ describe('initial window preparation and reveal', () => {
       await maximize.promise;
       mocks.trace.push('maximize:complete');
     });
-    const service = await import('../src/services/windowState');
+    const service = await import('../src/services/windowPersistence');
     let ready = false;
     const windowReady = service.waitForWindowReady().then(() => {
       ready = true;
@@ -159,7 +159,7 @@ describe('initial window preparation and reveal', () => {
   it('shares preparation and reveal across concurrent callers without replaying native operations', async () => {
     const stateRead = deferred<WindowState>();
     mocks.getState.mockImplementation(() => stateRead.promise);
-    const service = await import('../src/services/windowState');
+    const service = await import('../src/services/windowPersistence');
     const calls = [
       service.prepareWindowState(),
       service.prepareWindowState(),
@@ -182,7 +182,7 @@ describe('initial window preparation and reveal', () => {
   it('preserves a live window on page reload instead of restoring an older saved placement', async () => {
     mocks.visible = true;
     mocks.state!.maximized = true;
-    const service = await import('../src/services/windowState');
+    const service = await import('../src/services/windowPersistence');
     await service.showInitialWindow();
     expect(mocks.getState).not.toHaveBeenCalled();
     expect(mocks.monitors).not.toHaveBeenCalled();
@@ -193,7 +193,7 @@ describe('initial window preparation and reveal', () => {
 
   it('reveals the default window and releases modal waiters after a saved-state read fails', async () => {
     mocks.getState.mockRejectedValue(new Error('settings read failed'));
-    const service = await import('../src/services/windowState');
+    const service = await import('../src/services/windowPersistence');
     const windowReady = service.waitForWindowReady();
     await service.showInitialWindow().catch(() => {});
     await windowReady;
@@ -203,7 +203,7 @@ describe('initial window preparation and reveal', () => {
 
   it('restores a minimized startup window before focusing it', async () => {
     mocks.isMinimized.mockResolvedValue(true);
-    const service = await import('../src/services/windowState');
+    const service = await import('../src/services/windowPersistence');
     await service.showInitialWindow();
     expect(mocks.unminimize).toHaveBeenCalledTimes(1);
     expect(mocks.trace.indexOf('unminimize')).toBeLessThan(mocks.trace.indexOf('focus'));
@@ -211,7 +211,7 @@ describe('initial window preparation and reveal', () => {
 
   it('settles the shared ready signal even when native reveal fails', async () => {
     mocks.show.mockRejectedValue(new Error('window unavailable'));
-    const service = await import('../src/services/windowState');
+    const service = await import('../src/services/windowPersistence');
     const windowReady = service.waitForWindowReady();
     await service.showInitialWindow().catch(() => {});
     await windowReady;
@@ -220,7 +220,7 @@ describe('initial window preparation and reveal', () => {
 
   it('does not invoke native window APIs in a browser', async () => {
     mocks.native = false;
-    const service = await import('../src/services/windowState');
+    const service = await import('../src/services/windowPersistence');
     await service.prepareWindowState();
     await service.showInitialWindow();
     await service.waitForWindowReady();

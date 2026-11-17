@@ -16,7 +16,7 @@ import type { SessionDocument } from '../lib/documentSession';
 import { getRecentFiles, pushRecentFile, removeRecentFile } from '../lib/store';
 import { getTemplate } from '../lib/templates';
 import type { RecentFile, Tab } from '../lib/types';
-import { waitForWindowReady } from '../services/windowState';
+import { waitForWindowReady } from '../services/windowPersistence';
 
 import type { Workspace } from './useWorkspace';
 import { useSessionPersistence } from './useSessionPersistence';

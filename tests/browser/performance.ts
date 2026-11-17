@@ -48,8 +48,8 @@ export async function runPerformanceRegression(testCase: PerformanceCase): Promi
       latest = update;
       updates++;
     },
-    resolveImageIdentity: (url) => url,
-    resolveImageReference: (url) => url,
+    imageTokenForUrl: (url) => url,
+    imageUrlForToken: (url) => url,
   });
   await editor.create();
   try {

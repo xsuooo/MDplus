@@ -10,7 +10,7 @@ import { SearchBar } from '../src/components/SearchBar';
 import { LIMITS } from '../src/config/constants';
 import { searchPlugin, searchPluginKey } from '../src/lib/search';
 
-vi.mock('../src/lib/sourcePosition', () => ({
+vi.mock('../src/lib/position/sourcePosition', () => ({
   measureSourceText: (
     _input: HTMLTextAreaElement,
     _value: string,

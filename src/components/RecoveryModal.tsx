@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useDialogFocus } from '../lib/useDialogFocus';
-import { clearRecovery, type RecoveryEntry } from '../lib/recovery';
+import { deleteSnapshot, type RecoveryEntry } from '../lib/recovery';
 import { confirmDialog, showMessage } from '../lib/dialog';
 import { displayPath } from '../lib/pathDisplay';
 
@@ -27,7 +27,7 @@ export function RecoveryModal({
           !(await confirmDialog(`永久删除「${entry.title}」的恢复副本和缓存图片？原文档不受影响。`))
         )
           return;
-        await clearRecovery(entry.id);
+        await deleteSnapshot(entry.id);
         onRemove(entry.id);
       }
     } catch {

@@ -11,7 +11,7 @@ export function isRelativeImageUrl(url: string): boolean {
   return !/^(?:mdplus-image:|https?:|data:|file:|[a-zA-Z]:[\\/]|\/|\/\/)/i.test(url);
 }
 
-export interface PendingImageReference {
+export interface UrlRewrite {
   placeholder: string;
   relativePath: string;
 }
@@ -178,7 +178,7 @@ function encodeDestination(url: string, literal: boolean): string {
 }
 
 /** 按源区间改写 destination;仅在共用定义时展开图片引用,保留普通链接。 */
-function imageReferenceEdits(markdown: string, references: PendingImageReference[]) {
+function imageReferenceEdits(markdown: string, references: UrlRewrite[]) {
   if (references.length === 0) return [];
   const replacements = new Map(
     references.map((reference) => [reference.placeholder, reference.relativePath]),
@@ -200,10 +200,7 @@ function imageReferenceEdits(markdown: string, references: PendingImageReference
   });
 }
 
-export function rewriteImageReferences(
-  markdown: string,
-  references: PendingImageReference[],
-): string {
+export function rewriteImageReferences(markdown: string, references: UrlRewrite[]): string {
   return imageReferenceEdits(markdown, references).reduceRight(
     (text, edit) => text.slice(0, edit.start) + edit.text + text.slice(edit.end),
     markdown,
@@ -211,11 +208,7 @@ export function rewriteImageReferences(
 }
 
 /** Rebase a selection through individual image URL replacements, not one large diff. */
-export function mapImageOffset(
-  markdown: string,
-  references: PendingImageReference[],
-  offset: number,
-): number {
+export function mapImageOffset(markdown: string, references: UrlRewrite[], offset: number): number {
   let delta = 0;
   for (const edit of imageReferenceEdits(markdown, references)) {
     if (offset <= edit.start) break;

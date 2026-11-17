@@ -5,10 +5,10 @@ import { basename } from '../lib/fileOps';
 import { prepareImageReferences } from '../lib/imageOps';
 import { scheduleImagePreparation } from '../lib/imagePreparation';
 import {
-  clearRecovery,
+  deleteSnapshot,
   listRecovery,
   prepareRecovery,
-  scheduleRecovery,
+  scheduleSnapshot,
   type RecoveryEntry,
   type RecoveryStatus,
 } from '../lib/recovery';
@@ -20,7 +20,7 @@ export function useRecovery(workspace: Workspace) {
   const {
     tabs,
     tabsRef,
-    contentGenerations,
+    contentVersions,
     saveGenerations,
     imagePreparations,
     resolveContent,
@@ -44,7 +44,7 @@ export function useRecovery(workspace: Workspace) {
       if (!tab) return Promise.resolve(false);
       const path = tab.path,
         revision = tab.diskRevision;
-      const version = contentGenerations.current[id] ?? 0;
+      const version = contentVersions.current[id] ?? 0;
       const content = resolveContent(tab);
       const pending = imagePreparations.current[id];
       if (
@@ -65,7 +65,7 @@ export function useRecovery(workspace: Workspace) {
             !!current &&
             current.path === path &&
             current.diskRevision === revision &&
-            (contentGenerations.current[id] ?? 0) === version &&
+            (contentVersions.current[id] ?? 0) === version &&
             resolveContent(current) === content &&
             (prepared?.commit() ?? true)
           );
@@ -81,15 +81,15 @@ export function useRecovery(workspace: Workspace) {
       if (!defer) void work.flush();
       return promise;
     },
-    [contentGenerations, imagePreparations, resolveContent, tabsRef],
+    [contentVersions, imagePreparations, resolveContent, tabsRef],
   );
 
   const recoveryInitialized = useRef(false);
-  const protectDraft = useCallback(
+  const saveRecoverySnapshot = useCallback(
     (tab: Tab) => {
       const current = tabsRef.current.find((candidate) => candidate.id === tab.id);
       if (!current) return;
-      scheduleRecovery(
+      scheduleSnapshot(
         { ...current, markdown: resolveContent(current) },
         (status) => {
           if (tabsRef.current.some((candidate) => candidate.id === current.id)) {
@@ -103,12 +103,12 @@ export function useRecovery(workspace: Workspace) {
     },
     [prepareCurrentImages, resolveContent, tabsRef],
   );
-  const cleanRecovery = useCallback(
+  const deleteRecoverySnapshot = useCallback(
     async (id: string) => {
-      const generation = contentGenerations.current[id];
+      const generation = contentVersions.current[id];
       try {
-        await clearRecovery(id);
-        if (contentGenerations.current[id] === generation) {
+        await deleteSnapshot(id);
+        if (contentVersions.current[id] === generation) {
           setRecoveryStates((previous) => ({ ...previous, [id]: 'idle' }));
         }
         return true;
@@ -117,7 +117,7 @@ export function useRecovery(workspace: Workspace) {
         return false;
       }
     },
-    [contentGenerations],
+    [contentVersions],
   );
 
   // Preserve disk-diverged buffers even when no new keystroke made them dirty.
@@ -128,10 +128,10 @@ export function useRecovery(workspace: Workspace) {
     for (const tab of tabs) {
       if (!tab.preserveLocal) continue;
       retained.add(tab.id);
-      if (!retainedLocalIds.current.has(tab.id)) protectDraft(tab);
+      if (!retainedLocalIds.current.has(tab.id)) saveRecoverySnapshot(tab);
     }
     retainedLocalIds.current = retained;
-  }, [tabs, protectDraft]);
+  }, [tabs, saveRecoverySnapshot]);
 
   const refreshRecovery = useCallback(async () => {
     try {
@@ -208,8 +208,8 @@ export function useRecovery(workspace: Workspace) {
   }, []);
   return {
     prepareCurrentImages,
-    protectDraft,
-    cleanRecovery,
+    saveRecoverySnapshot,
+    deleteRecoverySnapshot,
     refreshRecovery,
     handleRestore,
     recoveryEntries,

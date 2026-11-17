@@ -4,7 +4,11 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useEffect, useState } from 'react';
 import { BODY_FONTS, CODE_FONTS, readBodyFont, readCodeFont } from '../lib/editorFont';
 
-import { persistWindowState, prepareWindowState, showInitialWindow } from '../services/windowState';
+import {
+  persistWindowState,
+  prepareWindowState,
+  showInitialWindow,
+} from '../services/windowPersistence';
 
 export function useWindowLifecycle(preferencesReady: boolean) {
   const [windowReady, setWindowReady] = useState(() => !isTauri());

@@ -763,7 +763,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
       JSON.stringify(bounds) === JSON.stringify(savedBounds),
       `Physical bounds scaled at ${scaleFactor} DPI: ${JSON.stringify(bounds)}`,
     );
-    const { persistWindowState } = await import('../../src/services/windowState');
+    const { persistWindowState } = await import('../../src/services/windowPersistence');
     await persistWindowState();
     check(
       JSON.stringify(store.get('window-state')) === JSON.stringify(savedBounds),

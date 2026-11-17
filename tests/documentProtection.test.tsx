@@ -36,8 +36,8 @@ vi.mock('../src/lib/imageOps', () => ({
   prepareImageReferences: vi.fn(async () => ({ commit: () => true, dispose: async () => {} })),
 }));
 vi.mock('../src/lib/recovery', () => ({
-  clearRecovery: mocks.clear,
-  scheduleRecovery: mocks.schedule,
+  deleteSnapshot: mocks.clear,
+  scheduleSnapshot: mocks.schedule,
   listRecovery: vi.fn(async () => []),
   restoreRecovery: vi.fn(),
   prepareRecovery: vi.fn(),
@@ -52,7 +52,7 @@ const initial = (): Tab => ({
   markdown: 'local original A',
   savedContent: 'local original A',
   initialContent: 'local original A',
-  externalMtime: 1,
+  diskMtime: 1,
   diskRevision: 'A',
   externalChanged: false,
   stats: { words: 3, chars: 14, lines: 1 },
@@ -172,7 +172,7 @@ describe('local versions without a matching disk copy', () => {
     const { workspace } = hook.result.current;
     expect(workspace.tabsRef.current[0].markdown).toBe('local original A');
     // The detected disk mtime, not -1: the file is known to exist.
-    expect(workspace.blockedExternalMtime.current.a).toBe(2);
+    expect(workspace.autosavePausedMtime.current.a).toBe(2);
     const shown = mocks.message.mock.calls.map(([text]) => String(text));
     expect(shown).toHaveLength(1);
     expect(shown[0]).toContain('图片');

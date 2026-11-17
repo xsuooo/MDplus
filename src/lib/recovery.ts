@@ -197,7 +197,7 @@ function capture(tab: Pick<Tab, 'id' | 'title' | 'path' | 'markdown'>) {
   }
 }
 
-export function scheduleRecovery(
+export function scheduleSnapshot(
   tab: Pick<Tab, 'id' | 'title' | 'path' | 'markdown'>,
   onStatus: (status: RecoveryStatus) => void,
   ready?: Promise<boolean>,
@@ -266,7 +266,7 @@ export function scheduleRecovery(
 }
 
 /** Serialize deletion after pending image/snapshot writes, so they cannot resurrect a draft. */
-export async function clearRecovery(id: string): Promise<void> {
+export async function deleteSnapshot(id: string): Promise<void> {
   if (!isTauri()) return;
   const entry = journal(id);
   ++entry.generation;

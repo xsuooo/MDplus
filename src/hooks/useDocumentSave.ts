@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { confirmDialog, showMessage } from '../lib/dialog';
 import { needsDocumentProtection } from '../lib/documentProtection';
 import { flushEditorUpdate } from '../lib/editorUpdates';
-import { rebaseSourcePlace, renderedPlace } from '../lib/editorPosition';
+import { rebaseSourcePlace, renderedPlace } from '../lib/position/editorPosition';
 import { errorMessage } from '../lib/errors';
 import { basename, documentRevision, pickSaveFile, writeDocument } from '../lib/fileOps';
 import {
@@ -18,7 +18,7 @@ import { computeStats } from '../lib/stats';
 import { getRecentFiles, pushRecentFile } from '../lib/store';
 import type { RecentFile, Tab } from '../lib/types';
 
-import { AUTO_SAVE_DELAY } from '../config/constants';
+import { AUTO_SAVE_MS } from '../config/constants';
 import type { Workspace } from './useWorkspace';
 import type { RecoveryController } from './useRecovery';
 
@@ -68,12 +68,12 @@ export function useDocumentSave(
     saveGenerations,
     saveTimers,
     saveQueues,
-    contentGenerations,
+    contentVersions,
     tabMirror,
     positions,
     sourceRewrites,
     editorRegistry,
-    blockedExternalMtime,
+    autosavePausedMtime,
     detectedExternalStates,
     activeId,
     activeTab,
@@ -82,7 +82,7 @@ export function useDocumentSave(
     pauseAutoSave,
     syncEditor,
   } = workspace;
-  const { prepareCurrentImages, cleanRecovery, protectDraft } = recovery;
+  const { prepareCurrentImages, deleteRecoverySnapshot, saveRecoverySnapshot } = recovery;
   const [savingId, setSavingId] = useState<string | null>(null);
   /* ---------- 保存 ---------- */
   /**
@@ -174,10 +174,10 @@ export function useDocumentSave(
           return false;
         if (!isCurrentSave()) return false;
         const content = resolveContent(latestBeforeWrite);
-        const contentGeneration = contentGenerations.current[tab.id] ?? 0;
+        const contentGeneration = contentVersions.current[tab.id] ?? 0;
         const imagesReady = await prepareCurrentImages(tab.id);
         if (!isCurrentSave()) return false;
-        if (!imagesReady || (contentGenerations.current[tab.id] ?? 0) !== contentGeneration) {
+        if (!imagesReady || (contentVersions.current[tab.id] ?? 0) !== contentGeneration) {
           await showMessage(
             '图片准备期间文稿已变化，本次另存为已取消。编辑内容仍保留，请重试。',
             'info',
@@ -217,7 +217,7 @@ export function useDocumentSave(
         );
         if (!isCurrentSave()) return false;
         const contentChangedDuringWrite =
-          (contentGenerations.current[tab.id] ?? 0) !== contentGeneration;
+          (contentVersions.current[tab.id] ?? 0) !== contentGeneration;
         const latestContent = resolveContent(latestBeforeWrite);
         if (
           contentChangedDuringWrite &&
@@ -230,7 +230,7 @@ export function useDocumentSave(
           delete saveTimers.current[tab.id];
           pauseAutoSave(tab.id, -1);
           updateTab(tab.id, { dirty: true });
-          protectDraft(tabsRef.current.find((candidate) => candidate.id === tab.id)!);
+          saveRecoverySnapshot(tabsRef.current.find((candidate) => candidate.id === tab.id)!);
           await showMessage(
             `副本已写入「${displayPath(target)}」。保存期间又有含相对图片的新编辑，当前标签仍保留原文件位置和新稿，自动保存已暂停。请重新另存为以保存最新内容。`,
             'info',
@@ -249,7 +249,7 @@ export function useDocumentSave(
           path: receipt.path,
           title: basename(target),
           isNew: false,
-          externalMtime: receipt.mtime,
+          diskMtime: receipt.mtime,
           diskRevision: receipt.revision,
           externalChanged: false,
           preserveLocal: false,
@@ -257,13 +257,13 @@ export function useDocumentSave(
           savedContent: migratedContent,
           dirty: contentChangedDuringWrite ? latestContent !== migratedContent : false,
         });
-        delete blockedExternalMtime.current[tab.id];
+        delete autosavePausedMtime.current[tab.id];
         delete detectedExternalStates.current[tab.id];
         if (!contentChangedDuringWrite) {
-          await cleanRecovery(tab.id);
+          await deleteRecoverySnapshot(tab.id);
           const latest = tabsRef.current.find((item) => item.id === tab.id);
           if (latest && needsDocumentProtection(latest, resolveContent(latest)))
-            protectDraft(latest);
+            saveRecoverySnapshot(latest);
         }
         try {
           await pushRecentFile(receipt.path, basename(receipt.path), selected);
@@ -277,7 +277,7 @@ export function useDocumentSave(
         console.error('另存为失败', err);
         updateTab(tab.id, { dirty: true });
         const latest = tabsRef.current.find((item) => item.id === tab.id);
-        if (latest) protectDraft(latest);
+        if (latest) saveRecoverySnapshot(latest);
         await showMessage(`另存为失败:${errorMessage(err)}`, 'error');
         return false;
       } finally {
@@ -288,18 +288,18 @@ export function useDocumentSave(
       saveGenerations,
       tabsRef,
       resolveContent,
-      contentGenerations,
+      contentVersions,
       prepareCurrentImages,
       updateTab,
-      blockedExternalMtime,
+      autosavePausedMtime,
       detectedExternalStates,
       setRecentFiles,
       saveTimers,
       pauseAutoSave,
-      protectDraft,
+      saveRecoverySnapshot,
       sourceRewrites,
       applyMigratedContent,
-      cleanRecovery,
+      deleteRecoverySnapshot,
     ],
   );
 
@@ -318,7 +318,7 @@ export function useDocumentSave(
       const editor = editorRegistry.current[id];
       if (editor) flushEditorUpdate(editor);
       const tab = tabsRef.current.find((candidate) => candidate.id === id);
-      if (!tab || (!manual && id in blockedExternalMtime.current)) return false;
+      if (!tab || (!manual && id in autosavePausedMtime.current)) return false;
       if (saveAs || !tab.path) {
         return manual
           ? handleSaveAsFor(tab, generation, () => performSave(id, true, generation))
@@ -330,13 +330,13 @@ export function useDocumentSave(
       try {
         const disk = await documentRevision(tab.path);
         const diskMtime = disk.mtime ?? 0;
-        const blockedMtime = blockedExternalMtime.current[id];
+        const blockedMtime = autosavePausedMtime.current[id];
         const hasBlockedExternalChange =
           blockedMtime !== undefined && blockedMtime >= 0 && diskMtime === blockedMtime;
         const hasExternalConflict = disk.revision !== tab.diskRevision || hasBlockedExternalChange;
         if (hasExternalConflict) {
           if (!manual) {
-            if (blockedExternalMtime.current[id] !== diskMtime) {
+            if (autosavePausedMtime.current[id] !== diskMtime) {
               pauseAutoSave(id, diskMtime);
               await showMessage(
                 `「${tab.title}」的磁盘版本已变化，自动保存已暂停。请点击工具栏「保存」确认，或另存为保留两份。`,
@@ -356,10 +356,10 @@ export function useDocumentSave(
 
         if (!isCurrentSave()) return false;
         const rawContent = resolveContent(tab);
-        const contentGeneration = contentGenerations.current[id] ?? 0;
+        const contentGeneration = contentVersions.current[id] ?? 0;
         const imagesReady = await prepareCurrentImages(id);
         if (!isCurrentSave()) return false;
-        if (!imagesReady || (contentGenerations.current[id] ?? 0) !== contentGeneration) {
+        if (!imagesReady || (contentVersions.current[id] ?? 0) !== contentGeneration) {
           if (manual)
             await showMessage(
               '图片准备期间文稿已变化，本次保存已取消。编辑内容仍保留，请重试。',
@@ -385,8 +385,7 @@ export function useDocumentSave(
           writeState = state;
         });
         if (!isCurrentSave()) return false;
-        const contentChangedDuringWrite =
-          (contentGenerations.current[id] ?? 0) !== contentGeneration;
+        const contentChangedDuringWrite = (contentVersions.current[id] ?? 0) !== contentGeneration;
         if (!contentChangedDuringWrite) {
           commitImageMigration(migration);
           sourceRewrites.current[id] = [
@@ -401,19 +400,19 @@ export function useDocumentSave(
         updateTab(id, {
           dirty: latest !== content,
           markdown: latest,
-          externalMtime: receipt.mtime,
+          diskMtime: receipt.mtime,
           diskRevision: receipt.revision,
           externalChanged: false,
           preserveLocal: false,
           savedContent: content,
         });
-        delete blockedExternalMtime.current[id];
+        delete autosavePausedMtime.current[id];
         delete detectedExternalStates.current[id];
         if (!contentChangedDuringWrite) {
-          await cleanRecovery(id);
+          await deleteRecoverySnapshot(id);
           const current = tabsRef.current.find((item) => item.id === id);
           if (current && needsDocumentProtection(current, resolveContent(current)))
-            protectDraft(current);
+            saveRecoverySnapshot(current);
         }
         return true;
       } catch (err) {
@@ -422,7 +421,7 @@ export function useDocumentSave(
         pauseAutoSave(id, -1);
         updateTab(id, { dirty: true });
         const latest = tabsRef.current.find((item) => item.id === id);
-        if (latest) protectDraft(latest);
+        if (latest) saveRecoverySnapshot(latest);
         await showMessage(`保存失败:${errorMessage(err)}`, 'error');
         return false;
       } finally {
@@ -433,10 +432,10 @@ export function useDocumentSave(
       saveGenerations,
       editorRegistry,
       tabsRef,
-      blockedExternalMtime,
+      autosavePausedMtime,
       handleSaveAsFor,
       resolveContent,
-      contentGenerations,
+      contentVersions,
       prepareCurrentImages,
       tabMirror,
       updateTab,
@@ -444,8 +443,8 @@ export function useDocumentSave(
       pauseAutoSave,
       sourceRewrites,
       applyMigratedContent,
-      cleanRecovery,
-      protectDraft,
+      deleteRecoverySnapshot,
+      saveRecoverySnapshot,
     ],
   );
 
@@ -477,7 +476,7 @@ export function useDocumentSave(
     (id: string) => {
       const timer = saveTimers.current[id];
       if (timer) clearTimeout(timer);
-      saveTimers.current[id] = setTimeout(() => void doSave(id), AUTO_SAVE_DELAY);
+      saveTimers.current[id] = setTimeout(() => void doSave(id), AUTO_SAVE_MS);
     },
     [doSave, saveTimers],
   );

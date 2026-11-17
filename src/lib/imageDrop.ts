@@ -8,7 +8,7 @@ import {
   type SourceEditorApi,
   type SourceTextEdit,
 } from './sourceEditorApi';
-import { mapTextOffset } from './textPosition';
+import { mapTextOffset } from './position/textPosition';
 
 export interface DropPosition {
   x: number;

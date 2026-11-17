@@ -3,10 +3,10 @@ import { useEditor, Milkdown, MilkdownProvider } from '@milkdown/react';
 import type { Editor } from '@milkdown/kit/core';
 import { createEditor, getCurrentState, getEditorImageReferences } from '../lib/editor';
 import {
-  resolveImageSource,
+  imagePreviewUrl,
   subscribeImageSources,
-  resolveImageIdentity,
-  resolveImageReference,
+  imageTokenForUrl,
+  imageUrlForToken,
   registerImageReachability,
   imageReferencesChanged,
   settleImageInsertion,
@@ -86,10 +86,10 @@ function EditorTabInner({
         onUpdate: (u, coalesced) => onUpdateRef.current(tabIdRef.current, u, false, coalesced),
         onActivity: (u) => onActivityRef.current(tabIdRef.current, u),
         deferUpdates: true,
-        resolveImageSource: (url) => resolveImageSource(tabIdRef.current, url),
+        imagePreviewUrl: (url) => imagePreviewUrl(tabIdRef.current, url),
         subscribeImageSources: (listener) => subscribeImageSources(tabIdRef.current, listener),
-        resolveImageIdentity: (url) => resolveImageIdentity(tabIdRef.current, url),
-        resolveImageReference: (token) => resolveImageReference(tabIdRef.current, token),
+        imageTokenForUrl: (url) => imageTokenForUrl(tabIdRef.current, url),
+        imageUrlForToken: (token) => imageUrlForToken(tabIdRef.current, token),
         onImageReferencesChanged: () => imageReferencesChanged(tabIdRef.current),
         onImagePasteSettled: (token) => settleImageInsertion(tabIdRef.current, token),
         onMediaPreview: (media) => previewRef.current?.(media),

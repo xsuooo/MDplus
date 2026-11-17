@@ -17,7 +17,7 @@ import {
   getPendingImages,
   importDroppedImage,
   migratePendingImages,
-  resolveImageSource,
+  imagePreviewUrl,
   settleImageInsertion,
 } from '../src/lib/imageOps';
 
@@ -83,7 +83,7 @@ describe('native drop images reuse immutable backing and migration ownership', (
     expect(getPendingImages('drop-tab')).toEqual([
       expect.objectContaining({ placeholder: token, filename: receipt.filename, byteLength: 1 }),
     ]);
-    expect(resolveImageSource('drop-tab', token)).toBe(receipt.previewUrl);
+    expect(imagePreviewUrl('drop-tab', token)).toBe(receipt.previewUrl);
     settleImageInsertion('drop-tab', token);
     const markdown = `before ![](${token}) after`;
     const migration = await migratePendingImages('drop-tab', 'D:/saved/note.md', markdown);
@@ -98,7 +98,7 @@ describe('native drop images reuse immutable backing and migration ownership', (
     expect(native.invoke).toHaveBeenCalledWith('commit_image_assets', {
       allocationIds: ['allocation'],
     });
-    expect(resolveImageSource('drop-tab', './assets/图片 1.png')).toBe(receipt.previewUrl);
+    expect(imagePreviewUrl('drop-tab', './assets/图片 1.png')).toBe(receipt.previewUrl);
   });
 
   it('cancels a failed insertion immediately but retains an independent running read lease', async () => {

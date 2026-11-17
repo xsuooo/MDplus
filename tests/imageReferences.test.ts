@@ -19,7 +19,7 @@ import {
   loadImageReferences,
   migratePendingImages,
   prepareImageReferences,
-  resolveImageSource,
+  imagePreviewUrl,
   restorePendingImages,
   stagePendingImages,
   subscribeImageSources,
@@ -89,8 +89,8 @@ describe('transactional image references', () => {
     const original = tokenFrom(await loadImageReferences('image-tx', markdown, document));
     mocks.readImageFile.mockResolvedValue(loaded(newBytes));
     await loadImageReferences('image-tx', markdown, document);
-    expect(resolveImageSource('image-tx', './img/pic.png')).toBe(preview(newBytes));
-    expect(resolveImageSource('image-tx', original)).toBe(preview(oldBytes));
+    expect(imagePreviewUrl('image-tx', './img/pic.png')).toBe(preview(newBytes));
+    expect(imagePreviewUrl('image-tx', original)).toBe(preview(oldBytes));
   });
 
   it('keeps both global cache and source text unchanged until commit', async () => {
@@ -100,10 +100,10 @@ describe('transactional image references', () => {
       refresh: true,
     });
     expect(prepared.markdown).toBe(markdown);
-    expect(resolveImageSource('image-tx', './img/pic.png')).toBe(preview(oldBytes));
+    expect(imagePreviewUrl('image-tx', './img/pic.png')).toBe(preview(oldBytes));
     expect(getPendingImages('image-tx')).toHaveLength(1);
     expect(prepared.commit()).toBe(true);
-    expect(resolveImageSource('image-tx', './img/pic.png')).toBe(preview(newBytes));
+    expect(imagePreviewUrl('image-tx', './img/pic.png')).toBe(preview(newBytes));
     expect(prepared.commit()).toBe(false);
   });
 
@@ -111,9 +111,9 @@ describe('transactional image references', () => {
     const source = 'Keep ./img/new.png as text.\n\n![new](./img/new.png)';
     const prepared = await prepareImageReferences('image-tx', source, document);
     expect(prepared.markdown).toBe(source);
-    expect(resolveImageSource('image-tx', './img/new.png')).toBe('./img/new.png');
+    expect(imagePreviewUrl('image-tx', './img/new.png')).toBe('./img/new.png');
     expect(prepared.commit()).toBe(true);
-    expect(resolveImageSource('image-tx', './img/new.png')).toBe(preview(oldBytes));
+    expect(imagePreviewUrl('image-tx', './img/new.png')).toBe(preview(oldBytes));
     expect(mocks.readImageFile).toHaveBeenCalledExactlyOnceWith(document, 'img/new.png');
   });
 
@@ -133,7 +133,7 @@ describe('transactional image references', () => {
     expect(prepared.markdown).toBe(source);
     expect(prepared.commit()).toBe(true);
     expect(mocks.readImageFile).toHaveBeenCalledExactlyOnceWith(document, `img/${filename}`);
-    expect(resolveImageSource('image-tx', `./img/${url}`)).toBe(preview(oldBytes));
+    expect(imagePreviewUrl('image-tx', `./img/${url}`)).toBe(preview(oldBytes));
 
     const saved = await migratePendingImages('image-tx', document, source);
     expect(saved.markdown).toBe(source);
@@ -158,7 +158,7 @@ describe('transactional image references', () => {
       'D:\\other\\note.md',
       `assets/1-${filename}`,
     );
-    expect(resolveImageSource('other-image-tx', savedAs.references[0].relativePath)).toBe(
+    expect(imagePreviewUrl('other-image-tx', savedAs.references[0].relativePath)).toBe(
       preview(oldBytes),
     );
   });
@@ -170,7 +170,7 @@ describe('transactional image references', () => {
       const prepared = await prepareImageReferences('image-tx', source, document);
       expect(prepared.commit()).toBe(true);
       expect(mocks.readImageFile).toHaveBeenCalledExactlyOnceWith(document, `img/${filename}`);
-      expect(resolveImageSource('image-tx', `./img/${filename}`)).toBe(preview(oldBytes));
+      expect(imagePreviewUrl('image-tx', `./img/${filename}`)).toBe(preview(oldBytes));
     },
   );
 
@@ -197,7 +197,7 @@ describe('transactional image references', () => {
     const newer = await pendingNewer;
     expect(newer.commit()).toBe(true);
     expect((await older).commit()).toBe(false);
-    expect(resolveImageSource('image-tx', './img/pic.png')).toBe(preview(newBytes));
+    expect(imagePreviewUrl('image-tx', './img/pic.png')).toBe(preview(newBytes));
   });
 
   it('does not resurrect a closed tab when an image read finishes later', async () => {
@@ -225,7 +225,7 @@ describe('transactional image references', () => {
     restorePendingImages('image-tx', restored);
     gate.resolve(loaded());
     expect((await preparation).commit()).toBe(false);
-    expect(resolveImageSource('image-tx', 'mdplus-image:restored')).toBe(preview(newBytes));
+    expect(imagePreviewUrl('image-tx', 'mdplus-image:restored')).toBe(preview(newBytes));
   });
 
   it('leaves the old cache intact on a failed preparation, then invalidates only the live alias on commit', async () => {
@@ -234,10 +234,10 @@ describe('transactional image references', () => {
     const prepared = await prepareImageReferences('image-tx', markdown, document, {
       refresh: true,
     });
-    expect(resolveImageSource('image-tx', './img/pic.png')).toBe(preview(oldBytes));
+    expect(imagePreviewUrl('image-tx', './img/pic.png')).toBe(preview(oldBytes));
     expect(prepared.commit()).toBe(true);
-    expect(resolveImageSource('image-tx', './img/pic.png')).toBe('./img/pic.png');
-    expect(resolveImageSource('image-tx', token)).toBe(preview(oldBytes));
+    expect(imagePreviewUrl('image-tx', './img/pic.png')).toBe('./img/pic.png');
+    expect(imagePreviewUrl('image-tx', token)).toBe(preview(oldBytes));
     mocks.invoke.mockClear();
     await migratePendingImages('image-tx', 'D:\\other\\note.md', markdown);
     expect(mocks.invoke).not.toHaveBeenCalled();
@@ -256,7 +256,7 @@ describe('transactional image references', () => {
       expect.objectContaining({ dataBase64: Buffer.from(oldBytes).toString('base64') }),
     );
     expect(migration.markdown).not.toContain('./img/pic.png');
-    expect(resolveImageSource('image-tx', oldToken)).toBe(preview(oldBytes));
+    expect(imagePreviewUrl('image-tx', oldToken)).toBe(preview(oldBytes));
   });
 
   it('does not duplicate immutable image bytes when a refresh observes the same content', async () => {
@@ -268,7 +268,7 @@ describe('transactional image references', () => {
       expect(prepared.commit()).toBe(true);
     }
     expect(getPendingImages('image-tx')).toHaveLength(1);
-    expect(resolveImageSource('image-tx', oldToken)).toBe(preview(oldBytes));
+    expect(imagePreviewUrl('image-tx', oldToken)).toBe(preview(oldBytes));
   });
 
   it('invalidates old preparations even if the winning refresh had identical bytes', async () => {
@@ -280,7 +280,7 @@ describe('transactional image references', () => {
     gate.resolve(loaded(newBytes));
     expect((await winning).commit()).toBe(true);
     expect((await stale).commit()).toBe(false);
-    expect(resolveImageSource('image-tx', './img/pic.png')).toBe(preview(oldBytes));
+    expect(imagePreviewUrl('image-tx', './img/pic.png')).toBe(preview(oldBytes));
   });
 
   it('does not reuse an alias belonging to a different document directory', async () => {
@@ -289,7 +289,7 @@ describe('transactional image references', () => {
     mocks.readImageFile.mockResolvedValue(loaded(newBytes, 'img/pic.png', other));
     expect((await prepareImageReferences('image-tx', markdown, other)).commit()).toBe(true);
     expect(mocks.readImageFile).toHaveBeenLastCalledWith(other, 'img/pic.png');
-    expect(resolveImageSource('image-tx', './img/pic.png')).toBe(preview(newBytes));
+    expect(imagePreviewUrl('image-tx', './img/pic.png')).toBe(preview(newBytes));
   });
 
   it('rejects a pending refresh after Save As commits new image sources', async () => {
@@ -301,7 +301,7 @@ describe('transactional image references', () => {
     const migration = await migratePendingImages('image-tx', 'D:\\other\\note.md', markdown);
     commitImageMigration(migration);
     expect((await preparation).commit()).toBe(false);
-    expect(resolveImageSource('image-tx', './assets/1-pic.png')).toBe(preview(oldBytes));
+    expect(imagePreviewUrl('image-tx', './assets/1-pic.png')).toBe(preview(oldBytes));
   });
 
   it('notifies only the affected tab and detaches subscribers without leaking callbacks', async () => {

@@ -14,9 +14,9 @@ const BACKGROUND_EXTERNAL_POLL_MS = EXTERNAL_POLL_MS * 15;
 
 export function useExternalChanges(
   workspace: Workspace,
-  recovery: Pick<RecoveryController, 'cleanRecovery' | 'protectDraft'>,
+  recovery: Pick<RecoveryController, 'deleteRecoverySnapshot' | 'saveRecoverySnapshot'>,
 ) {
-  const { cleanRecovery, protectDraft } = recovery;
+  const { deleteRecoverySnapshot, saveRecoverySnapshot } = recovery;
   const {
     setTabs,
     activeId,
@@ -26,8 +26,8 @@ export function useExternalChanges(
     saveTimers,
     saveQueues,
     saveGenerations,
-    contentGenerations,
-    blockedExternalMtime,
+    contentVersions,
+    autosavePausedMtime,
     detectedExternalStates,
     externalChecks,
     externalPrompts,
@@ -47,7 +47,7 @@ export function useExternalChanges(
       try {
         const tab = tabsRef.current.find((candidate) => candidate.id === tabId);
         if (!tab?.path || tab.dirty || tabId in saveQueues.current) return;
-        const version = contentGenerations.current[tabId] ?? 0;
+        const version = contentVersions.current[tabId] ?? 0;
         const saveGeneration = saveGenerations.current[tabId] ?? 0;
         const isCurrentDocument = () => {
           const latest = tabsRef.current.find((candidate) => candidate.id === tabId);
@@ -59,7 +59,7 @@ export function useExternalChanges(
         };
         const canApply = () =>
           isCurrentDocument() &&
-          (contentGenerations.current[tabId] ?? 0) === version &&
+          (contentVersions.current[tabId] ?? 0) === version &&
           !tabsRef.current.find((candidate) => candidate.id === tabId)?.dirty &&
           !(tabId in saveQueues.current);
         const cancelReload = async () => {
@@ -95,7 +95,7 @@ export function useExternalChanges(
             console.warn('准备磁盘版本的图片失败', error);
             pauseAutoSave(tabId, detectedMtime);
             const active = tabId === currentView.current.activeId;
-            updateTab(tabId, { externalMtime: detectedMtime, externalChanged: !active });
+            updateTab(tabId, { diskMtime: detectedMtime, externalChanged: !active });
             if (active)
               await showMessage(
                 `无法载入「${tab.title}」磁盘版本中的图片,本次未重新加载,已保留本地内容。磁盘上的文件没有被改动。`,
@@ -125,8 +125,8 @@ export function useExternalChanges(
           const timer = saveTimers.current[tabId];
           if (timer) clearTimeout(timer);
           delete saveTimers.current[tabId];
-          contentGenerations.current[tabId] = version + 1;
-          delete blockedExternalMtime.current[tabId];
+          contentVersions.current[tabId] = version + 1;
+          delete autosavePausedMtime.current[tabId];
           delete detectedExternalStates.current[tabId];
           // 先提交新基线,避免同步编辑器回调把重载当作未保存输入。
           tabMirror.current[tabId] = {
@@ -140,7 +140,7 @@ export function useExternalChanges(
             markdown: content,
             stats: nextStats,
             dirty: false,
-            externalMtime: loadedMtime,
+            diskMtime: loadedMtime,
             diskRevision: snapshot.revision,
             externalChanged: false,
             preserveLocal: false,
@@ -148,20 +148,20 @@ export function useExternalChanges(
           });
           syncEditor(tabId, content);
           setTabs([...tabsRef.current]);
-          await cleanRecovery(tabId);
+          await deleteRecoverySnapshot(tabId);
           const current = tabsRef.current.find((candidate) => candidate.id === tabId);
-          if (current && needsDocumentProtection(current)) protectDraft(current);
+          if (current && needsDocumentProtection(current)) saveRecoverySnapshot(current);
         } else {
           // 保留本地内容时记录冲突 mtime,避免后续自动保存静默覆盖外部版本。
           pauseAutoSave(tabId, detectedMtime);
           updateTab(tabId, {
-            externalMtime: detectedMtime,
+            diskMtime: detectedMtime,
             externalChanged: tabId !== currentView.current.activeId,
           });
         }
       } catch (error) {
         const tab = tabsRef.current.find((candidate) => candidate.id === tabId);
-        if (blockedExternalMtime.current[tabId] !== -1) {
+        if (autosavePausedMtime.current[tabId] !== -1) {
           pauseAutoSave(tabId, -1);
           if (tab?.id === activeId) {
             await showMessage(
@@ -186,20 +186,20 @@ export function useExternalChanges(
       externalPrompts,
       tabsRef,
       saveQueues,
-      contentGenerations,
+      contentVersions,
       saveGenerations,
       pauseAutoSave,
       tabMirror,
       saveTimers,
-      blockedExternalMtime,
+      autosavePausedMtime,
       detectedExternalStates,
       updateTab,
       syncEditor,
       setTabs,
       currentView,
       activeId,
-      cleanRecovery,
-      protectDraft,
+      deleteRecoverySnapshot,
+      saveRecoverySnapshot,
     ],
   );
 
@@ -208,14 +208,14 @@ export function useExternalChanges(
     if (!activeTab?.externalChanged || activeTab.dirty) return;
     void promptExternalReload(
       activeTab.id,
-      activeTab.externalMtime,
+      activeTab.diskMtime,
       detectedExternalStates.current[activeTab.id]?.revision ?? activeTab.diskRevision,
     );
   }, [
     activeTab?.dirty,
     activeTab?.diskRevision,
     activeTab?.externalChanged,
-    activeTab?.externalMtime,
+    activeTab?.diskMtime,
     activeTab?.id,
     detectedExternalStates,
     promptExternalReload,
@@ -249,7 +249,7 @@ export function useExternalChanges(
             return;
           if (disk.revision === null) throw new Error('文件已不在原位置');
           const mtime = disk.mtime ?? 0;
-          if (disk.revision === latest.diskRevision && mtime === latest.externalMtime) return;
+          if (disk.revision === latest.diskRevision && mtime === latest.diskMtime) return;
           const offered = detectedExternalStates.current[latest.id];
           if (offered?.revision === disk.revision && offered.mtime === mtime) return;
           detectedExternalStates.current[latest.id] = { revision: disk.revision, mtime };
@@ -257,14 +257,14 @@ export function useExternalChanges(
           if (latest.id === activeId) {
             await promptExternalReload(latest.id, mtime, disk.revision);
           } else {
-            updateTab(latest.id, { externalMtime: mtime, externalChanged: true });
+            updateTab(latest.id, { diskMtime: mtime, externalChanged: true });
           }
         } catch (error) {
           const latest = tabsRef.current.find((tab) => tab.id === candidate.id);
           if (
             latest &&
             latest.path === candidate.path &&
-            blockedExternalMtime.current[latest.id] !== -1
+            autosavePausedMtime.current[latest.id] !== -1
           ) {
             pauseAutoSave(latest.id, -1);
             if (latest.id === activeId) {
@@ -284,7 +284,7 @@ export function useExternalChanges(
     },
     [
       activeId,
-      blockedExternalMtime,
+      autosavePausedMtime,
       detectedExternalStates,
       externalChecks,
       externalPrompts,

@@ -26,15 +26,11 @@ vi.mock('../src/lib/store', () => ({
   pushRecentFile: mocks.pushRecent,
 }));
 
-import { AUTO_SAVE_DELAY, IMAGE_PREPARATION_MS, RECOVERY_DELAY_MS } from '../src/config/constants';
+import { AUTO_SAVE_MS, IMAGE_PREPARATION_MS, RECOVERY_DELAY_MS } from '../src/config/constants';
 import { useDocumentSave } from '../src/hooks/useDocumentSave';
 import { useWorkspace } from '../src/hooks/useWorkspace';
 import { useRecovery } from '../src/hooks/useRecovery';
-import {
-  clearPendingImages,
-  prepareImageReferences,
-  resolveImageSource,
-} from '../src/lib/imageOps';
+import { clearPendingImages, prepareImageReferences, imagePreviewUrl } from '../src/lib/imageOps';
 import { computeStats } from '../src/lib/stats';
 import type { Tab } from '../src/lib/types';
 import {
@@ -63,7 +59,7 @@ const edited = (): Tab => ({
   isNew: false,
   dirty: true,
   preserveLocal: false,
-  externalMtime: 1,
+  diskMtime: 1,
   diskRevision: 'rev-1',
   externalChanged: false,
   initialContent: one,
@@ -136,7 +132,7 @@ describe('saving and protecting a document while the image stash is full', () =>
       savedContent: both,
       diskRevision: 'rev-2',
     });
-    expect(resolveImageSource(id, './img/a.png')).toBe(previewA);
+    expect(imagePreviewUrl(id, './img/a.png')).toBe(previewA);
     expect([...native.stash.values()]).toEqual([base64(A)]);
     expect(commands()).not.toContain('save_image_asset');
     expect(commands()).not.toContain('discard_stashed_images');
@@ -147,7 +143,7 @@ describe('saving and protecting a document while the image stash is full', () =>
 
     act(() => hook.result.current.save.scheduleAutoSave(id));
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY);
+      await vi.advanceTimersByTimeAsync(AUTO_SAVE_MS);
       await hook.result.current.workspace.saveQueues.current[id];
     });
 
@@ -158,8 +154,8 @@ describe('saving and protecting a document while the image stash is full', () =>
       savedContent: both,
       diskRevision: 'rev-2',
     });
-    expect(id in hook.result.current.workspace.blockedExternalMtime.current).toBe(false);
-    expect(resolveImageSource(id, './img/a.png')).toBe(previewA);
+    expect(id in hook.result.current.workspace.autosavePausedMtime.current).toBe(false);
+    expect(imagePreviewUrl(id, './img/a.png')).toBe(previewA);
   });
 
   it('copies both images when saving as a file in another directory', async () => {
@@ -187,7 +183,9 @@ describe('saving and protecting a document while the image stash is full', () =>
   it('protects the draft with an owned copy of both images', async () => {
     const hook = await mount();
 
-    act(() => hook.result.current.recovery.protectDraft(hook.result.current.workspace.tabs[0]));
+    act(() =>
+      hook.result.current.recovery.saveRecoverySnapshot(hook.result.current.workspace.tabs[0]),
+    );
     const preparation = hook.result.current.workspace.imagePreparations.current[id]?.promise;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(IMAGE_PREPARATION_MS);

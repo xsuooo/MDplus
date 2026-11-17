@@ -15,7 +15,7 @@ MDPlus 的领域词汇。一个概念只用一个词；「避免」列出的是�
 | stash key         | 原生进程内图片暂存区的随机键                                             | key（单独使用）                |
 | disk url          | 图片写入 Markdown 的相对路径                                             | relativePath、reference        |
 | preview url       | WebView 用来显示图片的地址                                               | source                         |
-| url rewrite       | 一对 `{ from, to }`，把正文里的图片地址从一种形式改写成另一种            | PendingImageReference          |
+| url rewrite       | 一对 `{ from, to }`，把正文里的图片地址从一种形式改写成另一种            | UrlRewrite                     |
 | place             | 内存里的光标与滚动位置，仅当前进程有效                                   |                                |
 | session place     | 落盘的位置，用文本锚点表示，跨进程有效                                   |                                |
 | text anchor       | 偏移加前后各 40 个字符的上下文，文本变化后仍能重新定位                   |                                |

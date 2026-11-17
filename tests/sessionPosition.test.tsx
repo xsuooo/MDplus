@@ -16,7 +16,7 @@ import {
   sourceSessionPlace,
   toRendered,
   toSource,
-} from '../src/lib/editorPosition';
+} from '../src/lib/position/editorPosition';
 import { useWorkspace } from '../src/hooks/useWorkspace';
 import { useEditorView } from '../src/hooks/useEditorView';
 import type { RecoveryController } from '../src/hooks/useRecovery';
@@ -76,7 +76,7 @@ function initial(markdown: string): Tab {
     savedContent: markdown,
     initialContent: markdown,
     stats: computeStats(markdown),
-    externalMtime: 1,
+    diskMtime: 1,
     diskRevision: 'disk:a',
     externalChanged: false,
   };
@@ -320,8 +320,8 @@ describe('serialized editor positions', () => {
     });
     const recovery = {
       prepareCurrentImages: vi.fn(async () => true),
-      protectDraft: vi.fn(),
-      cleanRecovery: vi.fn(async () => true),
+      saveRecoverySnapshot: vi.fn(),
+      deleteRecoverySnapshot: vi.fn(async () => true),
     } as unknown as RecoveryController;
     const hook = renderHook(() => {
       const workspace = useWorkspace([initial(markdown)]);
@@ -342,6 +342,6 @@ describe('serialized editor positions', () => {
     });
     expect(field.selectionStart).toBe(4);
     expect(field.selectionEnd).toBe(4);
-    expect(recovery.protectDraft).not.toHaveBeenCalled();
+    expect(recovery.saveRecoverySnapshot).not.toHaveBeenCalled();
   });
 });

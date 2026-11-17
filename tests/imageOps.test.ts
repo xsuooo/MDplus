@@ -23,7 +23,7 @@ import {
   commitImageMigration,
   loadImageReferences,
   migratePendingImages,
-  resolveImageSource,
+  imagePreviewUrl,
   saveImage,
 } from '../src/lib/imageOps';
 
@@ -70,21 +70,21 @@ describe('document image loading and migration', () => {
     expect(placeholder).toMatch(/^mdplus-image:[\w-]+$/);
     expect(display).not.toContain('base64');
     const preview = 'http://mdplus-image-stash.localhost/QUJD';
-    expect(resolveImageSource('tab', placeholder)).toBe(preview);
-    expect(resolveImageSource('tab', './img/pic.png')).toBe(preview);
-    expect(resolveImageSource('other-tab', './img/pic.png')).toBe('./img/pic.png');
-    expect(resolveImageSource('tab', 'https://example.com/pic.png')).toBe(
+    expect(imagePreviewUrl('tab', placeholder)).toBe(preview);
+    expect(imagePreviewUrl('tab', './img/pic.png')).toBe(preview);
+    expect(imagePreviewUrl('other-tab', './img/pic.png')).toBe('./img/pic.png');
+    expect(imagePreviewUrl('tab', 'https://example.com/pic.png')).toBe(
       'https://example.com/pic.png',
     );
 
     const savedAs = await migratePendingImages('tab', 'D:\\new\\note.md', display);
-    expect(resolveImageSource('tab', './assets/pic.png')).toBe('./assets/pic.png');
+    expect(imagePreviewUrl('tab', './assets/pic.png')).toBe('./assets/pic.png');
     commitImageMigration(savedAs);
     expect(savedAs.markdown).toBe('![](./assets/pic.png)');
-    expect(resolveImageSource('tab', './assets/pic.png')).toBe(preview);
-    expect(resolveImageSource('tab', placeholder)).toBe(preview);
+    expect(imagePreviewUrl('tab', './assets/pic.png')).toBe(preview);
+    expect(imagePreviewUrl('tab', placeholder)).toBe(preview);
     clearPendingImages('tab');
-    expect(resolveImageSource('tab', './assets/pic.png')).toBe('./assets/pic.png');
+    expect(imagePreviewUrl('tab', './assets/pic.png')).toBe('./assets/pic.png');
   });
 
   it('keeps image titles through loading, editing, saving and SaveAs', async () => {
@@ -140,7 +140,7 @@ describe('document image loading and migration', () => {
     expect(mocks.readImageFile).toHaveBeenCalledExactlyOnceWith(document, relativePath);
     const savedAs = await migratePendingImages('tab', 'D:\\new\\note.md', display);
     expect(savedAs.markdown).toBe(expected);
-    expect(resolveImageSource('tab', `./${relativePath}`)).toBe(
+    expect(imagePreviewUrl('tab', `./${relativePath}`)).toBe(
       'http://mdplus-image-stash.localhost/QUJD',
     );
     expect(savedAs.markdown).not.toContain('mdplus-image:');
@@ -323,7 +323,7 @@ describe('document image loading and migration', () => {
     await expect(migratePendingImages('tab', 'D:\\failed\\note.md', display)).rejects.toThrow(
       'disk full',
     );
-    expect(resolveImageSource('tab', './assets/pic.png')).toBe('./assets/pic.png');
+    expect(imagePreviewUrl('tab', './assets/pic.png')).toBe('./assets/pic.png');
     mocks.invoke.mockClear();
     const retry = await migratePendingImages('tab', document, display);
     expect(retry.markdown).toBe(original);
@@ -356,7 +356,7 @@ describe('document image loading and migration', () => {
     const tokens = [...display.matchAll(/mdplus-image:[\w-]+/g)].map(([token]) => token);
     expect(tokens).toHaveLength(2);
     expect(tokens[0]).not.toBe(tokens[1]);
-    expect(resolveImageSource('tab', tokens[0])).toBe(resolveImageSource('tab', tokens[1]));
+    expect(imagePreviewUrl('tab', tokens[0])).toBe(imagePreviewUrl('tab', tokens[1]));
     const saved = await migratePendingImages('tab', document, display);
     expect(saved.markdown).toBe(markdown);
     const savedAs = await migratePendingImages('tab', 'D:\\new\\note.md', display);
@@ -379,9 +379,7 @@ describe('document image loading and migration', () => {
       const placeholder = await saveImage(new Blob(['ABC'], { type: 'image/png' }), 'tab');
       expect(placeholder).toMatch(/^mdplus-image:[\w-]+$/);
       expect(placeholder.length).toBeLessThan(70);
-      expect(resolveImageSource('tab', placeholder)).toBe(
-        'http://mdplus-image-stash.localhost/QUJD',
-      );
+      expect(imagePreviewUrl('tab', placeholder)).toBe('http://mdplus-image-stash.localhost/QUJD');
       expect(imageWrites()).toHaveLength(0);
       const first = await migratePendingImages('tab', document, `![](${placeholder})`);
       expect(first.markdown).not.toContain('mdplus-image:');

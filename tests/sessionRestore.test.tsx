@@ -6,7 +6,7 @@ import { useWorkspace } from '../src/hooks/useWorkspace';
 import { useDocumentFiles } from '../src/hooks/useDocumentFiles';
 import { useDocumentClose } from '../src/hooks/useDocumentClose';
 import type { SavedDocumentSession } from '../src/lib/documentSession';
-import { textAnchor, type SessionEditorPlace } from '../src/lib/sessionPosition';
+import { textAnchor, type SessionEditorPlace } from '../src/lib/position/sessionPosition';
 import { computeStats } from '../src/lib/stats';
 import type { Tab } from '../src/lib/types';
 
@@ -48,7 +48,7 @@ vi.mock('../src/lib/imageOps', () => ({
   prepareImageReferences: async () => ({ commit: () => true, dispose: async () => {} }),
 }));
 vi.mock('../src/lib/dialog', () => ({ showMessage: mocks.message }));
-vi.mock('../src/services/windowState', () => ({ waitForWindowReady: mocks.waitWindow }));
+vi.mock('../src/services/windowPersistence', () => ({ waitForWindowReady: mocks.waitWindow }));
 vi.mock('../src/lib/fileOps', () => ({
   readDocument: mocks.read,
   documentRevision: mocks.revision,
@@ -87,7 +87,7 @@ function tab(id: string, dirty = false, saved = true): Tab {
     savedContent: dirty ? 'previous disk body\n' : markdown,
     initialContent: markdown,
     stats: computeStats(markdown),
-    externalMtime: 1,
+    diskMtime: 1,
     diskRevision: saved ? `disk:${id}` : null,
     externalChanged: false,
   };
@@ -110,7 +110,7 @@ function setup(initial: Tab[] = [], strict = false) {
       const files = useDocumentFiles(workspace);
       const close = useDocumentClose(
         workspace,
-        { cleanRecovery: mocks.clean, protectDraft: mocks.protect },
+        { deleteRecoverySnapshot: mocks.clean, saveRecoverySnapshot: mocks.protect },
         mocks.save,
         mocks.windowPersist,
         onClosing,
@@ -278,7 +278,7 @@ describe('saved-file startup restoration', () => {
     expect(hook.result.current.files.startupResolved).toBe(true);
     const id = hook.result.current.workspace.activeId!;
     act(() => {
-      hook.result.current.workspace.contentGenerations.current[id] = 1;
+      hook.result.current.workspace.contentVersions.current[id] = 1;
       hook.result.current.workspace.updateTab(id, {
         markdown: 'Intervening user edit',
         dirty: true,

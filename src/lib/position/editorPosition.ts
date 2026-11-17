@@ -1,3 +1,10 @@
+// Position modules, from low to high level:
+//   textPosition     map one text offset across an edit (pure)
+//   sourcePosition   measure the source textarea: offset <-> scroll pixels
+//   sessionPosition  TextAnchor: a position stored as surrounding text, survives restarts
+//   editorPosition   Place = live cursor + scroll of one mode; ModeExchange carries a
+//                    Place across the rich <-> source switch; *Session* functions
+//                    convert a Place to and from the persisted SessionEditorPlace
 import { editorViewCtx, remarkCtx, schemaCtx, type Editor } from '@milkdown/kit/core';
 import { ParserState, type MarkdownNode, type RemarkParser } from '@milkdown/kit/transformer';
 import { TextSelection, Selection } from '@milkdown/prose/state';
@@ -10,9 +17,9 @@ import {
   measureSourceLayout,
   sourceTextLayout,
 } from './sourcePosition';
-import { mapImageOffset, type PendingImageReference } from './imagePaths';
+import { mapImageOffset, type UrlRewrite } from '../imagePaths';
 import { resolveTextAnchor, textAnchor, type SessionEditorPlace } from './sessionPosition';
-import type { OutlineItem } from './types';
+import type { OutlineItem } from '../types';
 
 export interface SourcePlace {
   start: number;
@@ -20,7 +27,7 @@ export interface SourcePlace {
   direction: 'forward' | 'backward' | 'none';
   top: number;
   left: number;
-  rewrites?: { before: string; after: string; references: PendingImageReference[] }[];
+  rewrites?: { before: string; after: string; references: UrlRewrite[] }[];
 }
 export interface RenderedPlace {
   selection: Selection;
@@ -96,7 +103,7 @@ export function rebaseSourcePlace(
   place: SourcePlace,
   before: string,
   after: string,
-  references: PendingImageReference[],
+  references: UrlRewrite[],
 ): SourcePlace {
   return {
     ...place,
