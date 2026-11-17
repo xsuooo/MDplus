@@ -1,3 +1,4 @@
+import { serialQueue } from '../lib/serialQueue';
 import { invoke } from '@tauri-apps/api/core';
 import { LIMITS } from '../config/constants';
 
@@ -48,7 +49,7 @@ export async function loadSettingsStore(): Promise<SettingsStore> {
   // edits the file lacks, so a queued save cannot undo an adopted external change.
   let base = copyValues(snapshot.values);
   let revision = snapshot.revision;
-  let saveQueue = Promise.resolve();
+  const enqueueSave = serialQueue();
   const edits = new Map<string, Edit>();
   let editSeq = 0;
   let savedSeq = 0;
@@ -102,7 +103,7 @@ export async function loadSettingsStore(): Promise<SettingsStore> {
       // Each save commits the edits made up to this call, not later ones.
       const own = new Map(edits);
       const seq = editSeq;
-      const operation = saveQueue.then(async () => {
+      return enqueueSave(async () => {
         try {
           await write(own, seq);
         } catch (error) {
@@ -121,8 +122,6 @@ export async function loadSettingsStore(): Promise<SettingsStore> {
           }
         }
       });
-      saveQueue = operation.catch(() => {});
-      return operation;
     },
   };
 }

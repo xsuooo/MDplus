@@ -1,3 +1,4 @@
+import { serialQueue } from './serialQueue';
 import { invoke } from '@tauri-apps/api/core';
 import { join, dirname } from '@tauri-apps/api/path';
 import { LIMITS } from '../config/constants';
@@ -62,12 +63,7 @@ const imageRoots = new Map<string, Set<() => Iterable<string>>>();
 const collectionTimers = new Map<string, ReturnType<typeof setTimeout>>();
 // Serialize complete read/encode/write operations, not just individual invokes:
 // otherwise many tabs can keep a 64 MiB base64 result alive while queued to write.
-let imageIOTail: Promise<unknown> = Promise.resolve();
-function imageIO<T>(operation: () => Promise<T>): Promise<T> {
-  const next = imageIOTail.catch(() => {}).then(operation);
-  imageIOTail = next.catch(() => {});
-  return next;
-}
+const imageIO = serialQueue();
 function cacheFor(tabId: string): ImageCache {
   let cache = imageCaches.get(tabId);
   if (!cache) {

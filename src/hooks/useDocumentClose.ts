@@ -14,7 +14,7 @@ import type { WindowSessionController } from './useSessionPersistence';
 export function useDocumentClose(
   workspace: Workspace,
   recovery: Pick<RecoveryController, 'deleteRecoverySnapshot' | 'saveRecoverySnapshot'>,
-  doSave: (id: string, manual?: boolean) => Promise<boolean>,
+  doSave: (id: string, options?: { manual?: boolean }) => Promise<boolean>,
   persistWindowState: () => Promise<void>,
   onClosing: () => void,
   sessionController?: WindowSessionController,
@@ -165,7 +165,7 @@ export function useDocumentClose(
       const closedId = pendingCloseTab.id;
       try {
         if (action === 'save') {
-          const saved = await doSave(closedId, true);
+          const saved = await doSave(closedId, { manual: true });
           const savedTab = tabsRef.current.find((candidate) => candidate.id === closedId);
           if (
             !isCurrent() ||

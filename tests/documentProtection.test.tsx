@@ -184,7 +184,7 @@ describe('local versions without a matching disk copy', () => {
     mocks.clear.mockReturnValueOnce(new Promise<void>((resolve) => (release = resolve)));
     const hook = setup();
     act(() => hook.result.current.close.closeTabRequest('a'));
-    act(() => hook.result.current.workspace.pauseAutoSave('a', -1));
+    act(() => hook.result.current.workspace.pauseAutoSave('a', null));
     await act(async () => release());
     expect(hook.result.current.workspace.tabsRef.current).toHaveLength(1);
     expect(hook.result.current.close.pendingCloseTab?.id).toBe('a');
