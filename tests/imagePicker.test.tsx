@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useDocumentSession } from '../src/hooks/useDocumentSession';
+import { useWorkspace } from '../src/hooks/useWorkspace';
 import { useImageDrop } from '../src/hooks/useImageDrop';
 import type { SourceEditorApi } from '../src/lib/sourceEditorApi';
 
@@ -47,17 +47,17 @@ function setup() {
     redo: vi.fn(),
   };
   const hook = renderHook(() => {
-    const session = useDocumentSession();
-    const images = useImageDrop(session, (id) => (id === 'a' ? api : null));
-    return { session, images };
+    const workspace = useWorkspace();
+    const images = useImageDrop(workspace, (id) => (id === 'a' ? api : null));
+    return { workspace, images };
   });
   act(() => {
-    hook.result.current.session.addTab(
+    hook.result.current.workspace.addTab(
       { title: 'a.md', path: null, isNew: true, content: input.value },
       'a',
     );
-    hook.result.current.session.registerSource('a', input);
-    hook.result.current.session.setSourceMode(true);
+    hook.result.current.workspace.registerSource('a', input);
+    hook.result.current.workspace.setSourceMode(true);
   });
   return { hook, input };
 }
@@ -160,8 +160,8 @@ describe('image selection lifecycle', () => {
       operation = hook.result.current.images.pick();
     });
     act(() => {
-      hook.result.current.session.setSourceMode(false);
-      hook.result.current.session.setSourceMode(true);
+      hook.result.current.workspace.setSourceMode(false);
+      hook.result.current.workspace.setSourceMode(true);
     });
     await act(async () => {
       gate.resolve(['C:/images/1.png']);
@@ -180,11 +180,11 @@ describe('image selection lifecycle', () => {
       operation = hook.result.current.images.pick();
     });
     act(() => {
-      hook.result.current.session.addTab(
+      hook.result.current.workspace.addTab(
         { title: 'b.md', path: null, isNew: true, content: 'other' },
         'b',
       );
-      hook.result.current.session.setSourceMode(true);
+      hook.result.current.workspace.setSourceMode(true);
     });
     await act(async () => {
       gate.resolve(['C:/images/2.jpg']);
@@ -192,7 +192,7 @@ describe('image selection lifecycle', () => {
     });
     expect(mocks.import).toHaveBeenCalledWith('C:/images/2.jpg', 'a');
     expect(input.value).toContain('TARGET![](mdplus-image:two)');
-    expect(hook.result.current.session.activeId).toBe('b');
+    expect(hook.result.current.workspace.activeId).toBe('b');
   });
 
   it('releases imported images after a mode round trip during native image reading', async () => {
@@ -207,8 +207,8 @@ describe('image selection lifecycle', () => {
     });
     expect(mocks.import).toHaveBeenCalledOnce();
     act(() => {
-      hook.result.current.session.setSourceMode(false);
-      hook.result.current.session.setSourceMode(true);
+      hook.result.current.workspace.setSourceMode(false);
+      hook.result.current.workspace.setSourceMode(true);
     });
     await act(async () => {
       gate.resolve('mdplus-image:two');

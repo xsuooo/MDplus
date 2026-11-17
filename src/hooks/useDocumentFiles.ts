@@ -2,7 +2,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { makeId } from '../hooks/useDocumentSession';
+import { makeId } from '../hooks/useWorkspace';
 import { showMessage } from '../lib/dialog';
 import { errorMessage } from '../lib/errors';
 import { basename, documentRevision, pickOpenFile, readDocument } from '../lib/fileOps';
@@ -18,7 +18,7 @@ import { getTemplate } from '../lib/templates';
 import type { RecentFile, Tab } from '../lib/types';
 import { waitForWindowReady } from '../services/windowState';
 
-import type { DocumentSession } from './useDocumentSession';
+import type { Workspace } from './useWorkspace';
 import { useSessionPersistence } from './useSessionPersistence';
 
 export interface DocumentFileOptions {
@@ -30,9 +30,9 @@ interface OpenOptions {
   restore?: SessionDocument;
 }
 
-export function useDocumentFiles(session: DocumentSession, options: DocumentFileOptions = {}) {
-  const { tabsRef, openingPaths, selectTab, addTab, installSessionPlace, setTabs } = session;
-  const persistence = useSessionPersistence(session);
+export function useDocumentFiles(workspace: Workspace, options: DocumentFileOptions = {}) {
+  const { tabsRef, openingPaths, selectTab, addTab, installSessionPlace, setTabs } = workspace;
+  const persistence = useSessionPersistence(workspace);
   const {
     readStoredSession,
     completeSessionStartup,
@@ -336,7 +336,7 @@ export function useDocumentFiles(session: DocumentSession, options: DocumentFile
         selectTab(
           requestedStillOpen ??
             restoredActive ??
-            session.currentView.current.activeId ??
+            workspace.currentView.current.activeId ??
             tabsRef.current[0]?.id ??
             null,
         );
@@ -358,7 +358,7 @@ export function useDocumentFiles(session: DocumentSession, options: DocumentFile
     readStoredSession,
     reorderSessionTabs,
     selectTab,
-    session.currentView,
+    workspace.currentView,
     tabsRef,
   ]);
 
@@ -368,7 +368,7 @@ export function useDocumentFiles(session: DocumentSession, options: DocumentFile
       if (startupWork.current) await startupWork.current;
       if (!alive.current) return;
       setSessionRestoreBusy(true);
-      const active = session.currentView.current.activeId;
+      const active = workspace.currentView.current.activeId;
       try {
         const loaded = await retrySessionPersistence();
         const candidates = [
@@ -383,7 +383,7 @@ export function useDocumentFiles(session: DocumentSession, options: DocumentFile
           await openDocumentPath(entry.path, { silent: true, activate: false, restore: entry });
         }
         reorderSessionTabs();
-        const latestActive = session.currentView.current.activeId;
+        const latestActive = workspace.currentView.current.activeId;
         if (latestActive && tabsRef.current.some((tab) => tab.id === latestActive))
           selectTab(latestActive);
         else if (active && tabsRef.current.some((tab) => tab.id === active)) selectTab(active);
@@ -408,7 +408,7 @@ export function useDocumentFiles(session: DocumentSession, options: DocumentFile
     reorderSessionTabs,
     retrySessionPersistence,
     selectTab,
-    session.currentView,
+    workspace.currentView,
     tabsRef,
   ]);
 

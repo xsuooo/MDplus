@@ -2,7 +2,7 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { StrictMode, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useDocumentSession } from '../src/hooks/useDocumentSession';
+import { useWorkspace } from '../src/hooks/useWorkspace';
 import { useDocumentFiles } from '../src/hooks/useDocumentFiles';
 import { useDocumentClose } from '../src/hooks/useDocumentClose';
 import type { SavedDocumentSession } from '../src/lib/documentSession';
@@ -106,17 +106,17 @@ const onClosing = () => {};
 function setup(initial: Tab[] = [], strict = false) {
   return renderHook(
     () => {
-      const session = useDocumentSession(initial);
-      const files = useDocumentFiles(session);
+      const workspace = useWorkspace(initial);
+      const files = useDocumentFiles(workspace);
       const close = useDocumentClose(
-        session,
+        workspace,
         { cleanRecovery: mocks.clean, protectDraft: mocks.protect },
         mocks.save,
         mocks.windowPersist,
         onClosing,
         files.sessionController,
       );
-      return { session, files, close };
+      return { workspace, files, close };
     },
     {
       wrapper: strict
@@ -186,7 +186,7 @@ describe('saved-file startup restoration', () => {
         entry.message.startsWith('Unavailable:'),
       ),
     ).toBe(true);
-    expect(hook.result.current.session.tabs.map((item) => item.path)).toEqual([path('c')]);
+    expect(hook.result.current.workspace.tabs.map((item) => item.path)).toEqual([path('c')]);
     expect(hook.result.current.files.startupResolved).toBe(true);
     expect(mocks.message).not.toHaveBeenCalled();
   });
@@ -230,13 +230,13 @@ describe('saved-file startup restoration', () => {
     file('c');
     const hook = setup();
     await act(flush);
-    expect(hook.result.current.session.tabs.map((item) => item.path)).toEqual(
+    expect(hook.result.current.workspace.tabs.map((item) => item.path)).toEqual(
       saved.documents.map((entry) => entry.path),
     );
-    expect(hook.result.current.session.activeTab?.path).toBe(path('b'));
-    expect(hook.result.current.session.sourceMode).toBe(true);
-    expect(hook.result.current.session.activeTab?.markdown).toContain('Latest changed disk body');
-    expect(hook.result.current.session.activeTab?.dirty).toBe(false);
+    expect(hook.result.current.workspace.activeTab?.path).toBe(path('b'));
+    expect(hook.result.current.workspace.sourceMode).toBe(true);
+    expect(hook.result.current.workspace.activeTab?.markdown).toContain('Latest changed disk body');
+    expect(hook.result.current.workspace.activeTab?.dirty).toBe(false);
     expect(hook.result.current.files.startupResolved).toBe(true);
     expect(hook.result.current.files.sessionRestoreBusy).toBe(false);
     expect(mocks.clean).not.toHaveBeenCalled();
@@ -259,10 +259,10 @@ describe('saved-file startup restoration', () => {
     for (const name of ['a', 'b', 'c', 'd']) file(name);
     const hook = setup();
     await act(flush);
-    expect(hook.result.current.session.tabs.map((item) => item.path)).toEqual(
+    expect(hook.result.current.workspace.tabs.map((item) => item.path)).toEqual(
       ['a', 'b', 'c', 'd'].map(path),
     );
-    expect(hook.result.current.session.activeTab?.path).toBe(path('d'));
+    expect(hook.result.current.workspace.activeTab?.path).toBe(path('d'));
     expect(mocks.read.mock.calls.filter(([requested]) => requested === path('c'))).toHaveLength(1);
   });
 
@@ -274,12 +274,15 @@ describe('saved-file startup restoration', () => {
     file('b');
     const hook = setup();
     await act(flush);
-    expect(hook.result.current.session.activeTab?.path).toBe(path('b'));
+    expect(hook.result.current.workspace.activeTab?.path).toBe(path('b'));
     expect(hook.result.current.files.startupResolved).toBe(true);
-    const id = hook.result.current.session.activeId!;
+    const id = hook.result.current.workspace.activeId!;
     act(() => {
-      hook.result.current.session.contentGenerations.current[id] = 1;
-      hook.result.current.session.updateTab(id, { markdown: 'Intervening user edit', dirty: true });
+      hook.result.current.workspace.contentGenerations.current[id] = 1;
+      hook.result.current.workspace.updateTab(id, {
+        markdown: 'Intervening user edit',
+        dirty: true,
+      });
     });
     const saved = snapshot('a', 'b');
     const anchor = textAnchor('old body', 3);
@@ -295,9 +298,11 @@ describe('saved-file startup restoration', () => {
       gate.resolve({ enabled: true, session: saved });
       await flush();
     });
-    expect(hook.result.current.session.tabs.map((item) => item.path)).toEqual(['a', 'b'].map(path));
-    expect(hook.result.current.session.activeTab?.markdown).toBe('Intervening user edit');
-    expect(hook.result.current.session.sourceMode).toBe(false);
+    expect(hook.result.current.workspace.tabs.map((item) => item.path)).toEqual(
+      ['a', 'b'].map(path),
+    );
+    expect(hook.result.current.workspace.activeTab?.markdown).toBe('Intervening user edit');
+    expect(hook.result.current.workspace.sourceMode).toBe(false);
   });
 
   it('aggregates unavailable paths, retains their slots, and retries once while busy', async () => {
@@ -309,7 +314,7 @@ describe('saved-file startup restoration', () => {
     expect(hook.result.current.files.sessionFailures.map((entry) => entry.path)).toEqual(
       ['a', 'b'].map(path),
     );
-    expect(hook.result.current.session.tabs.map((item) => item.path)).toEqual([path('c')]);
+    expect(hook.result.current.workspace.tabs.map((item) => item.path)).toEqual([path('c')]);
     expect(hook.result.current.files.startupResolved).toBe(true);
     expect(mocks.waitWindow).not.toHaveBeenCalled();
     expect(mocks.message).not.toHaveBeenCalled();
@@ -340,10 +345,10 @@ describe('saved-file startup restoration', () => {
       await flush();
     });
     expect(hook.result.current.files.sessionFailures).toEqual([]);
-    expect(hook.result.current.session.tabs.map((item) => item.path)).toEqual(
+    expect(hook.result.current.workspace.tabs.map((item) => item.path)).toEqual(
       ['a', 'b', 'c'].map(path),
     );
-    expect(hook.result.current.session.activeTab?.path).toBe(path('c'));
+    expect(hook.result.current.workspace.activeTab?.path).toBe(path('c'));
   });
 
   it('keeps a failed settings read retryable and restores other files without replacing a live requested tab', async () => {
@@ -361,7 +366,7 @@ describe('saved-file startup restoration', () => {
     file('d');
     await act(() => hook.result.current.files.retrySessionFailures());
     expect(hook.result.current.files.sessionFailures).toEqual([]);
-    expect(hook.result.current.session.tabs.map((item) => item.path)).toEqual(
+    expect(hook.result.current.workspace.tabs.map((item) => item.path)).toEqual(
       ['a', 'b', 'd'].map(path),
     );
     expect(mocks.read.mock.calls.filter(([requested]) => requested === path('b'))).toHaveLength(1);
@@ -375,7 +380,7 @@ describe('saved-file startup restoration', () => {
     const hook = setup();
     await act(flush);
     expect(hook.result.current.files.sessionRestoreEnabled).toBe(false);
-    expect(hook.result.current.session.tabs.map((item) => item.path)).toEqual([path('b')]);
+    expect(hook.result.current.workspace.tabs.map((item) => item.path)).toEqual([path('b')]);
     await act(() => vi.advanceTimersByTimeAsync(501));
     expect(mocks.persist).not.toHaveBeenCalled();
     await act(() => hook.result.current.files.changeSessionRestore(true));
@@ -402,8 +407,8 @@ describe('saved-file startup restoration', () => {
     });
     await act(flush);
     act(() =>
-      hook.result.current.session.selectTab(
-        hook.result.current.session.tabsRef.current.find((item) => item.path === path('c'))!.id,
+      hook.result.current.workspace.selectTab(
+        hook.result.current.workspace.tabsRef.current.find((item) => item.path === path('c'))!.id,
       ),
     );
     await act(async () => {
@@ -411,7 +416,7 @@ describe('saved-file startup restoration', () => {
       await retry;
       await flush();
     });
-    expect(hook.result.current.session.activeTab?.path).toBe(path('c'));
+    expect(hook.result.current.workspace.activeTab?.path).toBe(path('c'));
     expect(hook.result.current.files.sessionFailures).toEqual([]);
   });
 
@@ -437,7 +442,7 @@ describe('window-close session transaction', () => {
     file('c');
     const hook = setup();
     await act(flush);
-    expect(hook.result.current.session.tabs.map((item) => item.path)).toEqual([path('c')]);
+    expect(hook.result.current.workspace.tabs.map((item) => item.path)).toEqual([path('c')]);
     await act(async () => {
       hook.result.current.close.handleWindowClose();
       await flush();
@@ -460,7 +465,7 @@ describe('window-close session transaction', () => {
     await act(flush);
     await act(() => hook.result.current.files.openFileFromPath(path('a')));
     await act(async () => {
-      const id = hook.result.current.session.tabsRef.current.find(
+      const id = hook.result.current.workspace.tabsRef.current.find(
         (item) => item.path === path('a'),
       )!.id;
       hook.result.current.close.closeTabRequest(id);
@@ -483,7 +488,7 @@ describe('window-close session transaction', () => {
     file('b');
     const hook = setup([], true);
     await act(flush);
-    expect(hook.result.current.session.activeTab?.path).toBe(path('b'));
+    expect(hook.result.current.workspace.activeTab?.path).toBe(path('b'));
     await act(async () => {
       hook.result.current.close.handleWindowClose();
       await flush();
@@ -509,12 +514,12 @@ describe('window-close session transaction', () => {
     input.setSelectionRange(2, 8, 'backward');
     input.scrollTop = 234;
     act(() => {
-      hook.result.current.session.registerSource('a', input);
-      hook.result.current.session.setSourceMode(true);
+      hook.result.current.workspace.registerSource('a', input);
+      hook.result.current.workspace.setSourceMode(true);
     });
     mocks.save.mockImplementation(async (id: string) => {
-      const current = hook.result.current.session.tabsRef.current.find((item) => item.id === id)!;
-      hook.result.current.session.updateTab(id, {
+      const current = hook.result.current.workspace.tabsRef.current.find((item) => item.id === id)!;
+      hook.result.current.workspace.updateTab(id, {
         path: path('saved-new'),
         isNew: false,
         dirty: false,
@@ -529,7 +534,7 @@ describe('window-close session transaction', () => {
     expect(hook.result.current.close.pendingCloseTab?.id).toBe('a');
     await act(() => hook.result.current.close.confirmClose('discard'));
     expect(hook.result.current.close.pendingCloseTab?.id).toBe('new');
-    expect(hook.result.current.session.positions.current.a).toBeUndefined();
+    expect(hook.result.current.workspace.positions.current.a).toBeUndefined();
     await act(() => hook.result.current.close.confirmClose('save'));
     const committed = mocks.persist.mock.calls.at(-1)?.[0] as SavedDocumentSession;
     expect(committed.documents.map((entry) => entry.path)).toEqual([
@@ -559,11 +564,11 @@ describe('window-close session transaction', () => {
     input.setSelectionRange(2, 8, 'backward');
     input.scrollTop = 234;
     act(() => {
-      hook.result.current.session.registerSource('a', input);
-      hook.result.current.session.setSourceMode(true);
+      hook.result.current.workspace.registerSource('a', input);
+      hook.result.current.workspace.setSourceMode(true);
     });
-    act(() => hook.result.current.session.selectTab('b'));
-    expect(hook.result.current.session.positions.current.a.sessionCapture).toBeTypeOf('function');
+    act(() => hook.result.current.workspace.selectTab('b'));
+    expect(hook.result.current.workspace.positions.current.a.sessionCapture).toBeTypeOf('function');
     input.value = 'Another source value';
     input.setSelectionRange(0, 0);
     input.scrollTop = 0;
@@ -581,7 +586,7 @@ describe('window-close session transaction', () => {
       start: { offset: 2 },
       end: { offset: 8 },
     });
-    expect(hook.result.current.session.positions.current.a.sessionCapture).toBeUndefined();
+    expect(hook.result.current.workspace.positions.current.a.sessionCapture).toBeUndefined();
     expect(mocks.destroy).toHaveBeenCalledOnce();
     input.remove();
   });
@@ -603,7 +608,7 @@ describe('window-close session transaction', () => {
     expect(
       mocks.persist.mock.calls[0][0].documents.map((entry: { path: string }) => entry.path),
     ).toEqual(['a', 'b'].map(path));
-    expect(hook.result.current.session.tabs.map((item) => item.id)).toEqual(['b']);
+    expect(hook.result.current.workspace.tabs.map((item) => item.id)).toEqual(['b']);
     expect(mocks.destroy).not.toHaveBeenCalled();
   });
 

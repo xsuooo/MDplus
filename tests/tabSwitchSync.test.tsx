@@ -16,7 +16,7 @@ import { history } from '@milkdown/kit/plugin/history';
 import { Transform } from '@milkdown/prose/transform';
 import { undoDepth } from '@milkdown/prose/history';
 import { TextSelection } from '@milkdown/prose/state';
-import { useDocumentSession } from '../src/hooks/useDocumentSession';
+import { useWorkspace } from '../src/hooks/useWorkspace';
 import { useEditorView } from '../src/hooks/useEditorView';
 import type { RecoveryController } from '../src/hooks/useRecovery';
 import { getCurrentState, undo } from '../src/lib/editor';
@@ -116,9 +116,9 @@ function setup(tabs: Tab[]) {
     cleanRecovery: vi.fn(async () => true),
   } as unknown as RecoveryController;
   const hook = renderHook(() => {
-    const session = useDocumentSession(tabs);
-    const view = useEditorView(session, recovery, vi.fn(), vi.fn(), false);
-    return { session, view };
+    const workspace = useWorkspace(tabs);
+    const view = useEditorView(workspace, recovery, vi.fn(), vi.fn(), false);
+    return { workspace, view };
   });
   return { ...hook, recovery };
 }
@@ -135,13 +135,13 @@ describe('tab activation synchronization', () => {
         vi.advanceTimersByTime(TAB_RENDER_MS / 2);
         hook.result.current.view.handleSourceChange('a', 'Newest source.\n');
       });
-      expect(hook.result.current.session.tabsRef.current[0].markdown).toBe('Newest source.\n');
-      expect(hook.result.current.session.tabMirror.current.a.markdown).toBe('Newest source.\n');
-      expect(hook.result.current.session.tabs[0].markdown).toBe('Original source.\n');
+      expect(hook.result.current.workspace.tabsRef.current[0].markdown).toBe('Newest source.\n');
+      expect(hook.result.current.workspace.tabMirror.current.a.markdown).toBe('Newest source.\n');
+      expect(hook.result.current.workspace.tabs[0].markdown).toBe('Original source.\n');
       expect(computeStats).not.toHaveBeenCalled();
       act(() => vi.advanceTimersByTime(TAB_RENDER_MS / 2));
-      expect(hook.result.current.session.tabs[0].markdown).toBe('Newest source.\n');
-      expect(hook.result.current.session.tabs[0].stats).toEqual(expectedStats);
+      expect(hook.result.current.workspace.tabs[0].markdown).toBe('Newest source.\n');
+      expect(hook.result.current.workspace.tabs[0].stats).toEqual(expectedStats);
       expect(computeStats).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
@@ -198,7 +198,7 @@ describe('tab activation synchronization', () => {
       initialTab('a', '# First\n\nFirst document.\n'),
       initialTab('b', '# Second\n\nSecond document.\n'),
     ]);
-    hook.result.current.session.editorRegistry.current = { a: first.editor, b: second.editor };
+    hook.result.current.workspace.editorRegistry.current = { a: first.editor, b: second.editor };
     const firstDoc = first.view.state.doc;
     const secondDoc = second.view.state.doc;
     const firstHeading = first.host.querySelector('h1');
@@ -214,13 +214,13 @@ describe('tab activation synchronization', () => {
     first.host.scrollTop = 120;
     second.host.scrollTop = 240;
 
-    act(() => hook.result.current.session.selectTab('b'));
+    act(() => hook.result.current.workspace.selectTab('b'));
     expect(second.parse).not.toHaveBeenCalled();
     expect(second.serialize).not.toHaveBeenCalled();
     expect(firstRemarkParse).not.toHaveBeenCalled();
     expect(secondRemarkParse).not.toHaveBeenCalled();
     for (const id of ['a', 'b', 'a', 'b', 'a'])
-      act(() => hook.result.current.session.selectTab(id));
+      act(() => hook.result.current.workspace.selectTab(id));
 
     expect(first.parse).not.toHaveBeenCalled();
     expect(first.serialize).not.toHaveBeenCalled();
@@ -238,7 +238,7 @@ describe('tab activation synchronization', () => {
     const markdown = '# Original\n\nBody selected target text.\n';
     const first = await createFixture(markdown);
     const hook = setup([initialTab('a', markdown), initialTab('b', 'Other document.\n')]);
-    hook.result.current.session.editorRegistry.current.a = first.editor;
+    hook.result.current.workspace.editorRegistry.current.a = first.editor;
     act(() => {
       first.view.dispatch(first.view.state.tr.insertText(' changed', 9));
       let selected = 0;
@@ -253,10 +253,10 @@ describe('tab activation synchronization', () => {
       );
       hook.result.current.view.handleTabUpdate('a', getCurrentState(first.editor));
     });
-    const departedMarkdown = hook.result.current.session.tabMirror.current.a.markdown;
+    const departedMarkdown = hook.result.current.workspace.tabMirror.current.a.markdown;
     const remark = first.editor.action((ctx) => ctx.get(remarkCtx));
     const parse = vi.spyOn(remark, 'parse');
-    act(() => hook.result.current.session.selectTab('b'));
+    act(() => hook.result.current.workspace.selectTab('b'));
     expect(parse).not.toHaveBeenCalled();
 
     // A background synchronization can replace both the document and its selection before persistence.
@@ -267,7 +267,7 @@ describe('tab activation synchronization', () => {
       );
       hook.result.current.view.handleTabUpdate('a', getCurrentState(first.editor));
     });
-    const place = hook.result.current.session.captureTabPlace('a');
+    const place = hook.result.current.workspace.captureTabPlace('a');
     expect(parse).toHaveBeenCalledExactlyOnceWith(departedMarkdown);
     expect(place).toMatchObject({
       sourceMode: false,
@@ -275,9 +275,9 @@ describe('tab activation synchronization', () => {
       start: { offset: departedMarkdown.indexOf('selected target') },
       end: { offset: departedMarkdown.indexOf('selected target') + 15 },
     });
-    expect(hook.result.current.session.captureTabPlace('a')).toBe(place);
+    expect(hook.result.current.workspace.captureTabPlace('a')).toBe(place);
     expect(parse).toHaveBeenCalledTimes(1);
-    expect(hook.result.current.session.positions.current.a.sessionCapture).toBeUndefined();
+    expect(hook.result.current.workspace.positions.current.a.sessionCapture).toBeUndefined();
   });
 
   it('reuses positioned blocks until the Markdown or rich document changes', async () => {
@@ -302,20 +302,20 @@ describe('tab activation synchronization', () => {
     const input = document.createElement('textarea');
     input.value = markdown;
     document.body.append(input);
-    hook.result.current.session.editorRegistry.current.a = fixture.editor;
-    hook.result.current.session.sourceRegistry.current.a = input;
-    hook.result.current.session.positions.current.a = {
+    hook.result.current.workspace.editorRegistry.current.a = fixture.editor;
+    hook.result.current.workspace.sourceRegistry.current.a = input;
+    hook.result.current.workspace.positions.current.a = {
       exchange: { markdown, source: sourcePlace(input), rendered: renderedPlace(fixture.editor) },
     };
     const doc = fixture.view.state.doc;
-    act(() => hook.result.current.session.setSourceMode(true));
+    act(() => hook.result.current.workspace.setSourceMode(true));
     act(() => hook.result.current.view.toggleSourceMode());
     expect(fixture.parse).not.toHaveBeenCalled();
     expect(fixture.serialize).not.toHaveBeenCalled();
     expect(fixture.view.state.doc).toBe(doc);
-    expect(hook.result.current.session.resolveContent(hook.result.current.session.activeTab!)).toBe(
-      markdown,
-    );
+    expect(
+      hook.result.current.workspace.resolveContent(hook.result.current.workspace.activeTab!),
+    ).toBe(markdown);
   });
 
   it('still parses source edits when returning to rich mode, then skips later tab activation', async () => {
@@ -325,11 +325,11 @@ describe('tab activation synchronization', () => {
       initialTab('a', 'Original rich text.\n'),
       initialTab('b', 'Other document.\n'),
     ]);
-    hook.result.current.session.editorRegistry.current = { a: first.editor, b: second.editor };
+    hook.result.current.workspace.editorRegistry.current = { a: first.editor, b: second.editor };
     const input = document.createElement('textarea');
     document.body.append(input);
-    hook.result.current.session.sourceRegistry.current.a = input;
-    act(() => hook.result.current.session.setSourceMode(true));
+    hook.result.current.workspace.sourceRegistry.current.a = input;
+    act(() => hook.result.current.workspace.setSourceMode(true));
     input.value = '# Updated source\n\nLatest source edit.\n';
     act(() => hook.result.current.view.handleSourceChange('a', input.value));
     expect(first.view.state.doc.textContent).toBe('Original rich text.');
@@ -338,13 +338,13 @@ describe('tab activation synchronization', () => {
 
     expect(first.parse).toHaveBeenCalledExactlyOnceWith(input.value);
     expect(first.view.state.doc.textContent).toContain('Latest source edit.');
-    expect(hook.result.current.session.resolveContent(hook.result.current.session.activeTab!)).toBe(
-      input.value,
-    );
+    expect(
+      hook.result.current.workspace.resolveContent(hook.result.current.workspace.activeTab!),
+    ).toBe(input.value);
     first.parse.mockClear();
     first.serialize.mockClear();
-    act(() => hook.result.current.session.selectTab('b'));
-    act(() => hook.result.current.session.selectTab('a'));
+    act(() => hook.result.current.workspace.selectTab('b'));
+    act(() => hook.result.current.workspace.selectTab('a'));
     expect(first.parse).not.toHaveBeenCalled();
     expect(first.serialize).not.toHaveBeenCalled();
   });
@@ -354,7 +354,7 @@ describe('tab activation synchronization', () => {
     const first = await createFixture(markdown);
     const second = await createFixture('Other document.\n');
     const hook = setup([initialTab('a', markdown), initialTab('b', 'Other document.\n')]);
-    hook.result.current.session.editorRegistry.current = { a: first.editor, b: second.editor };
+    hook.result.current.workspace.editorRegistry.current = { a: first.editor, b: second.editor };
     act(() => {
       first.view.dispatch(first.view.state.tr.insertText(' changed', 9));
       hook.result.current.view.handleTabUpdate('a', getCurrentState(first.editor));
@@ -364,24 +364,24 @@ describe('tab activation synchronization', () => {
     first.parse.mockClear();
     first.serialize.mockClear();
 
-    act(() => hook.result.current.session.selectTab('b'));
-    act(() => hook.result.current.session.selectTab('a'));
+    act(() => hook.result.current.workspace.selectTab('b'));
+    act(() => hook.result.current.workspace.selectTab('a'));
 
     expect(first.view.state.doc).toBe(editedDoc);
     expect(undoDepth(first.view.state)).toBe(depth);
     expect(first.parse).not.toHaveBeenCalled();
     expect(first.serialize).not.toHaveBeenCalled();
-    expect(hook.result.current.session.tabMirror.current.a.outline[0].text).toBe(
+    expect(hook.result.current.workspace.tabMirror.current.a.outline[0].text).toBe(
       'Original changed',
     );
-    expect(hook.result.current.session.tabMirror.current.a.canUndo).toBe(true);
-    expect(hook.result.current.session.tabsRef.current[0].dirty).toBe(true);
+    expect(hook.result.current.workspace.tabMirror.current.a.canUndo).toBe(true);
+    expect(hook.result.current.workspace.tabsRef.current[0].dirty).toBe(true);
     act(() => {
       undo(first.editor);
       hook.result.current.view.handleTabUpdate('a', getCurrentState(first.editor));
     });
-    expect(hook.result.current.session.tabMirror.current.a.markdown).toBe(markdown);
-    expect(hook.result.current.session.tabMirror.current.a.canRedo).toBe(true);
+    expect(hook.result.current.workspace.tabMirror.current.a.markdown).toBe(markdown);
+    expect(hook.result.current.workspace.tabMirror.current.a.canRedo).toBe(true);
   });
 
   it('keeps per-edit generations and recomputes dirty state for coalesced snapshots', () => {
@@ -393,9 +393,9 @@ describe('tab activation synchronization', () => {
       hook.result.current.view.handleEditorActivity('a', activity);
       hook.result.current.view.handleEditorActivity('a', activity);
     });
-    expect(hook.result.current.session.contentGenerations.current.a).toBe(2);
-    expect(hook.result.current.session.tabsRef.current[0].dirty).toBe(true);
-    expect(hook.result.current.session.tabsRef.current[0].markdown).toBe(original);
+    expect(hook.result.current.workspace.contentGenerations.current.a).toBe(2);
+    expect(hook.result.current.workspace.tabsRef.current[0].dirty).toBe(true);
+    expect(hook.result.current.workspace.tabsRef.current[0].markdown).toBe(original);
     expect(hook.recovery.protectDraft).not.toHaveBeenCalled();
 
     const update = (markdown: string): EditorUpdate => ({
@@ -405,8 +405,8 @@ describe('tab activation synchronization', () => {
       ...activity,
     });
     act(() => hook.result.current.view.handleTabUpdate('a', update('# Changed\n'), false, true));
-    expect(hook.result.current.session.contentGenerations.current.a).toBe(2);
-    expect(hook.result.current.session.tabsRef.current[0].markdown).toBe('# Changed\n');
+    expect(hook.result.current.workspace.contentGenerations.current.a).toBe(2);
+    expect(hook.result.current.workspace.tabsRef.current[0].markdown).toBe('# Changed\n');
     expect(hook.recovery.protectDraft).toHaveBeenCalledWith(
       expect.objectContaining({ markdown: '# Changed\n' }),
     );
@@ -415,8 +415,8 @@ describe('tab activation synchronization', () => {
       hook.result.current.view.handleEditorActivity('a', activity);
       hook.result.current.view.handleTabUpdate('a', update(original), false, true);
     });
-    expect(hook.result.current.session.contentGenerations.current.a).toBe(3);
-    expect(hook.result.current.session.tabsRef.current[0].dirty).toBe(false);
+    expect(hook.result.current.workspace.contentGenerations.current.a).toBe(3);
+    expect(hook.result.current.workspace.tabsRef.current[0].dirty).toBe(false);
   });
 
   it('keeps explicit image identity synchronization active even when Markdown text is unchanged', async () => {
@@ -424,13 +424,13 @@ describe('tab activation synchronization', () => {
     let identity = 'mdplus-image:first';
     const fixture = await createFixture(markdown, () => identity);
     const hook = setup([initialTab('a', markdown)]);
-    hook.result.current.session.editorRegistry.current.a = fixture.editor;
-    act(() => hook.result.current.session.syncEditor('a', markdown, false));
+    hook.result.current.workspace.editorRegistry.current.a = fixture.editor;
+    act(() => hook.result.current.workspace.syncEditor('a', markdown, false));
     const previousDoc = fixture.view.state.doc;
     fixture.parse.mockClear();
     identity = 'mdplus-image:replacement';
 
-    act(() => hook.result.current.session.syncEditor('a', markdown, false));
+    act(() => hook.result.current.workspace.syncEditor('a', markdown, false));
 
     expect(fixture.parse).toHaveBeenCalledExactlyOnceWith(markdown);
     expect(fixture.view.state.doc).not.toBe(previousDoc);
@@ -439,7 +439,7 @@ describe('tab activation synchronization', () => {
       if (node.type.name === 'image') images.push(node.attrs.src);
     });
     expect(images).toEqual(['mdplus-image:replacement']);
-    expect(hook.result.current.session.tabsRef.current[0].markdown).toBe(markdown);
+    expect(hook.result.current.workspace.tabsRef.current[0].markdown).toBe(markdown);
   });
 
   it('synchronizes a late or replacement editor with newer source before publishing initial metadata', async () => {
@@ -449,7 +449,7 @@ describe('tab activation synchronization', () => {
     act(() => hook.result.current.view.handleSourceChange('a', latest));
     for (let attempt = 0; attempt < 2; attempt++) {
       const fixture = await createFixture(current.initialContent);
-      hook.result.current.session.editorRegistry.current.a = fixture.editor;
+      hook.result.current.workspace.editorRegistry.current.a = fixture.editor;
       const initial = getCurrentState(fixture.editor);
       fixture.parse.mockClear();
       act(() => hook.result.current.view.handleTabUpdate('a', initial, true));
@@ -458,8 +458,8 @@ describe('tab activation synchronization', () => {
       expect(fixture.view.state.doc.textContent).toContain(
         'Unsaved edit before the editor was ready.',
       );
-      expect(hook.result.current.session.tabsRef.current[0].markdown).toBe(latest);
-      expect(hook.result.current.session.tabsRef.current[0].dirty).toBe(true);
+      expect(hook.result.current.workspace.tabsRef.current[0].markdown).toBe(latest);
+      expect(hook.result.current.workspace.tabsRef.current[0].dirty).toBe(true);
     }
   });
 
@@ -469,18 +469,18 @@ describe('tab activation synchronization', () => {
     const current = { ...initialTab('a', original), path: 'C:/notes/note.md', isNew: false };
     const hook = setup([current, initialTab('b', 'Other document.\n')]);
     act(() => {
-      hook.result.current.session.contentGenerations.current.a = 0;
+      hook.result.current.workspace.contentGenerations.current.a = 0;
       // Save As updates the authoritative draft even when sync cannot reach an
       // editor yet. EditorTab still initializes from the original source.
-      hook.result.current.session.syncEditor('a', migrated, false);
-      hook.result.current.session.tabMirror.current.a = {
+      hook.result.current.workspace.syncEditor('a', migrated, false);
+      hook.result.current.workspace.tabMirror.current.a = {
         markdown: migrated,
         outline: [],
         stats: computeStats(migrated),
         canUndo: false,
         canRedo: false,
       };
-      hook.result.current.session.updateTab('a', {
+      hook.result.current.workspace.updateTab('a', {
         path: 'C:/copies/note.md',
         markdown: migrated,
         savedContent: migrated,
@@ -488,7 +488,7 @@ describe('tab activation synchronization', () => {
         dirty: false,
       });
     });
-    expect(hook.result.current.session.editorRegistry.current.a).toBeUndefined();
+    expect(hook.result.current.workspace.editorRegistry.current.a).toBeUndefined();
     const fixture = await createFixture(current.initialContent);
     const staleDoc = fixture.view.state.doc;
     const initial = getCurrentState(fixture.editor);
@@ -511,9 +511,9 @@ describe('tab activation synchronization', () => {
     expect(fixture.view.state.doc).not.toBe(staleDoc);
     expect(fixture.parse).toHaveBeenCalledExactlyOnceWith(migrated);
     expect(undoDepth(fixture.view.state)).toBe(0);
-    expect(hook.result.current.session.contentGenerations.current.a).toBe(0);
-    expect(hook.result.current.session.tabMirror.current.a.markdown).toBe(migrated);
-    expect(hook.result.current.session.tabsRef.current[0]).toMatchObject({
+    expect(hook.result.current.workspace.contentGenerations.current.a).toBe(0);
+    expect(hook.result.current.workspace.tabMirror.current.a.markdown).toBe(migrated);
+    expect(hook.result.current.workspace.tabsRef.current[0]).toMatchObject({
       path: 'C:/copies/note.md',
       markdown: migrated,
       savedContent: migrated,
@@ -522,8 +522,8 @@ describe('tab activation synchronization', () => {
     });
     fixture.parse.mockClear();
     fixture.serialize.mockClear();
-    act(() => hook.result.current.session.selectTab('b'));
-    act(() => hook.result.current.session.selectTab('a'));
+    act(() => hook.result.current.workspace.selectTab('b'));
+    act(() => hook.result.current.workspace.selectTab('a'));
     expect(fixture.parse).not.toHaveBeenCalled();
     expect(fixture.serialize).not.toHaveBeenCalled();
   });
@@ -545,9 +545,9 @@ describe('tab activation synchronization', () => {
 
       expect(fixture.parse).not.toHaveBeenCalled();
       expect(fixture.serialize).not.toHaveBeenCalled();
-      expect(hook.result.current.session.contentGenerations.current.a).toBe(0);
-      expect(hook.result.current.session.tabMirror.current.a.markdown).toBe(raw);
-      expect(hook.result.current.session.tabsRef.current[0]).toMatchObject({
+      expect(hook.result.current.workspace.contentGenerations.current.a).toBe(0);
+      expect(hook.result.current.workspace.tabMirror.current.a.markdown).toBe(raw);
+      expect(hook.result.current.workspace.tabsRef.current[0]).toMatchObject({
         markdown: raw,
         initialContent: raw,
         savedContent: raw,

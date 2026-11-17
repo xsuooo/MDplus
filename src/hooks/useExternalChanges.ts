@@ -7,13 +7,13 @@ import { computeStats } from '../lib/stats';
 import { needsDocumentProtection } from '../lib/documentProtection';
 import type { Tab } from '../lib/types';
 
-import type { DocumentSession } from './useDocumentSession';
+import type { Workspace } from './useWorkspace';
 import type { RecoveryController } from './useRecovery';
 
 const BACKGROUND_EXTERNAL_POLL_MS = EXTERNAL_POLL_MS * 15;
 
 export function useExternalChanges(
-  session: DocumentSession,
+  workspace: Workspace,
   recovery: Pick<RecoveryController, 'cleanRecovery' | 'protectDraft'>,
 ) {
   const { cleanRecovery, protectDraft } = recovery;
@@ -35,7 +35,7 @@ export function useExternalChanges(
     syncEditor,
     updateTab,
     pauseAutoSave,
-  } = session;
+  } = workspace;
   const externalLastChecks = useRef<Record<string, number>>({});
   const previousActiveId = useRef(activeId);
   /* ---------- 外部文件变化检测 ---------- */

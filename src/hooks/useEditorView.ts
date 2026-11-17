@@ -40,11 +40,11 @@ import { protectPastedImage } from '../lib/recovery';
 import { computeStats } from '../lib/stats';
 import type { EditorUpdate, OutlineItem } from '../lib/types';
 
-import type { DocumentSession } from './useDocumentSession';
+import type { Workspace } from './useWorkspace';
 import type { RecoveryController } from './useRecovery';
 
 export function useEditorView(
-  session: DocumentSession,
+  workspace: Workspace,
   recovery: RecoveryController,
   scheduleAutoSave: (id: string) => void,
   changeSourcePreference: (source: boolean) => void,
@@ -70,13 +70,13 @@ export function useEditorView(
     syncEditor,
     rememberActive,
     resolveContent,
-  } = session;
+  } = workspace;
   const { prepareCurrentImages, protectDraft, cleanRecovery } = recovery;
   const [codeFont, setCodeFont] = useState(readCodeFont);
   const [bodyFont, setBodyFont] = useState(readBodyFont);
   const [editorWidth, setEditorWidth] = useState(readEditorWidth);
   // Worker inputs follow committed state; discarded renders must not consume newer mirror content.
-  const sourceMarkdown = session.activeTab?.markdown ?? '';
+  const sourceMarkdown = workspace.activeTab?.markdown ?? '';
   const [sourceOutline, setSourceOutline] = useState<{
     id: string;
     markdown: string;

@@ -14,15 +14,15 @@
 
 ## 正文的七份副本
 
-| 副本                                 | 位置                 | 何时更新                         |
-| ------------------------------------ | -------------------- | -------------------------------- |
-| ProseMirror 文档或源码 textarea 的值 | 编辑器实例           | 每次输入，唯一的事实来源         |
-| `pendingEditorUpdates`               | `lib/editorUpdates`  | 合并中的派生更新，flush 后清空   |
-| `tabMirror.current[id].markdown`     | `useDocumentSession` | 每次编辑器发布更新               |
-| `tabsRef.current[i].markdown`        | `useDocumentSession` | 与 `tabMirror` 同时写入          |
-| React `tabs`                         | `useDocumentSession` | `scheduleTabRender` 延后 120 ms  |
-| `Tab.initialContent`                 | `Tab`                | 创建编辑器时的初始文本           |
-| `Tab.savedContent`                   | `Tab`                | 上次写盘成功或从磁盘重载时的文本 |
+| 副本                                 | 位置                | 何时更新                         |
+| ------------------------------------ | ------------------- | -------------------------------- |
+| ProseMirror 文档或源码 textarea 的值 | 编辑器实例          | 每次输入，唯一的事实来源         |
+| `pendingEditorUpdates`               | `lib/editorUpdates` | 合并中的派生更新，flush 后清空   |
+| `tabMirror.current[id].markdown`     | `useWorkspace`      | 每次编辑器发布更新               |
+| `tabsRef.current[i].markdown`        | `useWorkspace`      | 与 `tabMirror` 同时写入          |
+| React `tabs`                         | `useWorkspace`      | `scheduleTabRender` 延后 120 ms  |
+| `Tab.initialContent`                 | `Tab`               | 创建编辑器时的初始文本           |
+| `Tab.savedContent`                   | `Tab`               | 上次写盘成功或从磁盘重载时的文本 |
 
 读当前正文用 `session.resolveContent(tab)`。
 

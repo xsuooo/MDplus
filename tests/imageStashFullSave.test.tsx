@@ -28,7 +28,7 @@ vi.mock('../src/lib/store', () => ({
 
 import { AUTO_SAVE_DELAY, IMAGE_PREPARATION_MS, RECOVERY_DELAY_MS } from '../src/config/constants';
 import { useDocumentSave } from '../src/hooks/useDocumentSave';
-import { useDocumentSession } from '../src/hooks/useDocumentSession';
+import { useWorkspace } from '../src/hooks/useWorkspace';
 import { useRecovery } from '../src/hooks/useRecovery';
 import {
   clearPendingImages,
@@ -75,10 +75,10 @@ const edited = (): Tab => ({
 async function mount() {
   const tabs = [edited()];
   const hook = renderHook(() => {
-    const session = useDocumentSession(tabs);
-    const recovery = useRecovery(session);
-    const save = useDocumentSave(session, recovery, setRecent);
-    return { session, recovery, save };
+    const workspace = useWorkspace(tabs);
+    const recovery = useRecovery(workspace);
+    const save = useDocumentSave(workspace, recovery, setRecent);
+    return { workspace, recovery, save };
   });
   // Settles the recovery listing that the hook starts on mount.
   await act(async () => {
@@ -131,7 +131,7 @@ describe('saving and protecting a document while the image stash is full', () =>
     expect(mocks.message.mock.calls).toEqual([]);
     expect(saved).toBe(true);
     expect(native.documents.get(notePath)).toMatchObject({ content: both, revision: 'rev-2' });
-    expect(hook.result.current.session.tabs[0]).toMatchObject({
+    expect(hook.result.current.workspace.tabs[0]).toMatchObject({
       dirty: false,
       savedContent: both,
       diskRevision: 'rev-2',
@@ -148,17 +148,17 @@ describe('saving and protecting a document while the image stash is full', () =>
     act(() => hook.result.current.save.scheduleAutoSave(id));
     await act(async () => {
       await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY);
-      await hook.result.current.session.saveQueues.current[id];
+      await hook.result.current.workspace.saveQueues.current[id];
     });
 
     expect(mocks.message.mock.calls).toEqual([]);
     expect(native.documents.get(notePath)).toMatchObject({ content: both, revision: 'rev-2' });
-    expect(hook.result.current.session.tabs[0]).toMatchObject({
+    expect(hook.result.current.workspace.tabs[0]).toMatchObject({
       dirty: false,
       savedContent: both,
       diskRevision: 'rev-2',
     });
-    expect(id in hook.result.current.session.blockedExternalMtime.current).toBe(false);
+    expect(id in hook.result.current.workspace.blockedExternalMtime.current).toBe(false);
     expect(resolveImageSource(id, './img/a.png')).toBe(previewA);
   });
 
@@ -181,14 +181,14 @@ describe('saving and protecting a document while the image stash is full', () =>
       base64(B),
     ]);
     expect(native.documents.get(notePath)).toMatchObject({ content: one, revision: 'rev-1' });
-    expect(hook.result.current.session.tabs[0]).toMatchObject({ path: otherPath, dirty: false });
+    expect(hook.result.current.workspace.tabs[0]).toMatchObject({ path: otherPath, dirty: false });
   });
 
   it('protects the draft with an owned copy of both images', async () => {
     const hook = await mount();
 
-    act(() => hook.result.current.recovery.protectDraft(hook.result.current.session.tabs[0]));
-    const preparation = hook.result.current.session.imagePreparations.current[id]?.promise;
+    act(() => hook.result.current.recovery.protectDraft(hook.result.current.workspace.tabs[0]));
+    const preparation = hook.result.current.workspace.imagePreparations.current[id]?.promise;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(IMAGE_PREPARATION_MS);
       await expect(preparation).resolves.toBe(true);

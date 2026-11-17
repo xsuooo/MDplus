@@ -2,7 +2,7 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useDocumentFiles } from '../src/hooks/useDocumentFiles';
-import { useDocumentSession } from '../src/hooks/useDocumentSession';
+import { useWorkspace } from '../src/hooks/useWorkspace';
 
 vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => false, invoke: vi.fn() }));
 vi.mock('../src/lib/editor', () => ({ setMarkdown: vi.fn() }));
@@ -13,8 +13,8 @@ afterEach(cleanup);
 
 function setup() {
   return renderHook(() => {
-    const session = useDocumentSession();
-    return { session, files: useDocumentFiles(session) };
+    const workspace = useWorkspace();
+    return { workspace, files: useDocumentFiles(workspace) };
   });
 }
 
@@ -26,11 +26,11 @@ describe('untitled document names', () => {
       hook.result.current.files.createDocument('blank');
     });
     act(() => {
-      const firstId = hook.result.current.session.tabsRef.current[0].id;
-      hook.result.current.session.removeTab(firstId);
+      const firstId = hook.result.current.workspace.tabsRef.current[0].id;
+      hook.result.current.workspace.removeTab(firstId);
       hook.result.current.files.createDocument('blank');
     });
-    const titles = hook.result.current.session.tabsRef.current.map((tab) => tab.title);
+    const titles = hook.result.current.workspace.tabsRef.current.map((tab) => tab.title);
     expect(new Set(titles).size).toBe(titles.length);
     expect(titles).toContain('未命名文档 2.md');
   });
@@ -39,14 +39,14 @@ describe('untitled document names', () => {
     const hook = setup();
     await act(async () => hook.result.current.files.createDocument('blank'));
     act(() => {
-      const savedId = hook.result.current.session.tabsRef.current[0].id;
-      hook.result.current.session.updateTab(savedId, {
+      const savedId = hook.result.current.workspace.tabsRef.current[0].id;
+      hook.result.current.workspace.updateTab(savedId, {
         path: 'C:/notes/未命名文档.md',
         isNew: false,
       });
       hook.result.current.files.createDocument('basic');
     });
-    expect(hook.result.current.session.tabsRef.current.map((tab) => tab.title)).toEqual([
+    expect(hook.result.current.workspace.tabsRef.current.map((tab) => tab.title)).toEqual([
       '未命名文档.md',
       '未命名文档 2.md',
     ]);

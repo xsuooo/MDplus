@@ -19,7 +19,7 @@ import { getRecentFiles, pushRecentFile } from '../lib/store';
 import type { RecentFile, Tab } from '../lib/types';
 
 import { AUTO_SAVE_DELAY } from '../config/constants';
-import type { DocumentSession } from './useDocumentSession';
+import type { Workspace } from './useWorkspace';
 import type { RecoveryController } from './useRecovery';
 
 type MigrationWriteState = 'unchanged' | 'committed' | 'unknown';
@@ -59,7 +59,7 @@ async function finishMigration(migration: ImageMigration | undefined, state: Mig
 }
 
 export function useDocumentSave(
-  session: DocumentSession,
+  workspace: Workspace,
   recovery: RecoveryController,
   setRecentFiles: (files: RecentFile[]) => void,
 ) {
@@ -81,7 +81,7 @@ export function useDocumentSave(
     updateTab,
     pauseAutoSave,
     syncEditor,
-  } = session;
+  } = workspace;
   const { prepareCurrentImages, cleanRecovery, protectDraft } = recovery;
   const [savingId, setSavingId] = useState<string | null>(null);
   /* ---------- 保存 ---------- */

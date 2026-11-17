@@ -68,7 +68,7 @@
 
 会话恢复默认开启，见 `src/hooks/useSessionPersistence.ts:38` 和 `src/lib/store.ts:230`。原生环境监听 `.editor-area` 内的 scroll、select、selectionchange、input、keyup、pointerup（`src/hooks/useSessionPersistence.ts:411`）；事件目标必须是该区域内的 HTMLElement，因此目标为 document 的 selectionchange 会被过滤。源码模式的输入和滚动也会重置 500ms 定时器。实际捕获还受启动完成、恢复开关、读取错误和关闭状态限制（`:140`）。
 
-`captureLiveSession()` 遍历全部标签，但 `sessionDocument()` 在 `:120` 跳过没有路径的标签。`captureTabPlace()` 为非活跃页复用已有位置，活跃页重新捕获（`src/hooks/useDocumentSession.ts:111`）。富文本位置解析使用该编辑器的 remark 上下文，可命中 `cacheMarkdownParser()`，但命中仍需克隆 AST 并执行 `runSync`；图片引用使用独立的 micromark 解析及内容缓存，两者不共享结果。因此，输入时的序列化和统计、150ms 后的图片准备、500ms 后的位置保存需要分别观察；不能把其中一个缓存命中当作全部旁路都已免除全文工作。
+`captureLiveSession()` 遍历全部标签，但 `sessionDocument()` 在 `:120` 跳过没有路径的标签。`captureTabPlace()` 为非活跃页复用已有位置，活跃页重新捕获（`src/hooks/useWorkspace.ts:111`）。富文本位置解析使用该编辑器的 remark 上下文，可命中 `cacheMarkdownParser()`，但命中仍需克隆 AST 并执行 `runSync`；图片引用使用独立的 micromark 解析及内容缓存，两者不共享结果。因此，输入时的序列化和统计、150ms 后的图片准备、500ms 后的位置保存需要分别观察；不能把其中一个缓存命中当作全部旁路都已免除全文工作。
 
 ## 5. 大文件打开和滚动的主要可疑环节
 
