@@ -59,7 +59,7 @@ export function useEditorView(
     tabRuntime,
     runtimeOf,
     tabsRef,
-    saveGenerations,
+    tabEpoch,
     currentView,
     positionVersion,
     syncEditor,
@@ -516,10 +516,9 @@ export function useEditorView(
   const handleImagePaste = useCallback(
     async (tabId: string, file: File): Promise<string> => {
       let imagePath: string | undefined;
-      const lifetime = saveGenerations.current[tabId] ?? 0;
+      const lifetime = tabEpoch(tabId);
       const isCurrent = () =>
-        (saveGenerations.current[tabId] ?? 0) === lifetime &&
-        tabsRef.current.some((tab) => tab.id === tabId);
+        tabEpoch(tabId) === lifetime && tabsRef.current.some((tab) => tab.id === tabId);
       try {
         imagePath = await saveImage(file, tabId);
         if (!isCurrent()) {
@@ -539,7 +538,7 @@ export function useEditorView(
         throw err;
       }
     },
-    [saveGenerations, tabsRef],
+    [tabEpoch, tabsRef],
   );
 
   /* ---------- 撤销 / 重做 ---------- */

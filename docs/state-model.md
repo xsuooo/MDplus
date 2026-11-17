@@ -10,7 +10,7 @@
 - `tabsRef`：`Tab` 数组的同步副本，异步流程读它。
 - `tabRuntime.current[id]`（类型 `TabRuntime`）：一个标签不参与渲染的全部状态，包括编辑器实例、内容镜像、内容版本、保存定时器与队列、磁盘同步、光标位置。读用 `tabRuntime.current[id]?.字段`，写用 `runtimeOf(id).字段`。`removeTab` 删除整条记录。
 
-唯一留在记录之外的是 `saveGenerations`：它必须比标签活得久，关闭标签时加一，让在途保存发现自己已过期。
+唯一留在记录之外的是 `tabEpoch`：它必须比标签活得久，关闭标签时加一，让在途保存发现自己已过期。
 
 ## 七条规则
 
@@ -41,7 +41,7 @@
 | 计数器                                    | 递增处                                                                                             | 用途                                                   |
 | ----------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | `tabRuntime[id].contentVersion`           | `useEditorView` 的 `handleEditorActivity`、`handleTabUpdate`、`handleSourceChange`；外部重载生效时 | 内容版本号。异步步骤前后比较，判断期间有没有新编辑     |
-| `saveGenerations[id]`                     | `removeTab`；另存为放弃采用新路径时                                                                | 使在途保存失效。也被恢复和图片粘贴当作「标签还在」令牌 |
+| `tabEpoch(id)`                            | `removeTab`；另存为放弃采用新路径时                                                                | 使在途保存失效。也被恢复和图片粘贴当作「标签还在」令牌 |
 | `tabRuntime[id].modeGeneration`           | `setSourceMode`                                                                                    | 使跨模式切换的图片拖放失效                             |
 | `closeGeneration`                         | `useDocumentClose` 每次发起或取消关闭                                                              | 使上一轮关闭确认失效                                   |
 | `tabRuntime[id].imagePreparation.version` | 记录发起准备时的 `contentVersion` 值                                                               | 判断准备结果是否仍对应当前内容                         |
@@ -79,6 +79,6 @@
 | 确认或图片迁移期间磁盘再次变化                   | `pauseAutoSave(id, 最新 mtime)`，取消本次保存                                                     |
 | 保存抛错                                         | `pauseAutoSave(id, null)`，`dirty: true`，安排恢复副本                                            |
 | 保存或另存为成功                                 | `resumeAutoSave(id)`，`externalChanged` 与 `preserveLocal` 复位                                   |
-| 关闭标签                                         | `removeTab` 删除 `tabRuntime[id]`，`saveGenerations` 加一                                         |
+| 关闭标签                                         | `removeTab` 删除 `tabRuntime[id]`，`tabEpoch` 加一                                                |
 
 `pauseAutoSave(id, mtime)` 同时写 `disk.pausedMtime` 并置 `preserveLocal: true`。

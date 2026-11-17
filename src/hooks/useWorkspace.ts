@@ -75,7 +75,13 @@ export function useWorkspace(initialTabs: Tab[] = []) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [positionVersion, setPositionVersion] = useState(0);
   const tabsRef = useRef<Tab[]>(initialTabs);
-  const saveGenerations = useRef<Record<string, number>>({});
+  // Outlives the tab on purpose: bumped when a tab closes or its queued saves must be dropped, so an
+  // async step can tell that the id it started with no longer means the same document.
+  const epochs = useRef<Record<string, number>>({});
+  const tabEpoch = useCallback((id: string) => epochs.current[id] ?? 0, []);
+  const invalidateSaves = useCallback((id: string) => {
+    epochs.current[id] = (epochs.current[id] ?? 0) + 1;
+  }, []);
   // All per-tab state that is not rendered. removeTab drops the whole record. See docs/state-model.md.
   const tabRuntime = useRef<Record<string, TabRuntime>>({});
   const runtimeOf = useCallback((id: string) => (tabRuntime.current[id] ??= {}), []);
@@ -300,7 +306,7 @@ export function useWorkspace(initialTabs: Tab[] = []) {
     // 同步更新 tabsRef,确保关闭窗口流程里 onCloseRequested 能读到最新状态,
     // 否则保存后再次 close() 会因读到旧 dirty 标签而再次拦截,陷入死循环
     tabsRef.current = tabsRef.current.filter((t) => t.id !== id);
-    saveGenerations.current[id] = (saveGenerations.current[id] ?? 0) + 1;
+    epochs.current[id] = (epochs.current[id] ?? 0) + 1;
     tabRuntime.current[id]?.imagePreparation?.cancel();
     setTabs([...tabsRef.current]);
     clearPendingImages(id);
@@ -327,7 +333,8 @@ export function useWorkspace(initialTabs: Tab[] = []) {
     positionVersion,
     activeTab,
     tabsRef,
-    saveGenerations,
+    tabEpoch,
+    invalidateSaves,
     tabRuntime,
     runtimeOf,
     diskOf,

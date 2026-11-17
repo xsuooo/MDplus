@@ -16,7 +16,7 @@ import { useImagePreparation } from './useImagePreparation';
 import type { Workspace } from './useWorkspace';
 
 export function useRecovery(workspace: Workspace) {
-  const { tabs, tabsRef, tabRuntime, saveGenerations, resolveContent, addTab } = workspace;
+  const { tabs, tabsRef, tabRuntime, tabEpoch, resolveContent, addTab } = workspace;
   const alive = useRef(true);
   const restoring = useRef(new Map<string, Promise<void>>());
   useEffect(() => {
@@ -108,13 +108,13 @@ export function useRecovery(workspace: Workspace) {
       const pending = restoring.current.get(id);
       if (pending) return pending;
       if (tabsRef.current.some((tab) => tab.id === id)) return Promise.resolve();
-      const lifetime = saveGenerations.current[id] ?? 0;
+      const lifetime = tabEpoch(id);
       const operation = (async () => {
         const prepared = await prepareRecovery(id);
         try {
           if (
             !alive.current ||
-            (saveGenerations.current[id] ?? 0) !== lifetime ||
+            tabEpoch(id) !== lifetime ||
             tabsRef.current.some((tab) => tab.id === id)
           )
             return;
@@ -146,7 +146,7 @@ export function useRecovery(workspace: Workspace) {
       void operation.then(finish, finish);
       return operation;
     },
-    [addTab, saveGenerations, tabsRef],
+    [addTab, tabEpoch, tabsRef],
   );
 
   const handleRecoveryRemoved = useCallback((id: string) => {
