@@ -64,7 +64,8 @@ export function useDocumentSave(
 ) {
   const {
     tabsRef,
-    saveGenerations,
+    tabEpoch,
+    invalidateSaves,
     tabRuntime,
     runtimeOf,
     isAutoSavePaused,
@@ -162,7 +163,7 @@ export function useDocumentSave(
   const handleSaveAsFor = useCallback(
     async (tab: Tab, generation: number, saveCurrent: () => Promise<boolean>): Promise<boolean> => {
       const isCurrentSave = () =>
-        (saveGenerations.current[tab.id] ?? 0) === generation &&
+        tabEpoch(tab.id) === generation &&
         tabsRef.current.some((candidate) => candidate.id === tab.id);
       let migration: ImageMigration | undefined;
       let writeState: MigrationWriteState = 'unchanged';
@@ -255,7 +256,7 @@ export function useDocumentSave(
           getImageUrls(latestContent).some(isRelativeImageUrl)
         ) {
           // The snapshot exists, but adopting its path would rebase a newer draft's relative images.
-          saveGenerations.current[tab.id] = (saveGenerations.current[tab.id] ?? 0) + 1;
+          invalidateSaves(tab.id);
           clearTimeout(tabRuntime.current[tab.id]?.saveTimer);
           delete tabRuntime.current[tab.id]?.saveTimer;
           pauseAutoSave(tab.id, null);
@@ -300,7 +301,7 @@ export function useDocumentSave(
       }
     },
     [
-      saveGenerations,
+      tabEpoch,
       tabsRef,
       resolveContent,
       tabRuntime,
@@ -309,6 +310,7 @@ export function useDocumentSave(
       updateTab,
       resumeAutoSave,
       refreshSnapshotAfterSave,
+      invalidateSaves,
       pauseAutoSave,
       saveRecoverySnapshot,
       setRecentFiles,
@@ -323,8 +325,7 @@ export function useDocumentSave(
       { manual = false, saveAs = false } = {},
     ): Promise<boolean> => {
       const isCurrentSave = () =>
-        (saveGenerations.current[id] ?? 0) === generation &&
-        tabsRef.current.some((tab) => tab.id === id);
+        tabEpoch(id) === generation && tabsRef.current.some((tab) => tab.id === id);
 
       if (!isCurrentSave()) return false;
       const editor = tabRuntime.current[id]?.editor;
@@ -429,7 +430,7 @@ export function useDocumentSave(
       tabRuntime,
       tabsRef,
       isAutoSavePaused,
-      saveGenerations,
+      tabEpoch,
       handleSaveAsFor,
       resolveContent,
       prepareCurrentImages,
@@ -448,7 +449,7 @@ export function useDocumentSave(
       if (timer) clearTimeout(timer);
       delete tabRuntime.current[id]?.saveTimer;
       const previous = tabRuntime.current[id]?.saveQueue ?? Promise.resolve(true);
-      const generation = saveGenerations.current[id] ?? 0;
+      const generation = tabEpoch(id);
       setSavingId(id);
       const next = previous
         .catch(() => false)
@@ -464,7 +465,7 @@ export function useDocumentSave(
       void next.then(finish, finish);
       return next;
     },
-    [performSave, saveGenerations, tabRuntime, runtimeOf],
+    [performSave, tabEpoch, tabRuntime, runtimeOf],
   );
 
   const scheduleAutoSave = useCallback(

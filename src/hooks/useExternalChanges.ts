@@ -24,7 +24,7 @@ export function useExternalChanges(
     tabRuntime,
     runtimeOf,
     tabsRef,
-    saveGenerations,
+    tabEpoch,
     diskOf,
     resumeAutoSave,
     currentView,
@@ -60,14 +60,10 @@ export function useExternalChanges(
         const tab = tabsRef.current.find((candidate) => candidate.id === tabId);
         if (!tab?.path || tab.dirty || tabRuntime.current[tabId]?.saveQueue !== undefined) return;
         const version = tabRuntime.current[tabId]?.contentVersion ?? 0;
-        const saveGeneration = saveGenerations.current[tabId] ?? 0;
+        const saveGeneration = tabEpoch(tabId);
         const isCurrentDocument = () => {
           const latest = tabsRef.current.find((candidate) => candidate.id === tabId);
-          return (
-            !!latest &&
-            latest.path === tab.path &&
-            (saveGenerations.current[tabId] ?? 0) === saveGeneration
-          );
+          return !!latest && latest.path === tab.path && tabEpoch(tabId) === saveGeneration;
         };
         const canApply = () =>
           isCurrentDocument() &&
@@ -190,7 +186,7 @@ export function useExternalChanges(
       tabsRef,
       tabRuntime,
       runtimeOf,
-      saveGenerations,
+      tabEpoch,
       pauseAutoSave,
       reportUnreadable,
       diskOf,
