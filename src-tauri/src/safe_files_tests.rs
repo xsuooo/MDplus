@@ -8,12 +8,12 @@ fn save_image_asset(
     filename: String,
     data: Vec<u8>,
 ) -> Result<crate::safe_files::ImageReceipt, Box<crate::safe_files::FileError>> {
-    let receipt = crate::safe_files::save_image_asset(
+    let receipt = crate::image_assets::save_image_asset(
         doc_path,
         filename,
         crate::image_data::encode_image(&data),
     )?;
-    crate::safe_files::commit_image_assets(receipt.allocation_id.iter().cloned().collect())
+    crate::image_assets::commit_image_assets(receipt.allocation_id.iter().cloned().collect())
         .unwrap();
     Ok(receipt)
 }

@@ -1,5 +1,5 @@
+use crate::image_assets::{commit_image_assets, discard_image_assets, save_image_asset};
 use crate::image_data::encode_image;
-use crate::safe_files::{commit_image_assets, discard_image_assets, save_image_asset};
 use std::fs;
 
 fn create(root: &std::path::Path, bytes: &[u8]) -> crate::safe_files::ImageReceipt {

@@ -14,7 +14,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tempfile::{Builder, TempDir};
 
-use crate::{decode_text, image_mime, looks_binary, MAX_IMAGE_FILE_BYTES, MAX_TEXT_FILE_BYTES};
+use crate::{decode_text, looks_binary, MAX_TEXT_FILE_BYTES};
 
 // Serializes this process only; arbitrary external editors do not participate.
 static DOCUMENT_WRITES: Mutex<()> = Mutex::new(());
@@ -32,7 +32,7 @@ pub struct FileError {
 }
 
 impl FileError {
-    fn new(code: &'static str, path: &Path, message: impl Into<String>) -> Box<Self> {
+    pub(crate) fn new(code: &'static str, path: &Path, message: impl Into<String>) -> Box<Self> {
         Box::new(Self {
             code,
             message: message.into(),
@@ -43,7 +43,7 @@ impl FileError {
             write_state: "unchanged",
         })
     }
-    fn io(path: &Path, error: io::Error) -> Box<Self> {
+    pub(crate) fn io(path: &Path, error: io::Error) -> Box<Self> {
         let code = if matches!(error.raw_os_error(), Some(32 | 33)) {
             "BUSY"
         } else {
@@ -85,10 +85,10 @@ pub struct ImageReceipt {
     pub allocation_id: Option<String>,
 }
 
-fn display(path: &Path) -> String {
+pub(crate) fn display(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
-fn revision(bytes: &[u8]) -> String {
+pub(crate) fn revision(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
@@ -352,7 +352,7 @@ struct SaveCopies {
     previous: PathBuf,
 }
 impl SaveCopies {
-    fn new(target: &Path, bytes: &[u8]) -> Result<Self, Box<FileError>> {
+    pub(crate) fn new(target: &Path, bytes: &[u8]) -> Result<Self, Box<FileError>> {
         let directory = Builder::new()
             .prefix(".mdplus-save-")
             .tempdir_in(target.parent().unwrap())
@@ -572,183 +572,6 @@ pub(crate) fn write_text_with_limit(
     Ok(receipt)
 }
 
-struct OwnedAsset {
-    file: File,
-    path: PathBuf,
-}
-
-static IMAGE_ALLOCATIONS: std::sync::LazyLock<
-    Mutex<std::collections::HashMap<String, OwnedAsset>>,
-> = std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
-
-#[tauri::command]
-pub fn save_image_asset(
-    doc_path: String,
-    filename: String,
-    data_base64: String,
-) -> Result<ImageReceipt, Box<FileError>> {
-    let document = target_path(Path::new(&doc_path))?;
-    if !valid_basename(&filename) {
-        return Err(FileError::new("INVALID_PATH", &document, "图片文件名无效"));
-    }
-    let data = crate::image_data::decode_image(&data_base64).map_err(|error| {
-        let code = match error {
-            crate::image_data::ImageDataError::TooLarge(_) => "TOO_LARGE",
-            crate::image_data::ImageDataError::InvalidBase64 => "INVALID_ENCODING",
-        };
-        FileError::new(code, &document, error.to_string())
-    })?;
-    image_mime(Path::new(&filename), &data)
-        .map_err(|message| FileError::new("INVALID_ENCODING", &document, message))?;
-    let mut allocations = IMAGE_ALLOCATIONS
-        .lock()
-        .map_err(|_| FileError::new("IO_ERROR", &document, "图片分配队列不可用"))?;
-    if allocations.len() >= crate::config::MAX_IMAGE_STASH_ENTRIES {
-        return Err(FileError::new(
-            "TOO_LARGE",
-            &document,
-            "未完成的图片分配过多，请先完成或取消保存",
-        ));
-    }
-    let directory = document.parent().unwrap().join("assets");
-    match fs::create_dir(&directory) {
-        Ok(()) => {}
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-        Err(error) => return Err(FileError::io(&directory, error)),
-    }
-    let metadata =
-        fs::symlink_metadata(&directory).map_err(|error| FileError::io(&directory, error))?;
-    if is_link(&metadata) || !metadata.is_dir() {
-        return Err(FileError::new(
-            "INVALID_PATH",
-            &directory,
-            "图片目录不能是文件、链接或重解析点",
-        ));
-    }
-    let (stem, extension) = filename
-        .rsplit_once('.')
-        .ok_or_else(|| FileError::new("INVALID_PATH", &document, "图片缺少扩展名"))?;
-    let expected_hash = revision(&data);
-    for attempt in 0..1000 {
-        let filename = if attempt == 0 {
-            filename.clone()
-        } else {
-            format!("{stem}-{attempt}.{extension}")
-        };
-        let path = directory.join(&filename);
-        // An uncommitted allocation belongs to a different migration. Sharing
-        // its token or returning it as unowned would allow one rollback to break
-        // another document, so allocate separately until it has been committed.
-        if allocations.values().any(|asset| asset.path == path) {
-            continue;
-        }
-        let mut file = match crate::owned_file::create_owned(&path) {
-            Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                // Reuse only a regular leaf, never a symlink/reparse point whose
-                // bytes happen to match. Such references may fail on reopen or
-                // escape the document directory; leave them alone and suffix.
-                if optional_snapshot(&path, MAX_IMAGE_FILE_BYTES)
-                    .is_ok_and(|raw| raw.is_some_and(|raw| raw.revision == expected_hash))
-                {
-                    return Ok(ImageReceipt {
-                        relative_path: format!("./assets/{filename}"),
-                        filename,
-                        path: display(&path),
-                        allocation_id: None,
-                    });
-                }
-                continue;
-            }
-            Err(error) => return Err(FileError::io(&path, error)),
-        };
-        let result = file.write_all(&data).and_then(|_| file.sync_all());
-        #[cfg(test)]
-        let result = hooks::image_write_result(result);
-        if let Err(error) = result {
-            // The still-exclusive handle is proof of ownership. Delete only that
-            // object; after closing it no cleanup is allowed by pathname.
-            let cleanup = crate::owned_file::delete_on_close(&file);
-            drop(file);
-            #[cfg(test)]
-            hooks::run(hooks::Checkpoint::ImageWriteFailed, &path);
-            let mut failure = FileError::io(&path, error);
-            if let Err(cleanup) = cleanup {
-                failure.write_state = "unknown";
-                failure.message.push_str(&format!(
-                    "\n图片可能不完整，未删除该路径：{}（{cleanup}）",
-                    failure.path
-                ));
-            }
-            return Err(failure);
-        }
-        let allocation_id = uuid::Uuid::new_v4().simple().to_string();
-        allocations.insert(
-            allocation_id.clone(),
-            OwnedAsset {
-                file,
-                path: path.clone(),
-            },
-        );
-        return Ok(ImageReceipt {
-            relative_path: format!("./assets/{filename}"),
-            filename,
-            path: display(&path),
-            allocation_id: Some(allocation_id),
-        });
-    }
-    Err(FileError::new(
-        "IO_ERROR",
-        &directory,
-        "图片同名文件过多，未覆盖任何已有图片",
-    ))
-}
-
-fn finish_image_allocations(allocation_ids: Vec<String>, discard: bool) -> Result<(), String> {
-    if allocation_ids.len() > crate::config::MAX_IMAGE_STASH_ENTRIES {
-        return Err("too many image allocation ids".into());
-    }
-    let mut allocations = IMAGE_ALLOCATIONS
-        .lock()
-        .map_err(|_| "image allocation lock failed")?;
-    let mut failures = Vec::new();
-    for id in allocation_ids {
-        // Unknown, duplicated or already-finalized tokens are harmless; clients
-        // can retry completion but can never turn an arbitrary path into a token.
-        if let Some(asset) = allocations.remove(&id) {
-            if discard {
-                let cleanup = || crate::owned_file::delete_on_close(&asset.file);
-                #[cfg(test)]
-                let result = hooks::image_discard_result(cleanup);
-                #[cfg(not(test))]
-                let result = cleanup();
-                if let Err(error) = result {
-                    failures.push(format!(
-                        "图片清理未确认，请核对路径：{}（{error}）",
-                        display(&asset.path)
-                    ));
-                }
-            }
-            drop(asset); // revoke the deletion right even if cleanup failed
-        }
-    }
-    if failures.is_empty() {
-        Ok(())
-    } else {
-        Err(failures.join("\n"))
-    }
-}
-
-#[tauri::command]
-pub fn commit_image_assets(allocation_ids: Vec<String>) -> Result<(), String> {
-    finish_image_allocations(allocation_ids, false)
-}
-
-#[tauri::command]
-pub fn discard_image_assets(allocation_ids: Vec<String>) -> Result<(), String> {
-    finish_image_allocations(allocation_ids, true)
-}
-
 #[cfg(test)]
 pub(crate) mod hooks {
     use std::cell::{Cell, RefCell};
@@ -768,7 +591,7 @@ pub(crate) mod hooks {
     pub fn fail_next_image_discard() {
         IMAGE_DISCARD_FAILURE.with(|flag| flag.set(true));
     }
-    pub(super) fn image_discard_result(
+    pub(crate) fn image_discard_result(
         cleanup: impl FnOnce() -> std::io::Result<()>,
     ) -> std::io::Result<()> {
         if IMAGE_DISCARD_FAILURE.with(|flag| flag.replace(false)) {
@@ -780,7 +603,7 @@ pub(crate) mod hooks {
     pub fn fail_next_image_write() {
         IMAGE_WRITE_FAILURE.with(|flag| flag.set(true));
     }
-    pub(super) fn image_write_result(result: std::io::Result<()>) -> std::io::Result<()> {
+    pub(crate) fn image_write_result(result: std::io::Result<()>) -> std::io::Result<()> {
         if IMAGE_WRITE_FAILURE.with(|flag| flag.replace(false)) {
             result.and(Err(std::io::Error::other("injected image write failure")))
         } else {
@@ -790,7 +613,7 @@ pub(crate) mod hooks {
     pub fn at(point: Checkpoint, hook: impl FnOnce(&Path) + 'static) {
         HOOK.with(|slot| *slot.borrow_mut() = Some((point, Box::new(hook))));
     }
-    pub(super) fn run(point: Checkpoint, path: &Path) {
+    pub(crate) fn run(point: Checkpoint, path: &Path) {
         let hook = HOOK.with(|slot| {
             if slot
                 .borrow()
