@@ -19,6 +19,15 @@ import { type ImagePreparation } from '../lib/imagePreparation';
 import { computeStats } from '../lib/stats';
 import type { EditorUpdate, Tab } from '../lib/types';
 
+export interface DiskSync {
+  /** undefined: autosave runs. null: paused, no disk mtime known. number: paused by that disk mtime. */
+  pausedMtime?: number | null;
+  /** The changed disk version last offered to the user. */
+  detected?: { revision: string | null; mtime: number };
+  checking?: boolean;
+  prompting?: boolean;
+}
+
 export function makeId(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
@@ -49,14 +58,20 @@ export function useWorkspace(initialTabs: Tab[] = []) {
       }
     >
   >({});
-  // Key present = autosave paused; the value is the disk mtime that caused it, null when none is known.
-  const autosavePausedMtime = useRef<Record<string, number | null>>({});
-  const detectedExternalStates = useRef<Record<string, { revision: string | null; mtime: number }>>(
-    {},
+  // Everything known about one tab's file on disk beyond the Tab fields. See docs/state-model.md.
+  const diskSync = useRef<Record<string, DiskSync>>({});
+  const diskOf = useCallback((id: string) => (diskSync.current[id] ??= {}), []);
+  const isAutoSavePaused = useCallback(
+    (id: string) => diskSync.current[id]?.pausedMtime !== undefined,
+    [],
   );
+  const resumeAutoSave = useCallback((id: string) => {
+    const disk = diskSync.current[id];
+    if (!disk) return;
+    delete disk.pausedMtime;
+    delete disk.detected;
+  }, []);
   const openingPaths = useRef(new Set<string>());
-  const externalChecks = useRef(new Set<string>());
-  const externalPrompts = useRef(new Set<string>());
   const tabRenderTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const currentView = useRef({ activeId, sourceMode });
   const modeGenerations = useRef<Record<string, number>>({});
@@ -204,15 +219,18 @@ export function useWorkspace(initialTabs: Tab[] = []) {
     setTabs([...tabsRef.current]);
   }, []);
 
-  const pauseAutoSave = useCallback((id: string, mtime: number | null) => {
-    autosavePausedMtime.current[id] = mtime;
-    // Keep dirty tied to edits so later disk revisions are still polled, but do
-    // not let close/recovery mistake the retained buffer for a backed-up copy.
-    tabsRef.current = tabsRef.current.map((tab) =>
-      tab.id === id ? { ...tab, preserveLocal: true } : tab,
-    );
-    setTabs([...tabsRef.current]);
-  }, []);
+  const pauseAutoSave = useCallback(
+    (id: string, mtime: number | null) => {
+      diskOf(id).pausedMtime = mtime;
+      // Keep dirty tied to edits so later disk revisions are still polled, but do
+      // not let close/recovery mistake the retained buffer for a backed-up copy.
+      tabsRef.current = tabsRef.current.map((tab) =>
+        tab.id === id ? { ...tab, preserveLocal: true } : tab,
+      );
+      setTabs([...tabsRef.current]);
+    },
+    [diskOf],
+  );
 
   const addTab = useCallback(
     (
@@ -278,9 +296,7 @@ export function useWorkspace(initialTabs: Tab[] = []) {
     setTabs([...tabsRef.current]);
     delete editorRegistry.current[id];
     delete tabMirror.current[id];
-    delete autosavePausedMtime.current[id];
-    delete detectedExternalStates.current[id];
-    externalPrompts.current.delete(id);
+    delete diskSync.current[id];
     clearPendingImages(id);
     delete positions.current[id];
     delete sourceRegistry.current[id];
@@ -317,11 +333,11 @@ export function useWorkspace(initialTabs: Tab[] = []) {
     saveGenerations,
     contentVersions,
     imagePreparations,
-    autosavePausedMtime,
-    detectedExternalStates,
+    diskSync,
+    diskOf,
+    isAutoSavePaused,
+    resumeAutoSave,
     openingPaths,
-    externalChecks,
-    externalPrompts,
     tabRenderTimers,
     currentView,
     modeGenerations,

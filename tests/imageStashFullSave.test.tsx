@@ -154,7 +154,7 @@ describe('saving and protecting a document while the image stash is full', () =>
       savedContent: both,
       diskRevision: 'rev-2',
     });
-    expect(id in hook.result.current.workspace.autosavePausedMtime.current).toBe(false);
+    expect(hook.result.current.workspace.isAutoSavePaused(id)).toBe(false);
     expect(imagePreviewUrl(id, './img/a.png')).toBe(previewA);
   });
 

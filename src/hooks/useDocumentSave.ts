@@ -72,8 +72,9 @@ export function useDocumentSave(
     positions,
     sourceRewrites,
     editorRegistry,
-    autosavePausedMtime,
-    detectedExternalStates,
+    diskSync,
+    isAutoSavePaused,
+    resumeAutoSave,
     activeId,
     activeTab,
     resolveContent,
@@ -256,8 +257,7 @@ export function useDocumentSave(
           savedContent: migratedContent,
           dirty: contentChangedDuringWrite ? latestContent !== migratedContent : false,
         });
-        delete autosavePausedMtime.current[tab.id];
-        delete detectedExternalStates.current[tab.id];
+        resumeAutoSave(tab.id);
         if (!contentChangedDuringWrite) {
           await deleteRecoverySnapshot(tab.id);
           const latest = tabsRef.current.find((item) => item.id === tab.id);
@@ -290,8 +290,7 @@ export function useDocumentSave(
       contentVersions,
       prepareCurrentImages,
       updateTab,
-      autosavePausedMtime,
-      detectedExternalStates,
+      resumeAutoSave,
       setRecentFiles,
       saveTimers,
       pauseAutoSave,
@@ -317,7 +316,7 @@ export function useDocumentSave(
       const editor = editorRegistry.current[id];
       if (editor) flushEditorUpdate(editor);
       const tab = tabsRef.current.find((candidate) => candidate.id === id);
-      if (!tab || (!manual && id in autosavePausedMtime.current)) return false;
+      if (!tab || (!manual && isAutoSavePaused(id))) return false;
       if (saveAs || !tab.path) {
         return manual
           ? handleSaveAsFor(tab, generation, () => performSave(id, true, generation))
@@ -329,12 +328,12 @@ export function useDocumentSave(
       try {
         const disk = await documentRevision(tab.path);
         const diskMtime = disk.mtime ?? 0;
-        const blockedMtime = autosavePausedMtime.current[id];
+        const blockedMtime = diskSync.current[id]?.pausedMtime;
         const hasBlockedExternalChange = diskMtime === blockedMtime;
         const hasExternalConflict = disk.revision !== tab.diskRevision || hasBlockedExternalChange;
         if (hasExternalConflict) {
           if (!manual) {
-            if (autosavePausedMtime.current[id] !== diskMtime) {
+            if (diskSync.current[id]?.pausedMtime !== diskMtime) {
               pauseAutoSave(id, diskMtime);
               await showMessage(
                 `「${tab.title}」的磁盘版本已变化，自动保存已暂停。请点击工具栏「保存」确认，或另存为保留两份。`,
@@ -404,8 +403,7 @@ export function useDocumentSave(
           preserveLocal: false,
           savedContent: content,
         });
-        delete autosavePausedMtime.current[id];
-        delete detectedExternalStates.current[id];
+        resumeAutoSave(id);
         if (!contentChangedDuringWrite) {
           await deleteRecoverySnapshot(id);
           const current = tabsRef.current.find((item) => item.id === id);
@@ -430,14 +428,15 @@ export function useDocumentSave(
       saveGenerations,
       editorRegistry,
       tabsRef,
-      autosavePausedMtime,
+      diskSync,
+      isAutoSavePaused,
+      resumeAutoSave,
       handleSaveAsFor,
       resolveContent,
       contentVersions,
       prepareCurrentImages,
       tabMirror,
       updateTab,
-      detectedExternalStates,
       pauseAutoSave,
       sourceRewrites,
       applyMigratedContent,
