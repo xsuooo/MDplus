@@ -16,7 +16,7 @@ export function useDocumentExport(
   bodyFont: BodyFont,
   codeFont: CodeFont,
 ) {
-  const { activeTab, editorRegistry, tabsRef, saveQueues, contentGenerations, resolveContent } =
+  const { activeTab, editorRegistry, tabsRef, saveQueues, contentVersions, resolveContent } =
     workspace;
   const { prepareCurrentImages } = recovery;
   const [exporting, setExporting] = useState(false);
@@ -36,7 +36,7 @@ export function useDocumentExport(
         const editor = editorRegistry.current[activeTab.id];
         if (!tab || !editor) throw new Error('编辑器尚未就绪，请稍后重试');
         const content = resolveContent(tab),
-          version = contentGenerations.current[tab.id] ?? 0;
+          version = contentVersions.current[tab.id] ?? 0;
         const imagesReady = await prepareCurrentImages(tab.id);
         const current = tabsRef.current.find((candidate) => candidate.id === tab.id);
         if (
@@ -44,7 +44,7 @@ export function useDocumentExport(
           !current ||
           current.path !== tab.path ||
           current.diskRevision !== tab.diskRevision ||
-          (contentGenerations.current[tab.id] ?? 0) !== version ||
+          (contentVersions.current[tab.id] ?? 0) !== version ||
           resolveContent(current) !== content
         ) {
           throw new Error('图片准备期间文稿已变化，请重新导出');
@@ -103,7 +103,7 @@ export function useDocumentExport(
       tabsRef,
       editorRegistry,
       resolveContent,
-      contentGenerations,
+      contentVersions,
       prepareCurrentImages,
       bodyFont,
       codeFont,

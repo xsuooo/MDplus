@@ -194,7 +194,7 @@ async function checkCrowdedStatusbar(root: ReturnType<typeof createRoot>, label:
     path,
     isNew: false,
     dirty: true,
-    externalMtime: 0,
+    diskMtime: 0,
     diskRevision: 'statusbar-fixture-revision',
     externalChanged: true,
     initialContent: '# Saved draft',

@@ -13,7 +13,7 @@ const tab: Tab = {
   path: null,
   isNew: true,
   dirty: false,
-  externalMtime: 0,
+  diskMtime: 0,
   diskRevision: null,
   externalChanged: false,
   initialContent: '',

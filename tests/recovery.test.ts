@@ -114,14 +114,14 @@ afterEach(() => {
 describe('durable recovery journal', () => {
   it('recaches an image after its recovery duplicate is collected, leaving undo bytes available', async () => {
     mocks.images = [{ placeholder: 'mdplus-image:old', filename: 'old.png', data: [1] }];
-    const { protectPastedImage, scheduleRecovery } = await import('../src/lib/recovery');
+    const { protectPastedImage, scheduleSnapshot } = await import('../src/lib/recovery');
     await protectPastedImage(tab.id, 'mdplus-image:old');
     mocks.invoke.mockImplementation(async (command, args) =>
       command === 'write_recovery_snapshot'
         ? { removedKeys: ['old.png'], cleanupError: null }
         : imageTransport(command, args),
     );
-    scheduleRecovery({ ...tab, markdown: 'no images' }, vi.fn());
+    scheduleSnapshot({ ...tab, markdown: 'no images' }, vi.fn());
     await vi.advanceTimersByTimeAsync(1000);
     await protectPastedImage(tab.id, 'mdplus-image:old');
     expect(
@@ -134,8 +134,8 @@ describe('durable recovery journal', () => {
       { placeholder: 'mdplus-image:a', filename: 'a.png', data: [1] },
       { placeholder: 'mdplus-image:b', filename: 'b.png', data: [2], inserting: true },
     ];
-    const { protectPastedImage, scheduleRecovery } = await import('../src/lib/recovery');
-    scheduleRecovery({ ...tab, markdown: '![](mdplus-image:a)' }, vi.fn());
+    const { protectPastedImage, scheduleSnapshot } = await import('../src/lib/recovery');
+    scheduleSnapshot({ ...tab, markdown: '![](mdplus-image:a)' }, vi.fn());
     await protectPastedImage(tab.id, 'mdplus-image:b');
     const first = mocks.invoke.mock.calls.find(
       ([command]) => command === 'cache_recovery_image',
@@ -153,7 +153,7 @@ describe('durable recovery journal', () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       mocks.images = [{ placeholder: 'mdplus-image:image', filename: 'image.png', data: [1] }];
-      const { protectPastedImage, scheduleRecovery } = await import('../src/lib/recovery');
+      const { protectPastedImage, scheduleSnapshot } = await import('../src/lib/recovery');
       await protectPastedImage(tab.id, 'mdplus-image:image');
       mocks.invoke.mockImplementation(async (command, args) =>
         command === 'write_recovery_snapshot'
@@ -161,7 +161,7 @@ describe('durable recovery journal', () => {
           : imageTransport(command, args),
       );
       const status = vi.fn();
-      scheduleRecovery({ ...tab, markdown: '![](mdplus-image:image)' }, status);
+      scheduleSnapshot({ ...tab, markdown: '![](mdplus-image:image)' }, status);
       await vi.advanceTimersByTimeAsync(1000);
       expect(status).toHaveBeenLastCalledWith('protected');
       expect(warning).toHaveBeenCalled();
@@ -176,21 +176,21 @@ describe('durable recovery journal', () => {
 
   it('invalidates cached-key knowledge when deletion only partially completes', async () => {
     mocks.images = [{ placeholder: 'mdplus-image:image', filename: 'image.png', data: [1] }];
-    const { protectPastedImage, clearRecovery } = await import('../src/lib/recovery');
+    const { protectPastedImage, deleteSnapshot } = await import('../src/lib/recovery');
     await protectPastedImage(tab.id, 'mdplus-image:image');
     mocks.invoke.mockRejectedValueOnce(new Error('cleanup interrupted'));
-    await expect(clearRecovery(tab.id)).rejects.toThrow('cleanup interrupted');
+    await expect(deleteSnapshot(tab.id)).rejects.toThrow('cleanup interrupted');
     await protectPastedImage(tab.id, 'mdplus-image:image');
     expect(
       mocks.invoke.mock.calls.filter(([command]) => command === 'cache_recovery_image'),
     ).toHaveLength(2);
   });
   it('debounces input and commits only the newest snapshot', async () => {
-    const { scheduleRecovery } = await import('../src/lib/recovery');
+    const { scheduleSnapshot } = await import('../src/lib/recovery');
     const status = vi.fn();
-    scheduleRecovery(tab, status);
+    scheduleSnapshot(tab, status);
     await vi.advanceTimersByTimeAsync(700);
-    scheduleRecovery({ ...tab, markdown: 'newer' }, status);
+    scheduleSnapshot({ ...tab, markdown: 'newer' }, status);
     await vi.advanceTimersByTimeAsync(999);
     expect(mocks.invoke).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
@@ -209,7 +209,7 @@ describe('durable recovery journal', () => {
 
   it('persists image bytes before completing paste protection and before the manifest', async () => {
     mocks.images = [{ placeholder: 'mdplus-image:image', filename: '图片 一.png', data: [1, 2] }];
-    const { protectPastedImage, scheduleRecovery } = await import('../src/lib/recovery');
+    const { protectPastedImage, scheduleSnapshot } = await import('../src/lib/recovery');
     const gate = deferred();
     mocks.invoke.mockImplementation((command) =>
       command === 'cache_recovery_image'
@@ -225,7 +225,7 @@ describe('durable recovery journal', () => {
     expect(protectedImage).toBe(false);
     gate.resolve();
     await pending;
-    scheduleRecovery({ ...tab, markdown: '![](mdplus-image:image)' }, vi.fn());
+    scheduleSnapshot({ ...tab, markdown: '![](mdplus-image:image)' }, vi.fn());
     await vi.advanceTimersByTimeAsync(1000);
     expect(mocks.invoke.mock.calls.map(([command]) => command)).toEqual([
       'cache_recovery_image',
@@ -236,12 +236,12 @@ describe('durable recovery journal', () => {
   });
 
   it('does not mark data protected when image or manifest writes fail', async () => {
-    const { scheduleRecovery, protectPastedImage } = await import('../src/lib/recovery');
+    const { scheduleSnapshot, protectPastedImage } = await import('../src/lib/recovery');
     mocks.images = [{ placeholder: 'mdplus-image:image', filename: 'image.png', data: [1] }];
     mocks.invoke.mockRejectedValue(new Error('disk full'));
     await expect(protectPastedImage(tab.id, 'mdplus-image:image')).rejects.toThrow('disk full');
     const status = vi.fn();
-    scheduleRecovery({ ...tab, markdown: '![](mdplus-image:image)' }, status);
+    scheduleSnapshot({ ...tab, markdown: '![](mdplus-image:image)' }, status);
     await vi.advanceTimersByTimeAsync(1000);
     expect(status).toHaveBeenLastCalledWith('error');
     expect(mocks.invoke.mock.calls.some(([command]) => command === 'write_recovery_snapshot')).toBe(
@@ -250,16 +250,16 @@ describe('durable recovery journal', () => {
   });
 
   it('clears only after in-flight writes and cancels pending timers', async () => {
-    const { scheduleRecovery, clearRecovery } = await import('../src/lib/recovery');
+    const { scheduleSnapshot, deleteSnapshot } = await import('../src/lib/recovery');
     const gate = deferred();
     mocks.invoke.mockImplementation((command) =>
       command === 'write_recovery_snapshot'
         ? gate.promise.then(() => imageTransport(command))
         : Promise.resolve(imageTransport(command)),
     );
-    scheduleRecovery(tab, vi.fn());
+    scheduleSnapshot(tab, vi.fn());
     await vi.advanceTimersByTimeAsync(1000);
-    const clearing = clearRecovery(tab.id);
+    const clearing = deleteSnapshot(tab.id);
     expect(mocks.invoke).toHaveBeenCalledTimes(1);
     gate.resolve();
     await clearing;
@@ -267,8 +267,8 @@ describe('durable recovery journal', () => {
       'write_recovery_snapshot',
       'delete_recovery_snapshot',
     ]);
-    scheduleRecovery(tab, vi.fn());
-    await clearRecovery(tab.id);
+    scheduleSnapshot(tab, vi.fn());
+    await deleteSnapshot(tab.id);
     await vi.advanceTimersByTimeAsync(2000);
     expect(
       mocks.invoke.mock.calls.filter(([command]) => command === 'write_recovery_snapshot'),
@@ -283,8 +283,8 @@ describe('durable recovery journal', () => {
       source: { url: './旧 目录/中文.png' },
     };
     mocks.images = [image];
-    const { scheduleRecovery } = await import('../src/lib/recovery');
-    scheduleRecovery({ ...tab, markdown: '![](<./旧 目录/中文.png>)' }, vi.fn());
+    const { scheduleSnapshot } = await import('../src/lib/recovery');
+    scheduleSnapshot({ ...tab, markdown: '![](<./旧 目录/中文.png>)' }, vi.fn());
     image.source.url = './new/image.png';
     await vi.advanceTimersByTimeAsync(1000);
     const snapshot = mocks.invoke.mock.calls.find(
@@ -294,9 +294,9 @@ describe('durable recovery journal', () => {
   });
 
   it('refuses a temporary token whose bytes are missing', async () => {
-    const { scheduleRecovery } = await import('../src/lib/recovery');
+    const { scheduleSnapshot } = await import('../src/lib/recovery');
     const status = vi.fn();
-    scheduleRecovery({ ...tab, markdown: '![](mdplus-image:missing)' }, status);
+    scheduleSnapshot({ ...tab, markdown: '![](mdplus-image:missing)' }, status);
     await vi.advanceTimersByTimeAsync(1000);
     expect(status).toHaveBeenLastCalledWith('error');
     expect(mocks.invoke).not.toHaveBeenCalled();
@@ -323,9 +323,9 @@ describe('recovery image preparation boundary', () => {
   it.each(['![](./img/new.png)', '![new][picture]\n\n[picture]: <./img/new.png>'])(
     'refuses an uncached relative image: %s',
     async (markdown) => {
-      const { scheduleRecovery } = await import('../src/lib/recovery');
+      const { scheduleSnapshot } = await import('../src/lib/recovery');
       const status = vi.fn();
-      scheduleRecovery({ ...tab, markdown }, status);
+      scheduleSnapshot({ ...tab, markdown }, status);
       await vi.advanceTimersByTimeAsync(1000);
       expect(status).toHaveBeenLastCalledWith('error');
       expect(mocks.invoke).not.toHaveBeenCalled();
@@ -334,7 +334,7 @@ describe('recovery image preparation boundary', () => {
 
   it('captures current image bytes only after preparation commits', async () => {
     const { prepareImageReferences } = await import('../src/lib/imageOps');
-    const { scheduleRecovery } = await import('../src/lib/recovery');
+    const { scheduleSnapshot } = await import('../src/lib/recovery');
     const image = { path: 'D:/中文 空格/img/new.png', mime: 'image/png', dataBase64: 'QUJD' };
     const read = deferred<typeof image>();
     mocks.invoke.mockImplementation((command, args) =>
@@ -345,7 +345,7 @@ describe('recovery image preparation boundary', () => {
       prepared.commit(),
     );
     const status = vi.fn();
-    scheduleRecovery({ ...tab, markdown }, status, ready);
+    scheduleSnapshot({ ...tab, markdown }, status, ready);
     await vi.advanceTimersByTimeAsync(1500);
     expect(status.mock.calls).toEqual([['pending']]);
     expect(mocks.invoke.mock.calls.map(([command]) => command)).toEqual(['read_image_file']);
@@ -375,12 +375,12 @@ describe('recovery image preparation boundary', () => {
   it.each(['true', 'false', 'reject'])(
     'ignores a superseded preparation outcome: %s',
     async (outcome) => {
-      const { scheduleRecovery } = await import('../src/lib/recovery');
+      const { scheduleSnapshot } = await import('../src/lib/recovery');
       const gate = deferred<boolean>();
       const oldStatus = vi.fn();
       const status = vi.fn();
-      scheduleRecovery({ ...tab, markdown: '![](./img/old.png)' }, oldStatus, gate.promise);
-      scheduleRecovery({ ...tab, markdown: 'newest draft' }, status);
+      scheduleSnapshot({ ...tab, markdown: '![](./img/old.png)' }, oldStatus, gate.promise);
+      scheduleSnapshot({ ...tab, markdown: 'newest draft' }, status);
       await vi.advanceTimersByTimeAsync(1000);
       expect(status).toHaveBeenLastCalledWith('protected');
       if (outcome === 'reject') gate.reject(new Error('old image read failed'));
@@ -402,13 +402,13 @@ describe('recovery image preparation boundary', () => {
   );
 
   it('retains the previous durable snapshot when preparation returns false', async () => {
-    const { scheduleRecovery } = await import('../src/lib/recovery');
-    scheduleRecovery(tab, vi.fn());
+    const { scheduleSnapshot } = await import('../src/lib/recovery');
+    scheduleSnapshot(tab, vi.fn());
     await vi.advanceTimersByTimeAsync(1000);
     mocks.invoke.mockClear();
     const gate = deferred<boolean>();
     const status = vi.fn();
-    scheduleRecovery({ ...tab, markdown: 'newer' }, status, gate.promise);
+    scheduleSnapshot({ ...tab, markdown: 'newer' }, status, gate.promise);
     gate.resolve(false);
     await vi.advanceTimersByTimeAsync(1000);
     expect(status.mock.calls).toEqual([['pending'], ['error']]);
@@ -416,13 +416,13 @@ describe('recovery image preparation boundary', () => {
   });
 
   it('reports rejected preparation without replacing or deleting durable data', async () => {
-    const { scheduleRecovery } = await import('../src/lib/recovery');
-    scheduleRecovery(tab, vi.fn());
+    const { scheduleSnapshot } = await import('../src/lib/recovery');
+    scheduleSnapshot(tab, vi.fn());
     await vi.advanceTimersByTimeAsync(1000);
     mocks.invoke.mockClear();
     const gate = deferred<boolean>();
     const status = vi.fn();
-    scheduleRecovery({ ...tab, markdown: 'newer' }, status, gate.promise);
+    scheduleSnapshot({ ...tab, markdown: 'newer' }, status, gate.promise);
     gate.reject(new Error('preparation failed'));
     await vi.advanceTimersByTimeAsync(1000);
     expect(status.mock.calls).toEqual([['pending'], ['error']]);
@@ -430,9 +430,9 @@ describe('recovery image preparation boundary', () => {
   });
 
   it('does not treat true readiness as proof of missing image bytes', async () => {
-    const { scheduleRecovery } = await import('../src/lib/recovery');
+    const { scheduleSnapshot } = await import('../src/lib/recovery');
     const status = vi.fn();
-    scheduleRecovery({ ...tab, markdown: '![](./img/missing.png)' }, status, Promise.resolve(true));
+    scheduleSnapshot({ ...tab, markdown: '![](./img/missing.png)' }, status, Promise.resolve(true));
     await vi.advanceTimersByTimeAsync(1000);
     expect(status.mock.calls).toEqual([['pending'], ['error']]);
     expect(mocks.invoke).not.toHaveBeenCalled();
@@ -440,7 +440,7 @@ describe('recovery image preparation boundary', () => {
 
   it('rejects an empty compact image before publishing an alias or recovery snapshot', async () => {
     const { prepareImageReferences } = await import('../src/lib/imageOps');
-    const { scheduleRecovery } = await import('../src/lib/recovery');
+    const { scheduleSnapshot } = await import('../src/lib/recovery');
     mocks.invoke.mockResolvedValue({
       path: 'D:/中文 空格/img/empty.png',
       mime: 'image/png',
@@ -451,7 +451,7 @@ describe('recovery image preparation boundary', () => {
       prepared.commit(),
     );
     const status = vi.fn();
-    scheduleRecovery({ ...tab, markdown }, status, ready);
+    scheduleSnapshot({ ...tab, markdown }, status, ready);
     await expect(ready).rejects.toThrow('图片为空');
     await vi.advanceTimersByTimeAsync(1000);
     expect(status.mock.calls).toEqual([['pending'], ['error']]);
@@ -459,11 +459,11 @@ describe('recovery image preparation boundary', () => {
   });
 
   it('invalidates a pending preparation on explicit cleanup', async () => {
-    const { scheduleRecovery, clearRecovery } = await import('../src/lib/recovery');
+    const { scheduleSnapshot, deleteSnapshot } = await import('../src/lib/recovery');
     const gate = deferred<boolean>();
     const status = vi.fn();
-    scheduleRecovery({ ...tab, markdown: '![](./img/closed.png)' }, status, gate.promise);
-    await clearRecovery(tab.id);
+    scheduleSnapshot({ ...tab, markdown: '![](./img/closed.png)' }, status, gate.promise);
+    await deleteSnapshot(tab.id);
     mocks.invoke.mockClear();
     gate.resolve(true);
     await vi.advanceTimersByTimeAsync(1000);
@@ -472,13 +472,13 @@ describe('recovery image preparation boundary', () => {
   });
 
   it('cancels an older debounce immediately while newer preparation is pending', async () => {
-    const { scheduleRecovery } = await import('../src/lib/recovery');
+    const { scheduleSnapshot } = await import('../src/lib/recovery');
     const oldStatus = vi.fn();
-    scheduleRecovery(tab, oldStatus);
+    scheduleSnapshot(tab, oldStatus);
     await vi.advanceTimersByTimeAsync(900);
     const gate = deferred<boolean>();
     const status = vi.fn();
-    scheduleRecovery({ ...tab, markdown: 'newer' }, status, gate.promise);
+    scheduleSnapshot({ ...tab, markdown: 'newer' }, status, gate.promise);
     await vi.advanceTimersByTimeAsync(2000);
     expect(oldStatus.mock.calls).toEqual([['pending']]);
     expect(status.mock.calls).toEqual([['pending']]);
@@ -492,14 +492,14 @@ describe('recovery image preparation boundary', () => {
 
 describe('bounded recovery capture leases', () => {
   it('releases cancelled debounce captures immediately, including on explicit cleanup', async () => {
-    const { scheduleRecovery, clearRecovery } = await import('../src/lib/recovery');
-    scheduleRecovery(tab, vi.fn());
+    const { scheduleSnapshot, deleteSnapshot } = await import('../src/lib/recovery');
+    scheduleSnapshot(tab, vi.fn());
     const first = mocks.leases[0];
     expect(first.release).not.toHaveBeenCalled();
-    scheduleRecovery({ ...tab, markdown: 'newer' }, vi.fn());
+    scheduleSnapshot({ ...tab, markdown: 'newer' }, vi.fn());
     expect(first.release).toHaveBeenCalledTimes(1);
     const second = mocks.leases[1];
-    await clearRecovery(tab.id);
+    await deleteSnapshot(tab.id);
     expect(second.release).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(2000);
     expect(
@@ -509,24 +509,24 @@ describe('bounded recovery capture leases', () => {
 
   it('drops obsolete queued captures but keeps a running native cache copy pinned until it settles', async () => {
     mocks.images = [{ placeholder: 'mdplus-image:image', filename: 'image.png', data: [1, 2] }];
-    const { scheduleRecovery } = await import('../src/lib/recovery');
+    const { scheduleSnapshot } = await import('../src/lib/recovery');
     const gate = deferred();
     mocks.invoke.mockImplementation((command) =>
       command === 'cache_recovery_image'
         ? gate.promise.then(() => imageTransport(command))
         : Promise.resolve(imageTransport(command)),
     );
-    scheduleRecovery({ ...tab, markdown: '![](mdplus-image:image)' }, vi.fn());
+    scheduleSnapshot({ ...tab, markdown: '![](mdplus-image:image)' }, vi.fn());
     await vi.advanceTimersByTimeAsync(1000);
     const running = mocks.leases[0];
     expect(running.withStashKey).toHaveBeenCalledTimes(1);
     expect(running.withDataBase64).not.toHaveBeenCalled();
     expect(running.release).not.toHaveBeenCalled();
-    scheduleRecovery({ ...tab, markdown: 'obsolete queued' }, vi.fn());
+    scheduleSnapshot({ ...tab, markdown: 'obsolete queued' }, vi.fn());
     await vi.advanceTimersByTimeAsync(1000);
     const queued = mocks.leases[1];
     const status = vi.fn();
-    scheduleRecovery({ ...tab, markdown: 'latest' }, status);
+    scheduleSnapshot({ ...tab, markdown: 'latest' }, status);
     expect(queued.release).toHaveBeenCalledTimes(1);
     expect(running.release).not.toHaveBeenCalled();
     gate.resolve();
@@ -542,10 +542,10 @@ describe('bounded recovery capture leases', () => {
   });
 
   it('releases the active capture even if its manifest write fails', async () => {
-    const { scheduleRecovery } = await import('../src/lib/recovery');
+    const { scheduleSnapshot } = await import('../src/lib/recovery');
     mocks.invoke.mockRejectedValueOnce(new Error('disk full'));
     const status = vi.fn();
-    scheduleRecovery(tab, status);
+    scheduleSnapshot(tab, status);
     await vi.advanceTimersByTimeAsync(1000);
     expect(status).toHaveBeenLastCalledWith('error');
     expect(mocks.leases[0].release).toHaveBeenCalledTimes(1);
@@ -562,7 +562,7 @@ describe('bounded recovery capture leases', () => {
   });
 
   it('disposes asynchronously staged images if deletion invalidates their pending restore', async () => {
-    const { prepareRecovery, clearRecovery } = await import('../src/lib/recovery');
+    const { prepareRecovery, deleteSnapshot } = await import('../src/lib/recovery');
     const gate = deferred<{ dispose: ReturnType<typeof vi.fn> }>();
     const dispose = vi.fn(async () => {});
     mocks.invoke.mockImplementation(async (command) =>
@@ -584,7 +584,7 @@ describe('bounded recovery capture leases', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(mocks.stage).toHaveBeenCalledTimes(1);
-    await clearRecovery(tab.id);
+    await deleteSnapshot(tab.id);
     gate.resolve({ dispose });
     const prepared = await loading;
     expect(prepared.commit()).toBe(false);

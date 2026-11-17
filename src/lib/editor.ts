@@ -79,11 +79,11 @@ export interface EditorCallbacks {
   /** Coalesce derived Markdown work; immediate activity still records every edit. */
   deferUpdates?: boolean;
   onImagePaste?: (file: File) => Promise<string>;
-  resolveImageSource?: (url: string) => string;
+  imagePreviewUrl?: (url: string) => string;
   subscribeImageSources?: (listener: () => void) => () => void;
   /** Rich document/history attributes use identities; only serialization exposes safe disk URLs. */
-  resolveImageIdentity?: (url: string) => string;
-  resolveImageReference?: (token: string) => string;
+  imageTokenForUrl?: (url: string) => string;
+  imageUrlForToken?: (token: string) => string;
   onImageReferencesChanged?: () => void;
   onImagePasteSettled?: (token: string) => void;
   captureImagePaste?: () => () => boolean;
@@ -159,7 +159,7 @@ export function createEditor(
     .config(configureMarkdownSchemas)
     .config(configurePrismTransactions)
     .config((ctx) => {
-      if (!callbacks.resolveImageIdentity && !callbacks.resolveImageReference) return;
+      if (!callbacks.imageTokenForUrl && !callbacks.imageUrlForToken) return;
       ctx.update(imageSchema.key, (original) => (ctx) => {
         const schema = original(ctx);
         return {
@@ -172,13 +172,13 @@ export function createEditor(
               getAttrs: (dom: HTMLElement) => {
                 const attrs = getAttrs(dom);
                 if (!attrs) return attrs;
-                return { ...attrs, src: callbacks.resolveImageIdentity?.(attrs.src) ?? attrs.src };
+                return { ...attrs, src: callbacks.imageTokenForUrl?.(attrs.src) ?? attrs.src };
               },
             };
           }),
           toDOM: schema.toDOM
             ? (node) => {
-                const src = callbacks.resolveImageReference?.(node.attrs.src) ?? node.attrs.src;
+                const src = callbacks.imageUrlForToken?.(node.attrs.src) ?? node.attrs.src;
                 return schema.toDOM!(
                   src === node.attrs.src
                     ? node
@@ -193,7 +193,7 @@ export function createEditor(
                 state,
                 {
                   ...node,
-                  url: callbacks.resolveImageIdentity?.(String(node.url ?? '')) ?? node.url,
+                  url: callbacks.imageTokenForUrl?.(String(node.url ?? '')) ?? node.url,
                 },
                 type,
               ),
@@ -201,7 +201,7 @@ export function createEditor(
           toMarkdown: {
             ...schema.toMarkdown,
             runner: (state, node) => {
-              const src = callbacks.resolveImageReference?.(node.attrs.src) ?? node.attrs.src;
+              const src = callbacks.imageUrlForToken?.(node.attrs.src) ?? node.attrs.src;
               schema.toMarkdown.runner(
                 state,
                 src === node.attrs.src
@@ -274,11 +274,11 @@ export function createEditor(
               apply: (transaction) => transaction.getMeta(synchronization) === true,
             },
             appendTransaction: (transactions, _previous, state) => {
-              if (!callbacks.resolveImageIdentity || !transactions.some((item) => item.docChanged))
+              if (!callbacks.imageTokenForUrl || !transactions.some((item) => item.docChanged))
                 return null;
               const tr = state.tr;
               for (const { node, pos } of imageNodes(state.doc)) {
-                const src = callbacks.resolveImageIdentity!(node.attrs.src);
+                const src = callbacks.imageTokenForUrl!(node.attrs.src);
                 if (src !== node.attrs.src)
                   tr.setNodeMarkup(pos, undefined, { ...node.attrs, src });
               }
@@ -294,10 +294,10 @@ export function createEditor(
             view: (view) => {
               const restoreParser = cacheMarkdownParser(ctx);
               const normalize = () => {
-                if (!callbacks.resolveImageIdentity || view.isDestroyed) return;
+                if (!callbacks.imageTokenForUrl || view.isDestroyed) return;
                 const tr = view.state.tr;
                 for (const { node, pos } of imageNodes(view.state.doc)) {
-                  const src = callbacks.resolveImageIdentity!(node.attrs.src);
+                  const src = callbacks.imageTokenForUrl!(node.attrs.src);
                   if (src !== node.attrs.src)
                     tr.setNodeMarkup(pos, undefined, { ...node.attrs, src });
                 }
@@ -383,7 +383,7 @@ export function createEditor(
   editor.use(
     $view(imageSchema.node, () =>
       imageView(
-        callbacks.resolveImageSource ?? ((src) => src),
+        callbacks.imagePreviewUrl ?? ((src) => src),
         callbacks.onMediaPreview,
         callbacks.subscribeImageSources,
       ),

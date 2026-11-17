@@ -27,7 +27,7 @@ import {
   renderedPlace,
   renderedSessionPlace,
   sourcePlace,
-} from '../src/lib/editorPosition';
+} from '../src/lib/position/editorPosition';
 import type { EditorUpdate, Tab } from '../src/lib/types';
 import { TAB_RENDER_MS } from '../src/config/constants';
 
@@ -36,8 +36,8 @@ vi.mock('../src/lib/stats', async (original) => {
   const actual = await original<typeof import('../src/lib/stats')>();
   return { ...actual, computeStats: vi.fn(actual.computeStats) };
 });
-vi.mock('../src/lib/editorPosition', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/lib/editorPosition')>();
+vi.mock('../src/lib/position/editorPosition', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/lib/position/editorPosition')>();
   // Source-to-rich position geometry has browser coverage; this fixture tracks
   // the real parser, serializer and PM state at the synchronization boundary.
   return { ...actual, toRendered: vi.fn() };
@@ -65,7 +65,7 @@ function initialTab(id: string, markdown: string): Tab {
     savedContent: markdown,
     initialContent: markdown,
     stats: computeStats(markdown),
-    externalMtime: 0,
+    diskMtime: 0,
     diskRevision: null,
     externalChanged: false,
   };
@@ -112,8 +112,8 @@ async function createFixture(markdown: string, imageIdentity?: () => string) {
 function setup(tabs: Tab[]) {
   const recovery = {
     prepareCurrentImages: vi.fn(async () => true),
-    protectDraft: vi.fn(),
-    cleanRecovery: vi.fn(async () => true),
+    saveRecoverySnapshot: vi.fn(),
+    deleteRecoverySnapshot: vi.fn(async () => true),
   } as unknown as RecoveryController;
   const hook = renderHook(() => {
     const workspace = useWorkspace(tabs);
@@ -393,10 +393,10 @@ describe('tab activation synchronization', () => {
       hook.result.current.view.handleEditorActivity('a', activity);
       hook.result.current.view.handleEditorActivity('a', activity);
     });
-    expect(hook.result.current.workspace.contentGenerations.current.a).toBe(2);
+    expect(hook.result.current.workspace.contentVersions.current.a).toBe(2);
     expect(hook.result.current.workspace.tabsRef.current[0].dirty).toBe(true);
     expect(hook.result.current.workspace.tabsRef.current[0].markdown).toBe(original);
-    expect(hook.recovery.protectDraft).not.toHaveBeenCalled();
+    expect(hook.recovery.saveRecoverySnapshot).not.toHaveBeenCalled();
 
     const update = (markdown: string): EditorUpdate => ({
       markdown,
@@ -405,9 +405,9 @@ describe('tab activation synchronization', () => {
       ...activity,
     });
     act(() => hook.result.current.view.handleTabUpdate('a', update('# Changed\n'), false, true));
-    expect(hook.result.current.workspace.contentGenerations.current.a).toBe(2);
+    expect(hook.result.current.workspace.contentVersions.current.a).toBe(2);
     expect(hook.result.current.workspace.tabsRef.current[0].markdown).toBe('# Changed\n');
-    expect(hook.recovery.protectDraft).toHaveBeenCalledWith(
+    expect(hook.recovery.saveRecoverySnapshot).toHaveBeenCalledWith(
       expect.objectContaining({ markdown: '# Changed\n' }),
     );
 
@@ -415,7 +415,7 @@ describe('tab activation synchronization', () => {
       hook.result.current.view.handleEditorActivity('a', activity);
       hook.result.current.view.handleTabUpdate('a', update(original), false, true);
     });
-    expect(hook.result.current.workspace.contentGenerations.current.a).toBe(3);
+    expect(hook.result.current.workspace.contentVersions.current.a).toBe(3);
     expect(hook.result.current.workspace.tabsRef.current[0].dirty).toBe(false);
   });
 
@@ -469,7 +469,7 @@ describe('tab activation synchronization', () => {
     const current = { ...initialTab('a', original), path: 'C:/notes/note.md', isNew: false };
     const hook = setup([current, initialTab('b', 'Other document.\n')]);
     act(() => {
-      hook.result.current.workspace.contentGenerations.current.a = 0;
+      hook.result.current.workspace.contentVersions.current.a = 0;
       // Save As updates the authoritative draft even when sync cannot reach an
       // editor yet. EditorTab still initializes from the original source.
       hook.result.current.workspace.syncEditor('a', migrated, false);
@@ -511,7 +511,7 @@ describe('tab activation synchronization', () => {
     expect(fixture.view.state.doc).not.toBe(staleDoc);
     expect(fixture.parse).toHaveBeenCalledExactlyOnceWith(migrated);
     expect(undoDepth(fixture.view.state)).toBe(0);
-    expect(hook.result.current.workspace.contentGenerations.current.a).toBe(0);
+    expect(hook.result.current.workspace.contentVersions.current.a).toBe(0);
     expect(hook.result.current.workspace.tabMirror.current.a.markdown).toBe(migrated);
     expect(hook.result.current.workspace.tabsRef.current[0]).toMatchObject({
       path: 'C:/copies/note.md',
@@ -545,7 +545,7 @@ describe('tab activation synchronization', () => {
 
       expect(fixture.parse).not.toHaveBeenCalled();
       expect(fixture.serialize).not.toHaveBeenCalled();
-      expect(hook.result.current.workspace.contentGenerations.current.a).toBe(0);
+      expect(hook.result.current.workspace.contentVersions.current.a).toBe(0);
       expect(hook.result.current.workspace.tabMirror.current.a.markdown).toBe(raw);
       expect(hook.result.current.workspace.tabsRef.current[0]).toMatchObject({
         markdown: raw,

@@ -25,7 +25,7 @@ import {
   migratePendingImages,
   prepareImageReferences,
   registerImageReachability,
-  resolveImageSource,
+  imagePreviewUrl,
   restorePendingImages,
   saveImage,
   settleImageInsertion,
@@ -210,7 +210,7 @@ describe('disk-backed bounded image cache', () => {
     expect(image).not.toHaveProperty('data');
     expect(image).not.toHaveProperty('dataBase64');
     expect(image).not.toHaveProperty('preview');
-    expect(resolveImageSource('one', image.placeholder)).toMatch(
+    expect(imagePreviewUrl('one', image.placeholder)).toMatch(
       /^http:\/\/mdplus-image-stash\.localhost\//,
     );
     expect(imageCacheUsage().residentBytes).toBe(0);
@@ -247,7 +247,7 @@ describe('disk-backed bounded image cache', () => {
       await finalizeImageMigration(migration, 'committed');
       await collectUnusedImages('one');
       expect(stashes.size).toBe(1);
-      expect(resolveImageSource('one', token)).toContain('mdplus-image-stash.localhost');
+      expect(imagePreviewUrl('one', token)).toContain('mdplus-image-stash.localhost');
       history.clear();
       await collectUnusedImages('one');
       expect(stashes.size).toBe(0);

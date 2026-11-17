@@ -41,7 +41,7 @@ const initial = (): Tab => ({
   savedContent: 'original ![](./image.png)',
   initialContent: 'original ![](./image.png)',
   diskRevision: 'A',
-  externalMtime: 1,
+  diskMtime: 1,
   externalChanged: false,
   stats: { chars: 8, words: 1, lines: 1 },
 });
@@ -131,7 +131,7 @@ describe('export snapshots with leased native images', () => {
             diskRevision: 'B',
             dirty: true,
           });
-          hook.result.current.workspace.contentGenerations.current.tab = 1;
+          hook.result.current.workspace.contentVersions.current.tab = 1;
         }
       });
       await act(async () => {

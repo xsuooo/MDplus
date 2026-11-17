@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { mergeSessionDocuments, sanitizeDocumentSession } from '../src/lib/documentSession';
-import { resolveTextAnchor, sanitizeSessionPlace, textAnchor } from '../src/lib/sessionPosition';
+import {
+  resolveTextAnchor,
+  sanitizeSessionPlace,
+  textAnchor,
+} from '../src/lib/position/sessionPosition';
 
 describe('session text anchors', () => {
   it('finds source positions after a prefix was inserted on disk', () => {

@@ -1,5 +1,5 @@
 import { pathKey } from './pathIdentity';
-import { sanitizeSessionPlace, type SessionEditorPlace } from './sessionPosition';
+import { sanitizeSessionPlace, type SessionEditorPlace } from './position/sessionPosition';
 
 export interface SessionDocument {
   path: string;

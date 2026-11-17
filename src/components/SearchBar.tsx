@@ -9,7 +9,7 @@ import {
   createTextSearch,
   type TextSearchIndex,
 } from '../lib/search';
-import { measureSourceText } from '../lib/sourcePosition';
+import { measureSourceText } from '../lib/position/sourcePosition';
 import { IconChevronDown, IconChevronUp, IconClose, IconSearch } from './icons';
 import { isComposingEvent } from '../lib/shortcuts';
 import { useIsPresent } from '../lib/presence';

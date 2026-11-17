@@ -30,8 +30,8 @@ import {
   type Ast,
   type RenderedPlace,
   type SourcePlace,
-} from '../lib/editorPosition';
-import { measureSourceText } from '../lib/sourcePosition';
+} from '../lib/position/editorPosition';
+import { measureSourceText } from '../lib/position/sourcePosition';
 import { readEditorWidth, writeEditorWidth, type EditorWidth } from '../lib/editorWidth';
 import { errorMessage } from '../lib/errors';
 import { saveImage, settleImageInsertion } from '../lib/imageOps';
@@ -59,7 +59,7 @@ export function useEditorView(
     editorRegistry,
     tabMirror,
     tabsRef,
-    contentGenerations,
+    contentVersions,
     saveGenerations,
     tabRenderTimers,
     currentView,
@@ -71,7 +71,7 @@ export function useEditorView(
     rememberActive,
     resolveContent,
   } = workspace;
-  const { prepareCurrentImages, protectDraft, cleanRecovery } = recovery;
+  const { prepareCurrentImages, saveRecoverySnapshot, deleteRecoverySnapshot } = recovery;
   const [codeFont, setCodeFont] = useState(readCodeFont);
   const [bodyFont, setBodyFont] = useState(readBodyFont);
   const [editorWidth, setEditorWidth] = useState(readEditorWidth);
@@ -182,7 +182,7 @@ export function useEditorView(
       delete saved.pendingSessionPlace;
       sessionRestoreCleanups.current[id]?.();
       const source = currentView.current.sourceMode;
-      const generation = contentGenerations.current[id] ?? 0;
+      const generation = contentVersions.current[id] ?? 0;
       let cancelled = false;
       let frame: number | undefined;
       let remaining = 2;
@@ -200,7 +200,7 @@ export function useEditorView(
           !cancelled &&
           currentView.current.activeId === id &&
           currentView.current.sourceMode === source &&
-          (contentGenerations.current[id] ?? 0) === generation
+          (contentVersions.current[id] ?? 0) === generation
         ) {
           if (source && input?.isConnected) {
             restoreSessionSource(input, pending);
@@ -223,15 +223,7 @@ export function useEditorView(
         if (--remaining === 0) cancel();
       });
     },
-    [
-      contentGenerations,
-      currentView,
-      editorRegistry,
-      positions,
-      sourceRegistry,
-      tabMirror,
-      tabsRef,
-    ],
+    [contentVersions, currentView, editorRegistry, positions, sourceRegistry, tabMirror, tabsRef],
   );
   const captureFontPosition = useCallback(() => {
     rememberActive();
@@ -437,7 +429,7 @@ export function useEditorView(
     (id: string, activity: Pick<EditorUpdate, 'canUndo' | 'canRedo'>) => {
       const tab = tabsRef.current.find((candidate) => candidate.id === id);
       if (!tab) return;
-      contentGenerations.current[id] = (contentGenerations.current[id] ?? 0) + 1;
+      contentVersions.current[id] = (contentVersions.current[id] ?? 0) + 1;
       const mirror = tabMirror.current[id];
       if (mirror) tabMirror.current[id] = { ...mirror, ...activity };
       tabsRef.current = tabsRef.current.map((candidate) =>
@@ -446,13 +438,13 @@ export function useEditorView(
       scheduleAutoSave(id);
       scheduleTabRender(id);
     },
-    [contentGenerations, scheduleAutoSave, scheduleTabRender, tabMirror, tabsRef],
+    [contentVersions, scheduleAutoSave, scheduleTabRender, tabMirror, tabsRef],
   );
 
   const handleTabUpdate = useCallback(
     (id: string, update: EditorUpdate, isInitial = false, coalesced = false) => {
       const prev = tabsRef.current.find((t) => t.id === id);
-      const generation = contentGenerations.current[id] ?? 0;
+      const generation = contentVersions.current[id] ?? 0;
       const latest = tabMirror.current[id]?.markdown;
       // Save As can rewrite image URLs before registration without a user edit.
       // Compare the mirror with the fixed creation source, not its serialization.
@@ -476,9 +468,9 @@ export function useEditorView(
         : update;
       tabMirror.current[id] = currentUpdate;
       if (isInitial) {
-        contentGenerations.current[id] ??= 0;
+        contentVersions.current[id] ??= 0;
       } else if (!coalesced) {
-        contentGenerations.current[id] = (contentGenerations.current[id] ?? 0) + 1;
+        contentVersions.current[id] = (contentVersions.current[id] ?? 0) + 1;
       }
       // 以「最近一次保存成功的内容」为基线判定 dirty,避免编辑又回到打开时内容后误判为已保存
       const dirty = isInitial
@@ -491,25 +483,26 @@ export function useEditorView(
       );
       if (isInitial) {
         const tab = tabsRef.current.find((tab) => tab.id === id);
-        if (tab && needsDocumentProtection(tab)) protectDraft(tab);
+        if (tab && needsDocumentProtection(tab)) saveRecoverySnapshot(tab);
         setTabs([...tabsRef.current]);
         return;
       }
       void prepareCurrentImages(id, true).catch((error) => console.warn('图片引用准备失败', error));
       if (dirty && !coalesced) scheduleAutoSave(id);
       const changed = tabsRef.current.find((tab) => tab.id === id);
-      if (changed && (dirty || changed.isNew || changed.preserveLocal)) protectDraft(changed);
-      else if (changed) void cleanRecovery(id);
+      if (changed && (dirty || changed.isNew || changed.preserveLocal))
+        saveRecoverySnapshot(changed);
+      else if (changed) void deleteRecoverySnapshot(id);
       scheduleTabRender(id);
     },
     [
-      contentGenerations,
+      contentVersions,
       tabsRef,
       tabMirror,
       prepareCurrentImages,
       scheduleAutoSave,
-      protectDraft,
-      cleanRecovery,
+      saveRecoverySnapshot,
+      deleteRecoverySnapshot,
       scheduleTabRender,
       syncEditor,
       setTabs,
@@ -593,7 +586,7 @@ export function useEditorView(
       // Rebuild the preparation/recovery barrier against the preserved source.
       const current = tabsRef.current.find((candidate) => candidate.id === id);
       if (current && needsDocumentProtection(current, resolveContent(current)))
-        protectDraft(current);
+        saveRecoverySnapshot(current);
     } else {
       enteringSource.current = true;
       setSearchOpen(false);
@@ -611,7 +604,7 @@ export function useEditorView(
     tabMirror,
     syncEditor,
     resolveContent,
-    protectDraft,
+    saveRecoverySnapshot,
     positions,
     enteringSource,
     setSearchOpen,
@@ -621,7 +614,7 @@ export function useEditorView(
     (id: string, text: string) => {
       const activeId = id;
       if (activeId) {
-        contentGenerations.current[activeId] = (contentGenerations.current[activeId] ?? 0) + 1;
+        contentVersions.current[activeId] = (contentVersions.current[activeId] ?? 0) + 1;
         const prev = tabsRef.current.find((t) => t.id === activeId);
         const dirty = prev ? text !== prev.savedContent : true;
         tabMirror.current[activeId] = {
@@ -642,19 +635,20 @@ export function useEditorView(
         );
         if (dirty) scheduleAutoSave(activeId);
         const changed = tabsRef.current.find((tab) => tab.id === activeId);
-        if (changed && (dirty || changed.isNew || changed.preserveLocal)) protectDraft(changed);
-        else if (changed) void cleanRecovery(activeId);
+        if (changed && (dirty || changed.isNew || changed.preserveLocal))
+          saveRecoverySnapshot(changed);
+        else if (changed) void deleteRecoverySnapshot(activeId);
         scheduleTabRender(activeId, true);
       }
     },
     [
-      contentGenerations,
+      contentVersions,
       tabsRef,
       tabMirror,
       prepareCurrentImages,
       scheduleAutoSave,
-      protectDraft,
-      cleanRecovery,
+      saveRecoverySnapshot,
+      deleteRecoverySnapshot,
       scheduleTabRender,
     ],
   );

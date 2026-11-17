@@ -15,7 +15,7 @@ const tab: Tab = {
   path: 'C:/notes/project-b/same.md',
   isNew: false,
   dirty: false,
-  externalMtime: 100,
+  diskMtime: 100,
   diskRevision: 'revision',
   externalChanged: false,
   initialContent: '',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mapTextOffset } from '../src/lib/textPosition';
+import { mapTextOffset } from '../src/lib/position/textPosition';
 import { mapImageOffset, rewriteImageReferences } from '../src/lib/imagePaths';
 
 describe('source selection rebasing', () => {

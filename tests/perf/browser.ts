@@ -152,9 +152,9 @@ async function open(name: FixtureName) {
       latest = update;
       updates++;
     },
-    resolveImageSource: imageSource,
-    resolveImageIdentity: (src) => src,
-    resolveImageReference: (src) => src,
+    imagePreviewUrl: imageSource,
+    imageTokenForUrl: (src) => src,
+    imageUrlForToken: (src) => src,
   });
   const factoryMs = performance.now() - factoryStart;
   let parseMs = 0;

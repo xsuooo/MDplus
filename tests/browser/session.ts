@@ -1,10 +1,10 @@
 import { createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from '../../src/App';
-import { textAnchor, type SessionEditorPlace } from '../../src/lib/sessionPosition';
+import { textAnchor, type SessionEditorPlace } from '../../src/lib/position/sessionPosition';
 import type { SavedDocumentSession } from '../../src/lib/documentSession';
 import { getSourceEditorApi } from '../../src/lib/sourceEditorApi';
-import { measureSourceText } from '../../src/lib/sourcePosition';
+import { measureSourceText } from '../../src/lib/position/sourcePosition';
 import { createNativeMocks } from './nativeMocks';
 
 export const sessionCases = [

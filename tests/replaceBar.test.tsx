@@ -8,7 +8,7 @@ import { clearPendingImages } from '../src/lib/imageOps';
 import type { SourceEditorApi } from '../src/lib/sourceEditorApi';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
-vi.mock('../src/lib/sourcePosition', () => ({
+vi.mock('../src/lib/position/sourcePosition', () => ({
   measureSourceText: (
     _input: HTMLTextAreaElement,
     _text: string,

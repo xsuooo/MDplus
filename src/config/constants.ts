@@ -1,6 +1,6 @@
 import config from '../../config/application.json';
 
-export const AUTO_SAVE_DELAY = config.timing.autoSaveMs;
+export const AUTO_SAVE_MS = config.timing.autoSaveMs;
 export const EXTERNAL_POLL_MS = config.timing.externalPollMs;
 export const IMAGE_PREPARATION_MS = config.timing.imagePreparationMs;
 export const RECOVERY_DELAY_MS = config.timing.recoveryMs;

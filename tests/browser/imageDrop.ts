@@ -16,7 +16,7 @@ import {
   clearPendingImages,
   getPendingImages,
   registerImageReachability,
-  resolveImageSource,
+  imagePreviewUrl,
 } from '../../src/lib/imageOps';
 import { getImageUrls } from '../../src/lib/imagePaths';
 import { runImageDrop, sourceOffsetAtPoint, type DropPosition } from '../../src/lib/imageDrop';
@@ -136,7 +136,7 @@ async function rendered(testCase: ImageDropCase): Promise<string> {
   const original = code ? '```text\nbefore after\n```' : '**before after**';
   const editor = createEditor(host, original, {
     onUpdate: () => {},
-    resolveImageSource: (url) => resolveImageSource(tabId, url),
+    imagePreviewUrl: (url) => imagePreviewUrl(tabId, url),
   });
   await editor.create();
   const reachable = registerImageReachability(tabId, () => getEditorImageReferences(editor));

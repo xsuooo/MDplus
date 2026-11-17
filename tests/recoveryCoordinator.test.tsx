@@ -5,7 +5,7 @@ import { RecoveryModal } from '../src/components/RecoveryModal';
 import { useWorkspace } from '../src/hooks/useWorkspace';
 import { useRecovery } from '../src/hooks/useRecovery';
 import { Presence } from '../src/lib/presence';
-import { clearRecovery } from '../src/lib/recovery';
+import { deleteSnapshot } from '../src/lib/recovery';
 
 const mocks = vi.hoisted(() => ({
   restore: vi.fn(),
@@ -141,7 +141,7 @@ describe('recovery identity and publication', () => {
         { title: 'newer', path: null, isNew: true, content: 'newer content' },
         'taken',
       );
-      hook.result.current.workspace.contentGenerations.current.taken = 7;
+      hook.result.current.workspace.contentVersions.current.taken = 7;
     });
     await act(async () => {
       gate.resolve(restored('taken'));
@@ -149,7 +149,7 @@ describe('recovery identity and publication', () => {
     });
     expect(hook.result.current.workspace.tabsRef.current).toHaveLength(1);
     expect(hook.result.current.workspace.tabsRef.current[0].markdown).toBe('newer content');
-    expect(hook.result.current.workspace.contentGenerations.current.taken).toBe(7);
+    expect(hook.result.current.workspace.contentVersions.current.taken).toBe(7);
     expect(mocks.installImages).not.toHaveBeenCalled();
   });
 
@@ -162,7 +162,7 @@ describe('recovery identity and publication', () => {
       operation = hook.result.current.recovery.handleRestore('deleted');
     });
     await act(async () => {
-      await clearRecovery('deleted');
+      await deleteSnapshot('deleted');
       gate.resolve(restored('deleted'));
       await operation;
     });
@@ -203,7 +203,7 @@ describe('recovery identity and publication', () => {
         { title: 'first', path: null, isNew: true, content: 'keep me' },
         'unique',
       );
-      hook.result.current.workspace.contentGenerations.current.unique = 9;
+      hook.result.current.workspace.contentVersions.current.unique = 9;
       hook.result.current.workspace.addTab(
         { title: 'second', path: null, isNew: true, content: 'do not replace' },
         'unique',
@@ -211,6 +211,6 @@ describe('recovery identity and publication', () => {
     });
     expect(hook.result.current.workspace.tabsRef.current).toHaveLength(1);
     expect(hook.result.current.workspace.tabsRef.current[0].markdown).toBe('keep me');
-    expect(hook.result.current.workspace.contentGenerations.current.unique).toBe(9);
+    expect(hook.result.current.workspace.contentVersions.current.unique).toBe(9);
   });
 });

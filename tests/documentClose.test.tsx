@@ -27,7 +27,7 @@ const initial = (dirty = true): Tab => ({
   markdown: 'draft',
   savedContent: 'old',
   initialContent: 'old',
-  externalMtime: 1,
+  diskMtime: 1,
   diskRevision: 'old',
   externalChanged: false,
   stats: { words: 1, chars: 5, lines: 1 },
@@ -45,7 +45,7 @@ function setup(dirty = true) {
     const workspace = useWorkspace([initial(dirty)]);
     const close = useDocumentClose(
       workspace,
-      { cleanRecovery: mocks.clean, protectDraft: mocks.protect },
+      { deleteRecoverySnapshot: mocks.clean, saveRecoverySnapshot: mocks.protect },
       mocks.save,
       mocks.persist,
       onClosing,

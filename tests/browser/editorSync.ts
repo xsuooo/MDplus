@@ -54,9 +54,9 @@ export async function runImageHistoryRegression(): Promise<string[]> {
   document.body.append(root);
   const editor = createEditor(root, original, {
     onUpdate: () => {},
-    resolveImageIdentity: (url) => aliases.get(url) ?? url,
-    resolveImageReference: reference,
-    resolveImageSource: () =>
+    imageTokenForUrl: (url) => aliases.get(url) ?? url,
+    imageUrlForToken: reference,
+    imagePreviewUrl: () =>
       'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
     subscribeImageSources: (listener) => {
       subscribers.add(listener);

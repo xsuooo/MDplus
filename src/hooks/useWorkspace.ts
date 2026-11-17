@@ -11,10 +11,10 @@ import {
   type ModeExchange,
   type RenderedPlace,
   type SourcePlace,
-} from '../lib/editorPosition';
-import { textAnchor, type SessionEditorPlace } from '../lib/sessionPosition';
+} from '../lib/position/editorPosition';
+import { textAnchor, type SessionEditorPlace } from '../lib/position/sessionPosition';
 import { clearPendingImages } from '../lib/imageOps';
-import { type PendingImageReference } from '../lib/imagePaths';
+import { type UrlRewrite } from '../lib/imagePaths';
 import { type ImagePreparation } from '../lib/imagePreparation';
 import { computeStats } from '../lib/stats';
 import type { EditorUpdate, Tab } from '../lib/types';
@@ -37,7 +37,7 @@ export function useWorkspace(initialTabs: Tab[] = []) {
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const saveQueues = useRef<Record<string, Promise<boolean>>>({});
   const saveGenerations = useRef<Record<string, number>>({});
-  const contentGenerations = useRef<Record<string, number>>({});
+  const contentVersions = useRef<Record<string, number>>({});
   const imagePreparations = useRef<
     Record<
       string,
@@ -49,7 +49,7 @@ export function useWorkspace(initialTabs: Tab[] = []) {
       }
     >
   >({});
-  const blockedExternalMtime = useRef<Record<string, number>>({});
+  const autosavePausedMtime = useRef<Record<string, number>>({});
   const detectedExternalStates = useRef<Record<string, { revision: string | null; mtime: number }>>(
     {},
   );
@@ -60,7 +60,7 @@ export function useWorkspace(initialTabs: Tab[] = []) {
   const currentView = useRef({ activeId, sourceMode });
   const modeGenerations = useRef<Record<string, number>>({});
   const sourceRegistry = useRef<Record<string, HTMLTextAreaElement | null>>({});
-  const sourceRewrites = useRef<Record<string, PendingImageReference[]>>({});
+  const sourceRewrites = useRef<Record<string, UrlRewrite[]>>({});
   const positions = useRef<
     Record<
       string,
@@ -179,7 +179,7 @@ export function useWorkspace(initialTabs: Tab[] = []) {
   }, []);
   const installSessionPlace = useCallback(
     (id: string, place: SessionEditorPlace) => {
-      if ((contentGenerations.current[id] ?? 0) > 0) return;
+      if ((contentVersions.current[id] ?? 0) > 0) return;
       const saved = (positions.current[id] ??= {});
       // A user's live position takes precedence over a late session read.
       if ((saved.sessionPlace || saved.sessionCapture) && !saved.pendingSessionPlace) return;
@@ -204,7 +204,7 @@ export function useWorkspace(initialTabs: Tab[] = []) {
   }, []);
 
   const pauseAutoSave = useCallback((id: string, mtime: number) => {
-    blockedExternalMtime.current[id] = mtime;
+    autosavePausedMtime.current[id] = mtime;
     // Keep dirty tied to edits so later disk revisions are still polled, but do
     // not let close/recovery mistake the retained buffer for a backed-up copy.
     tabsRef.current = tabsRef.current.map((tab) =>
@@ -239,7 +239,7 @@ export function useWorkspace(initialTabs: Tab[] = []) {
         path: init.path,
         isNew: init.isNew,
         dirty: !!init.recovered,
-        externalMtime: init.mtime ?? 0,
+        diskMtime: init.mtime ?? 0,
         diskRevision: init.revision ?? null,
         externalChanged: false,
         preserveLocal: false,
@@ -254,7 +254,7 @@ export function useWorkspace(initialTabs: Tab[] = []) {
           sessionPlace: init.place,
           pendingSessionPlace: init.place,
         };
-      contentGenerations.current[id] = 0;
+      contentVersions.current[id] = 0;
       tabsRef.current = [...tabsRef.current, tab];
       setTabs([...tabsRef.current]);
       if (init.activate !== false) {
@@ -271,13 +271,13 @@ export function useWorkspace(initialTabs: Tab[] = []) {
     // 否则保存后再次 close() 会因读到旧 dirty 标签而再次拦截,陷入死循环
     tabsRef.current = tabsRef.current.filter((t) => t.id !== id);
     saveGenerations.current[id] = (saveGenerations.current[id] ?? 0) + 1;
-    delete contentGenerations.current[id];
+    delete contentVersions.current[id];
     imagePreparations.current[id]?.cancel();
     delete imagePreparations.current[id];
     setTabs([...tabsRef.current]);
     delete editorRegistry.current[id];
     delete tabMirror.current[id];
-    delete blockedExternalMtime.current[id];
+    delete autosavePausedMtime.current[id];
     delete detectedExternalStates.current[id];
     externalPrompts.current.delete(id);
     clearPendingImages(id);
@@ -314,9 +314,9 @@ export function useWorkspace(initialTabs: Tab[] = []) {
     saveTimers,
     saveQueues,
     saveGenerations,
-    contentGenerations,
+    contentVersions,
     imagePreparations,
-    blockedExternalMtime,
+    autosavePausedMtime,
     detectedExternalStates,
     openingPaths,
     externalChecks,

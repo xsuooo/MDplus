@@ -10,8 +10,8 @@ import {
 import { pasteSourceImage } from '../lib/sourcePaste';
 import { isComposingEvent } from '../lib/shortcuts';
 import { IconCode } from './icons';
-import { mapTextOffset } from '../lib/textPosition';
-import { mapSourceScroll } from '../lib/sourcePosition';
+import { mapTextOffset } from '../lib/position/textPosition';
+import { mapSourceScroll } from '../lib/position/sourcePosition';
 import {
   mapSourceEditOffset,
   prepareSourceEdits,
@@ -25,7 +25,7 @@ import {
   getImageUrls,
   mapImageOffset,
   rewriteImageReferences,
-  type PendingImageReference,
+  type UrlRewrite,
 } from '../lib/imagePaths';
 import {
   imageIdentityReferences,
@@ -45,7 +45,7 @@ interface SourceEditorProps {
   active?: boolean;
   onRegister?: (tabId: string, input: HTMLTextAreaElement | null) => void;
   onApi?: (tabId: string, api: SourceEditorApi | null) => void;
-  imageRewrites?: PendingImageReference[];
+  imageRewrites?: UrlRewrite[];
 }
 
 interface Snapshot {
@@ -53,7 +53,7 @@ interface Snapshot {
   start: number;
   end: number;
 }
-function rewriteSnapshot(snapshot: Snapshot, references: PendingImageReference[]): Snapshot {
+function rewriteSnapshot(snapshot: Snapshot, references: UrlRewrite[]): Snapshot {
   return {
     text: rewriteImageReferences(snapshot.text, references),
     start: mapImageOffset(snapshot.text, references, snapshot.start),

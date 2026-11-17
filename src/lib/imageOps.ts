@@ -6,12 +6,12 @@ import {
   getImageUrls,
   isRelativeImageUrl,
   rewriteImageReferences,
-  type PendingImageReference,
+  type UrlRewrite,
 } from './imagePaths';
 import { basename, readImageFile, type ImageReceipt } from './fileOps';
 
 /** Public snapshots contain identities, never a second copy of the image bytes. */
-export interface PendingImage extends PendingImageReference {
+export interface PendingImage extends UrlRewrite {
   filename: string;
   mime: string;
   byteLength: number;
@@ -482,7 +482,7 @@ export function clearPendingImages(tabId: string): void {
  * An image left in its file is not offered: its token owns no bytes and is replaced
  * whenever the file changes, so editors and their history keep the raw URL.
  */
-export function imageIdentityReferences(tabId: string): PendingImageReference[] {
+export function imageIdentityReferences(tabId: string): UrlRewrite[] {
   const cache = imageCaches.get(tabId);
   return [...(cache?.aliases ?? [])].flatMap(([url, token]) =>
     cache!.images.get(token)?.backing.key === null
@@ -490,23 +490,23 @@ export function imageIdentityReferences(tabId: string): PendingImageReference[] 
       : [{ placeholder: url, relativePath: token }],
   );
 }
-export function resolveImageIdentity(tabId: string, url: string): string {
+export function imageTokenForUrl(tabId: string, url: string): string {
   const cache = imageCaches.get(tabId);
   const token = cache?.aliases.get(url);
   return token !== undefined && cache!.images.get(token)?.backing.key !== null ? token : url;
 }
 /** Only expose a raw URL while it still names this exact immutable image. */
-export function resolveImageReference(tabId: string, token: string): string {
+export function imageUrlForToken(tabId: string, token: string): string {
   const cache = imageCaches.get(tabId);
   const image = cache?.images.get(token);
   return image?.source && cache!.aliases.get(image.source.url) === token ? image.source.url : token;
 }
-export function imageSourceReferences(tabId: string): PendingImageReference[] {
+export function imageSourceReferences(tabId: string): UrlRewrite[] {
   return getPendingImages(tabId).flatMap((image) =>
     image.source ? [{ placeholder: image.placeholder, relativePath: image.source.url }] : [],
   );
 }
-export function resolveImageSource(tabId: string, url: string): string {
+export function imagePreviewUrl(tabId: string, url: string): string {
   const cache = imageCaches.get(tabId);
   const image = cache?.images.get(url) ?? cache?.images.get(cache.aliases.get(url) ?? '');
   return image?.backing.previewUrl ?? url;
@@ -546,8 +546,8 @@ export interface ImageMigration {
   cache: ImageCache;
   targetFilePath: string;
   markdown: string;
-  references: PendingImageReference[];
-  historyReferences: PendingImageReference[];
+  references: UrlRewrite[];
+  historyReferences: UrlRewrite[];
   allocationIds: string[];
   updates: {
     image: PendingImage;

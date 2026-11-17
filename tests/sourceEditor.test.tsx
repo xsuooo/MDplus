@@ -54,7 +54,7 @@ vi.mock('react', async (original) => {
 });
 
 import { SourceEditor } from '../src/components/SourceEditor';
-import { getImageUrls, type PendingImageReference } from '../src/lib/imagePaths';
+import { getImageUrls, type UrlRewrite } from '../src/lib/imagePaths';
 import {
   clearPendingImages,
   collectUnusedImages,
@@ -64,12 +64,12 @@ import {
   loadImageReferences,
   migratePendingImages,
   prepareImageReferences,
-  resolveImageSource,
+  imagePreviewUrl,
 } from '../src/lib/imageOps';
 
 function mount(initial = 'abc', saveImage = vi.fn(async () => 'image.png')) {
   let value = initial;
-  let imageRewrites: PendingImageReference[] | undefined;
+  let imageRewrites: UrlRewrite[] | undefined;
   let field: ReactElement<any> & { ref: { current: unknown } };
   const changes = vi.fn();
   const input = {
@@ -143,7 +143,7 @@ function mount(initial = 'abc', saveImage = vi.fn(async () => 'image.png')) {
       value = text;
       render();
     },
-    migrate(text: string, references: PendingImageReference[]) {
+    migrate(text: string, references: UrlRewrite[]) {
       imageRewrites = references;
       value = text;
       render();
@@ -350,7 +350,7 @@ describe('SourceEditor history', () => {
     const original = '![photo](./img/pic.png)\n\n中文 text';
     await loadImageReferences('tab', original, 'C:/old/note.md');
     const oldToken = getPendingImages('tab')[0].placeholder;
-    const oldPreview = resolveImageSource('tab', oldToken);
+    const oldPreview = imagePreviewUrl('tab', oldToken);
     const editor = mount(original);
     const caret = original.indexOf('中文');
     editor.select(caret, caret + 2);
@@ -364,7 +364,7 @@ describe('SourceEditor history', () => {
     expect(getPendingImages('tab')).toHaveLength(1);
     editor.key('z');
     expect(getImageUrls(editor.input.value)).toEqual([oldToken]);
-    expect(resolveImageSource('tab', oldToken)).toBe(oldPreview);
+    expect(imagePreviewUrl('tab', oldToken)).toBe(oldPreview);
     expect(editor.input.value.slice(editor.input.selectionStart, editor.input.selectionEnd)).toBe(
       '中文',
     );
@@ -385,7 +385,7 @@ describe('SourceEditor history', () => {
     editor.key('y');
     editor.key('z');
     expect(getImageUrls(editor.input.value)).toEqual(['./assets/pic.png']);
-    expect(resolveImageSource('tab', './assets/pic.png')).toBe(oldPreview);
+    expect(imagePreviewUrl('tab', './assets/pic.png')).toBe(oldPreview);
   });
 
   it('does not let the same raw URL in the new directory replace an older source undo image', async () => {
@@ -401,12 +401,12 @@ describe('SourceEditor history', () => {
     editor.change(original, original.length, 'insertFromPaste');
     const prepared = await prepareImageReferences('tab', original, 'D:/new/note.md');
     expect(prepared.commit()).toBe(true);
-    const livePreview = resolveImageSource('tab', './img/pic.png');
-    expect(livePreview).not.toBe(resolveImageSource('tab', oldToken));
+    const livePreview = imagePreviewUrl('tab', './img/pic.png');
+    expect(livePreview).not.toBe(imagePreviewUrl('tab', oldToken));
     editor.key('z');
     editor.key('z');
     expect(getImageUrls(editor.input.value)).toEqual([oldToken]);
-    expect(resolveImageSource('tab', oldToken)).toBe('http://mdplus-image-stash.localhost/QQ==');
+    expect(imagePreviewUrl('tab', oldToken)).toBe('http://mdplus-image-stash.localhost/QQ==');
     editor.external('real external replacement clears source history');
     await collectUnusedImages('tab');
     expect(getPendingImages('tab')).toEqual([]);

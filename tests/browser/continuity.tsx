@@ -5,8 +5,8 @@ import { TextSelection, NodeSelection } from '@milkdown/prose/state';
 import { undoDepth } from '@milkdown/prose/history';
 import { createEditor, getCurrentState, setMarkdown } from '../../src/lib/editor';
 import App from '../../src/App';
-import { toRendered, toSource } from '../../src/lib/editorPosition';
-import { sourceTextLayout } from '../../src/lib/sourcePosition';
+import { toRendered, toSource } from '../../src/lib/position/editorPosition';
+import { sourceTextLayout } from '../../src/lib/position/sourcePosition';
 import '../../src/styles/global.css';
 
 export const continuityCases = [
@@ -96,8 +96,8 @@ export async function runContinuityRegression(testCase: ContinuityCase): Promise
     document.body.append(host, input);
     const editor = createEditor(host, markdown, {
       onUpdate: () => {},
-      resolveImageIdentity: (url) => url,
-      resolveImageReference: (url) => url,
+      imageTokenForUrl: (url) => url,
+      imageUrlForToken: (url) => url,
     });
     await editor.create();
     try {

@@ -165,7 +165,7 @@ beforeEach(() => {
     path: 'C:/notes/note.md',
     isNew: false,
     dirty: true,
-    externalMtime: 100,
+    diskMtime: 100,
     externalChanged: false,
     diskRevision: 'rev-100',
     markdown: 'current',
@@ -597,7 +597,7 @@ describe('App document revision contract', () => {
     await mocks.toolbar.onSave();
     await settle();
     expect(tabState().diskRevision).toBe('written-bytes');
-    expect(tabState().externalMtime).toBe(123);
+    expect(tabState().diskMtime).toBe(123);
     expect(tabState().savedContent).toBe('current');
   });
 

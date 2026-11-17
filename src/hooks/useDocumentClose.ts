@@ -13,14 +13,14 @@ import type { WindowSessionController } from './useSessionPersistence';
 
 export function useDocumentClose(
   workspace: Workspace,
-  recovery: Pick<RecoveryController, 'cleanRecovery' | 'protectDraft'>,
+  recovery: Pick<RecoveryController, 'deleteRecoverySnapshot' | 'saveRecoverySnapshot'>,
   doSave: (id: string, manual?: boolean) => Promise<boolean>,
   persistWindowState: () => Promise<void>,
   onClosing: () => void,
   sessionController?: WindowSessionController,
 ) {
-  const { tabsRef, contentGenerations, editorRegistry, resolveContent, removeTab } = workspace;
-  const { cleanRecovery, protectDraft } = recovery;
+  const { tabsRef, contentVersions, editorRegistry, resolveContent, removeTab } = workspace;
+  const { deleteRecoverySnapshot, saveRecoverySnapshot } = recovery;
   const [pendingCloseTab, setPendingCloseState] = useState<Tab | null>(null);
   const [closeBusy, setCloseBusy] = useState(false);
   const pendingClose = useRef<Tab | null>(null);
@@ -51,19 +51,19 @@ export function useDocumentClose(
       confirmingClose.current = null;
       setCloseBusy(false);
       if (needsDocumentProtection(tab, resolveContent(tab))) {
-        protectDraft(tab);
+        saveRecoverySnapshot(tab);
         setPendingCloseTab(tab);
       } else {
-        const generation = contentGenerations.current[id];
-        void cleanRecovery(id).then((clean) => {
+        const generation = contentVersions.current[id];
+        void deleteRecoverySnapshot(id).then((clean) => {
           if (closeGeneration.current !== request) return;
           const current = tabsRef.current.find((item) => item.id === id);
           if (
             current &&
-            (contentGenerations.current[id] !== generation ||
+            (contentVersions.current[id] !== generation ||
               needsDocumentProtection(current, resolveContent(current)))
           ) {
-            protectDraft(current);
+            saveRecoverySnapshot(current);
             setPendingCloseTab(current);
           } else if (clean) {
             if (current) sessionController?.forgetClosedTab?.(current);
@@ -76,10 +76,10 @@ export function useDocumentClose(
       tabsRef,
       flushEditor,
       setPendingCloseTab,
-      contentGenerations,
-      cleanRecovery,
+      contentVersions,
+      deleteRecoverySnapshot,
       removeTab,
-      protectDraft,
+      saveRecoverySnapshot,
       resolveContent,
       sessionController,
     ],
@@ -96,13 +96,15 @@ export function useDocumentClose(
           needsDocumentProtection(tab, resolveContent(tab)),
         );
         if (!dirty) return false;
-        protectDraft(dirty);
+        saveRecoverySnapshot(dirty);
         setPendingCloseTab(dirty);
         return true;
       };
       if (!isCurrent() || offerDirtyTab()) return;
       try {
-        const cleaned = await Promise.all(tabsRef.current.map((tab) => cleanRecovery(tab.id)));
+        const cleaned = await Promise.all(
+          tabsRef.current.map((tab) => deleteRecoverySnapshot(tab.id)),
+        );
         if (!isCurrent()) return;
         if (cleaned.some((success) => !success)) {
           pendingWindowClose.current = false;
@@ -133,11 +135,11 @@ export function useDocumentClose(
     [
       tabsRef,
       flushEditor,
-      protectDraft,
+      saveRecoverySnapshot,
       setPendingCloseTab,
       resolveContent,
       persistWindowState,
-      cleanRecovery,
+      deleteRecoverySnapshot,
       sessionController,
     ],
   );
@@ -174,12 +176,12 @@ export function useDocumentClose(
             return;
           if (pendingWindowClose.current) sessionController?.updateClosingTab(savedTab);
         }
-        const closingGeneration = contentGenerations.current[closedId];
-        const clean = await cleanRecovery(closedId);
+        const closingGeneration = contentVersions.current[closedId];
+        const clean = await deleteRecoverySnapshot(closedId);
         const current = tabsRef.current.find((tab) => tab.id === closedId);
         if (!isCurrent()) {
           if (current && needsDocumentProtection(current, resolveContent(current)))
-            protectDraft(current);
+            saveRecoverySnapshot(current);
           return;
         }
         if (!clean) {
@@ -187,13 +189,13 @@ export function useDocumentClose(
           return;
         }
         if (
-          contentGenerations.current[closedId] !== closingGeneration ||
+          contentVersions.current[closedId] !== closingGeneration ||
           (action === 'save' &&
             current &&
             needsDocumentProtection(current, resolveContent(current)))
         ) {
           if (current) {
-            protectDraft(current);
+            saveRecoverySnapshot(current);
             setPendingCloseTab(current);
           }
           return;
@@ -207,7 +209,7 @@ export function useDocumentClose(
         if (!isCurrent()) return;
         const current = tabsRef.current.find((tab) => tab.id === closedId);
         if (current) {
-          protectDraft(current);
+          saveRecoverySnapshot(current);
           setPendingCloseTab(current);
         }
         console.error('关闭文稿失败', error);
@@ -221,13 +223,13 @@ export function useDocumentClose(
     },
     [
       setPendingCloseTab,
-      contentGenerations,
-      cleanRecovery,
+      contentVersions,
+      deleteRecoverySnapshot,
       tabsRef,
       removeTab,
       continueWindowClose,
       doSave,
-      protectDraft,
+      saveRecoverySnapshot,
       resolveContent,
       sessionController,
     ],
