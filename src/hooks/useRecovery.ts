@@ -16,7 +16,7 @@ import { useImagePreparation } from './useImagePreparation';
 import type { Workspace } from './useWorkspace';
 
 export function useRecovery(workspace: Workspace) {
-  const { tabs, tabsRef, contentVersions, saveGenerations, resolveContent, addTab } = workspace;
+  const { tabs, tabsRef, tabRuntime, saveGenerations, resolveContent, addTab } = workspace;
   const alive = useRef(true);
   const restoring = useRef(new Map<string, Promise<void>>());
   useEffect(() => {
@@ -51,10 +51,10 @@ export function useRecovery(workspace: Workspace) {
   );
   const deleteRecoverySnapshot = useCallback(
     async (id: string) => {
-      const generation = contentVersions.current[id];
+      const generation = tabRuntime.current[id]?.contentVersion;
       try {
         await deleteSnapshot(id);
-        if (contentVersions.current[id] === generation) {
+        if (tabRuntime.current[id]?.contentVersion === generation) {
           setRecoveryStates((previous) => ({ ...previous, [id]: 'idle' }));
         }
         return true;
@@ -63,7 +63,7 @@ export function useRecovery(workspace: Workspace) {
         return false;
       }
     },
-    [contentVersions],
+    [tabRuntime],
   );
 
   // Preserve disk-diverged buffers even when no new keystroke made them dirty.

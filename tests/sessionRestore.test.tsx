@@ -278,7 +278,7 @@ describe('saved-file startup restoration', () => {
     expect(hook.result.current.files.startupResolved).toBe(true);
     const id = hook.result.current.workspace.activeId!;
     act(() => {
-      hook.result.current.workspace.contentVersions.current[id] = 1;
+      hook.result.current.workspace.runtimeOf(id).contentVersion = 1;
       hook.result.current.workspace.updateTab(id, {
         markdown: 'Intervening user edit',
         dirty: true,
@@ -534,7 +534,7 @@ describe('window-close session transaction', () => {
     expect(hook.result.current.close.pendingCloseTab?.id).toBe('a');
     await act(() => hook.result.current.close.confirmClose('discard'));
     expect(hook.result.current.close.pendingCloseTab?.id).toBe('new');
-    expect(hook.result.current.workspace.positions.current.a).toBeUndefined();
+    expect(hook.result.current.workspace.tabRuntime.current['a']?.position).toBeUndefined();
     await act(() => hook.result.current.close.confirmClose('save'));
     const committed = mocks.persist.mock.calls.at(-1)?.[0] as SavedDocumentSession;
     expect(committed.documents.map((entry) => entry.path)).toEqual([
@@ -568,7 +568,9 @@ describe('window-close session transaction', () => {
       hook.result.current.workspace.setSourceMode(true);
     });
     act(() => hook.result.current.workspace.selectTab('b'));
-    expect(hook.result.current.workspace.positions.current.a.sessionCapture).toBeTypeOf('function');
+    expect(
+      hook.result.current.workspace.tabRuntime.current['a']?.position?.sessionCapture,
+    ).toBeTypeOf('function');
     input.value = 'Another source value';
     input.setSelectionRange(0, 0);
     input.scrollTop = 0;
@@ -586,7 +588,9 @@ describe('window-close session transaction', () => {
       start: { offset: 2 },
       end: { offset: 8 },
     });
-    expect(hook.result.current.workspace.positions.current.a.sessionCapture).toBeUndefined();
+    expect(
+      hook.result.current.workspace.tabRuntime.current['a']?.position?.sessionCapture,
+    ).toBeUndefined();
     expect(mocks.destroy).toHaveBeenCalledOnce();
     input.remove();
   });

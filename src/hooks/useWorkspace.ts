@@ -28,6 +28,40 @@ export interface DiskSync {
   prompting?: boolean;
 }
 
+export interface TabPosition {
+  sourceMode?: boolean;
+  source?: SourcePlace;
+  rendered?: RenderedPlace;
+  exchange?: ModeExchange;
+  sessionPlace?: SessionEditorPlace;
+  sessionCapture?: () => SessionEditorPlace;
+  pendingSessionPlace?: SessionEditorPlace;
+}
+
+/** Per-tab state kept outside React. Every field is absent until first used. */
+export interface TabRuntime {
+  editor?: Editor | null;
+  sourceInput?: HTMLTextAreaElement | null;
+  /** Latest content published by the editor, ahead of the rendered tabs by up to TAB_RENDER_MS. */
+  mirror?: EditorUpdate;
+  /** Bumped on every edit; async steps compare it before and after to detect new edits. */
+  contentVersion?: number;
+  saveTimer?: ReturnType<typeof setTimeout>;
+  /** Present while a save is queued or running. */
+  saveQueue?: Promise<boolean>;
+  /** Bumped on each rich/source switch; invalidates image drops that span a switch. */
+  modeGeneration?: number;
+  sourceRewrites?: UrlRewrite[];
+  imagePreparation?: ImagePreparation & {
+    version: number;
+    content: string;
+    path: string | null;
+    revision: string | null;
+  };
+  disk?: DiskSync;
+  position?: TabPosition;
+}
+
 export function makeId(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
@@ -40,78 +74,52 @@ export function useWorkspace(initialTabs: Tab[] = []) {
   const [sourceMode, setSourceModeState] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [positionVersion, setPositionVersion] = useState(0);
-  const editorRegistry = useRef<Record<string, Editor | null>>({});
-  const tabMirror = useRef<Record<string, EditorUpdate>>({});
   const tabsRef = useRef<Tab[]>(initialTabs);
-  const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-  const saveQueues = useRef<Record<string, Promise<boolean>>>({});
   const saveGenerations = useRef<Record<string, number>>({});
-  const contentVersions = useRef<Record<string, number>>({});
-  const imagePreparations = useRef<
-    Record<
-      string,
-      ImagePreparation & {
-        version: number;
-        content: string;
-        path: string | null;
-        revision: string | null;
-      }
-    >
-  >({});
-  // Everything known about one tab's file on disk beyond the Tab fields. See docs/state-model.md.
-  const diskSync = useRef<Record<string, DiskSync>>({});
-  const diskOf = useCallback((id: string) => (diskSync.current[id] ??= {}), []);
+  // All per-tab state that is not rendered. removeTab drops the whole record. See docs/state-model.md.
+  const tabRuntime = useRef<Record<string, TabRuntime>>({});
+  const runtimeOf = useCallback((id: string) => (tabRuntime.current[id] ??= {}), []);
+  const diskOf = useCallback((id: string) => (runtimeOf(id).disk ??= {}), [runtimeOf]);
   const isAutoSavePaused = useCallback(
-    (id: string) => diskSync.current[id]?.pausedMtime !== undefined,
+    (id: string) => tabRuntime.current[id]?.disk?.pausedMtime !== undefined,
     [],
   );
   const resumeAutoSave = useCallback((id: string) => {
-    const disk = diskSync.current[id];
+    const disk = tabRuntime.current[id]?.disk;
     if (!disk) return;
     delete disk.pausedMtime;
     delete disk.detected;
   }, []);
   const currentView = useRef({ activeId, sourceMode });
-  const modeGenerations = useRef<Record<string, number>>({});
-  const sourceRegistry = useRef<Record<string, HTMLTextAreaElement | null>>({});
-  const sourceRewrites = useRef<Record<string, UrlRewrite[]>>({});
-  const positions = useRef<
-    Record<
-      string,
-      {
-        sourceMode?: boolean;
-        source?: SourcePlace;
-        rendered?: RenderedPlace;
-        exchange?: ModeExchange;
-        sessionPlace?: SessionEditorPlace;
-        sessionCapture?: () => SessionEditorPlace;
-        pendingSessionPlace?: SessionEditorPlace;
-      }
-    >
-  >({});
   currentView.current = { activeId, sourceMode };
-  const setSourceMode = useCallback((source: boolean) => {
-    const current = currentView.current;
-    if (current.activeId && current.sourceMode !== source)
-      modeGenerations.current[current.activeId] =
-        (modeGenerations.current[current.activeId] ?? 0) + 1;
-    current.sourceMode = source;
-    setSourceModeState(source);
-  }, []);
+  const setSourceMode = useCallback(
+    (source: boolean) => {
+      const current = currentView.current;
+      if (current.activeId && current.sourceMode !== source)
+        runtimeOf(current.activeId).modeGeneration =
+          (tabRuntime.current[current.activeId]?.modeGeneration ?? 0) + 1;
+      current.sourceMode = source;
+      setSourceModeState(source);
+    },
+    [runtimeOf],
+  );
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeId) ?? null, [tabs, activeId]);
-  const syncEditor = useCallback((id: string, markdown: string, history = true) => {
-    const editor = editorRegistry.current[id];
-    if (!editor) return;
-    const update = setMarkdown(editor, markdown, history);
-    if (update) tabMirror.current[id] = { ...update, markdown, stats: computeStats(markdown) };
-  }, []);
+  const syncEditor = useCallback(
+    (id: string, markdown: string, history = true) => {
+      const editor = tabRuntime.current[id]?.editor;
+      if (!editor) return;
+      const update = setMarkdown(editor, markdown, history);
+      if (update) runtimeOf(id).mirror = { ...update, markdown, stats: computeStats(markdown) };
+    },
+    [runtimeOf],
+  );
   const rememberActive = useCallback(() => {
     const { activeId: id, sourceMode: source } = currentView.current;
     if (!id) return;
-    const saved = (positions.current[id] ??= {});
+    const saved = (runtimeOf(id).position ??= {});
     saved.sourceMode = source;
-    const input = sourceRegistry.current[id];
-    const editor = editorRegistry.current[id];
+    const input = tabRuntime.current[id]?.sourceInput;
+    const editor = tabRuntime.current[id]?.editor;
     if (source && input) saved.source = sourcePlace(input);
     else if (editor) {
       try {
@@ -120,45 +128,48 @@ export function useWorkspace(initialTabs: Tab[] = []) {
         console.warn('文稿位置读取暂不可用', error);
       }
     }
-  }, []);
-  const captureTabPlace = useCallback((id: string): SessionEditorPlace | undefined => {
-    const tab = tabsRef.current.find((candidate) => candidate.id === id);
-    if (!tab) return;
-    const saved = (positions.current[id] ??= {});
-    const source =
-      currentView.current.activeId === id
-        ? currentView.current.sourceMode
-        : (saved.sourceMode ?? false);
-    // A restored tab whose view has not mounted still owns its original anchors.
-    if (saved.pendingSessionPlace) return saved.pendingSessionPlace;
-    const active = currentView.current.activeId === id;
-    if (!active && saved.sessionPlace && !saved.sessionCapture) return saved.sessionPlace;
-    const markdown = tabMirror.current[id]?.markdown ?? tab.markdown;
-    const input = sourceRegistry.current[id];
-    const editor = editorRegistry.current[id];
-    try {
-      if (!active && saved.sessionCapture) {
-        saved.sessionPlace = saved.sessionCapture();
-        delete saved.sessionCapture;
-      } else if (source && input && active)
-        saved.sessionPlace = sourceSessionPlace(input, markdown);
-      else if (!source && editor) saved.sessionPlace = renderedSessionPlace(editor, markdown);
-      else if (source && saved.source)
-        saved.sessionPlace = {
-          sourceMode: true,
-          start: textAnchor(markdown, saved.source.start),
-          end: textAnchor(markdown, saved.source.end),
-          direction: saved.source.direction,
-          top: saved.source.top,
-          left: saved.source.left,
-        };
-      if (active) delete saved.sessionCapture;
-    } catch (error) {
-      // The editor can be registering or tearing down. Keep its last usable position.
-      console.warn('文稿位置读取暂不可用', error);
-    }
-    return saved.sessionPlace;
-  }, []);
+  }, [runtimeOf]);
+  const captureTabPlace = useCallback(
+    (id: string): SessionEditorPlace | undefined => {
+      const tab = tabsRef.current.find((candidate) => candidate.id === id);
+      if (!tab) return;
+      const saved = (runtimeOf(id).position ??= {});
+      const source =
+        currentView.current.activeId === id
+          ? currentView.current.sourceMode
+          : (saved.sourceMode ?? false);
+      // A restored tab whose view has not mounted still owns its original anchors.
+      if (saved.pendingSessionPlace) return saved.pendingSessionPlace;
+      const active = currentView.current.activeId === id;
+      if (!active && saved.sessionPlace && !saved.sessionCapture) return saved.sessionPlace;
+      const markdown = tabRuntime.current[id]?.mirror?.markdown ?? tab.markdown;
+      const input = tabRuntime.current[id]?.sourceInput;
+      const editor = tabRuntime.current[id]?.editor;
+      try {
+        if (!active && saved.sessionCapture) {
+          saved.sessionPlace = saved.sessionCapture();
+          delete saved.sessionCapture;
+        } else if (source && input && active)
+          saved.sessionPlace = sourceSessionPlace(input, markdown);
+        else if (!source && editor) saved.sessionPlace = renderedSessionPlace(editor, markdown);
+        else if (source && saved.source)
+          saved.sessionPlace = {
+            sourceMode: true,
+            start: textAnchor(markdown, saved.source.start),
+            end: textAnchor(markdown, saved.source.end),
+            direction: saved.source.direction,
+            top: saved.source.top,
+            left: saved.source.left,
+          };
+        if (active) delete saved.sessionCapture;
+      } catch (error) {
+        // The editor can be registering or tearing down. Keep its last usable position.
+        console.warn('文稿位置读取暂不可用', error);
+      }
+      return saved.sessionPlace;
+    },
+    [runtimeOf],
+  );
   const selectTab = useCallback(
     (id: string | null) => {
       if (currentView.current.activeId === id) return;
@@ -166,10 +177,10 @@ export function useWorkspace(initialTabs: Tab[] = []) {
       const previousId = currentView.current.activeId;
       const previous = tabsRef.current.find((tab) => tab.id === previousId);
       if (previous) {
-        const saved = positions.current[previous.id];
-        const markdown = tabMirror.current[previous.id]?.markdown ?? previous.markdown;
-        const input = sourceRegistry.current[previous.id];
-        const editor = editorRegistry.current[previous.id];
+        const saved = (runtimeOf(previous.id).position ??= {});
+        const markdown = tabRuntime.current[previous.id]?.mirror?.markdown ?? previous.markdown;
+        const input = tabRuntime.current[previous.id]?.sourceInput;
+        const editor = tabRuntime.current[previous.id]?.editor;
         // Switching only freezes inputs; persistence and close flush the exact same snapshot.
         if (!saved.pendingSessionPlace)
           try {
@@ -180,20 +191,23 @@ export function useWorkspace(initialTabs: Tab[] = []) {
             console.warn('文稿位置读取暂不可用', error);
           }
       }
-      const source = id ? (positions.current[id]?.sourceMode ?? false) : false;
+      const source = id ? (tabRuntime.current[id]?.position?.sourceMode ?? false) : false;
       currentView.current = { activeId: id, sourceMode: source };
       setActiveId(id);
       setSourceModeState(source);
     },
-    [rememberActive],
+    [rememberActive, runtimeOf],
   );
-  const registerSource = useCallback((id: string, input: HTMLTextAreaElement | null) => {
-    sourceRegistry.current[id] = input;
-  }, []);
+  const registerSource = useCallback(
+    (id: string, input: HTMLTextAreaElement | null) => {
+      runtimeOf(id).sourceInput = input;
+    },
+    [runtimeOf],
+  );
   const installSessionPlace = useCallback(
     (id: string, place: SessionEditorPlace) => {
-      if ((contentVersions.current[id] ?? 0) > 0) return;
-      const saved = (positions.current[id] ??= {});
+      if ((tabRuntime.current[id]?.contentVersion ?? 0) > 0) return;
+      const saved = (runtimeOf(id).position ??= {});
       // A user's live position takes precedence over a late session read.
       if ((saved.sessionPlace || saved.sessionCapture) && !saved.pendingSessionPlace) return;
       saved.sourceMode = place.sourceMode;
@@ -204,11 +218,11 @@ export function useWorkspace(initialTabs: Tab[] = []) {
       }
       setPositionVersion((version) => version + 1);
     },
-    [setSourceMode],
+    [runtimeOf, setSourceMode],
   );
   /** Save, close, export and mode switches flush pending rich edits before reading this mirror. */
   const resolveContent = useCallback((tab: Tab): string => {
-    return tabMirror.current[tab.id]?.markdown ?? tab.markdown;
+    return tabRuntime.current[tab.id]?.mirror?.markdown ?? tab.markdown;
   }, []);
 
   const updateTab = useCallback((id: string, patch: Partial<Tab>) => {
@@ -265,12 +279,12 @@ export function useWorkspace(initialTabs: Tab[] = []) {
         stats: computeStats(init.content),
       };
       if (init.place)
-        positions.current[id] = {
+        runtimeOf(id).position = {
           sourceMode: init.place.sourceMode,
           sessionPlace: init.place,
           pendingSessionPlace: init.place,
         };
-      contentVersions.current[id] = 0;
+      runtimeOf(id).contentVersion = 0;
       tabsRef.current = [...tabsRef.current, tab];
       setTabs([...tabsRef.current]);
       if (init.activate !== false) {
@@ -279,7 +293,7 @@ export function useWorkspace(initialTabs: Tab[] = []) {
       }
       return id;
     },
-    [selectTab],
+    [runtimeOf, selectTab],
   );
 
   const removeTab = useCallback((id: string) => {
@@ -287,24 +301,15 @@ export function useWorkspace(initialTabs: Tab[] = []) {
     // 否则保存后再次 close() 会因读到旧 dirty 标签而再次拦截,陷入死循环
     tabsRef.current = tabsRef.current.filter((t) => t.id !== id);
     saveGenerations.current[id] = (saveGenerations.current[id] ?? 0) + 1;
-    delete contentVersions.current[id];
-    imagePreparations.current[id]?.cancel();
-    delete imagePreparations.current[id];
+    tabRuntime.current[id]?.imagePreparation?.cancel();
     setTabs([...tabsRef.current]);
-    delete editorRegistry.current[id];
-    delete tabMirror.current[id];
-    delete diskSync.current[id];
     clearPendingImages(id);
-    delete positions.current[id];
-    delete sourceRegistry.current[id];
-    delete sourceRewrites.current[id];
-    delete modeGenerations.current[id];
-    const timer = saveTimers.current[id];
+    const timer = tabRuntime.current[id]?.saveTimer;
     if (timer) clearTimeout(timer);
-    delete saveTimers.current[id];
+    delete tabRuntime.current[id];
     if (currentView.current.activeId === id) {
       const next = tabsRef.current[tabsRef.current.length - 1];
-      const source = next ? (positions.current[next.id]?.sourceMode ?? false) : false;
+      const source = next ? (tabRuntime.current[next.id]?.position?.sourceMode ?? false) : false;
       currentView.current = { activeId: next?.id ?? null, sourceMode: source };
       setSourceModeState(source);
       setActiveId(next?.id ?? null);
@@ -321,23 +326,14 @@ export function useWorkspace(initialTabs: Tab[] = []) {
     setSearchOpen,
     positionVersion,
     activeTab,
-    editorRegistry,
-    tabMirror,
     tabsRef,
-    saveTimers,
-    saveQueues,
     saveGenerations,
-    contentVersions,
-    imagePreparations,
-    diskSync,
+    tabRuntime,
+    runtimeOf,
     diskOf,
     isAutoSavePaused,
     resumeAutoSave,
     currentView,
-    modeGenerations,
-    sourceRegistry,
-    sourceRewrites,
-    positions,
     syncEditor,
     rememberActive,
     captureTabPlace,

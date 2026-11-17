@@ -5,7 +5,7 @@ import type { Workspace } from './useWorkspace';
 
 /** Resolves the images the current text refers to before save, export or a recovery snapshot reads them. */
 export function useImagePreparation(workspace: Workspace) {
-  const { tabsRef, contentVersions, imagePreparations, resolveContent } = workspace;
+  const { tabsRef, tabRuntime, runtimeOf, resolveContent } = workspace;
   // Input coalesces staged reads; save/export flush the exact current source.
   const prepareCurrentImages = useCallback(
     (id: string, defer = false): Promise<boolean> => {
@@ -13,9 +13,9 @@ export function useImagePreparation(workspace: Workspace) {
       if (!tab) return Promise.resolve(false);
       const path = tab.path,
         revision = tab.diskRevision;
-      const version = contentVersions.current[id] ?? 0;
+      const version = tabRuntime.current[id]?.contentVersion ?? 0;
       const content = resolveContent(tab);
-      const pending = imagePreparations.current[id];
+      const pending = tabRuntime.current[id]?.imagePreparation;
       if (
         pending?.version === version &&
         pending.content === content &&
@@ -34,7 +34,7 @@ export function useImagePreparation(workspace: Workspace) {
             !!current &&
             current.path === path &&
             current.diskRevision === revision &&
-            (contentVersions.current[id] ?? 0) === version &&
+            (tabRuntime.current[id]?.contentVersion ?? 0) === version &&
             resolveContent(current) === content &&
             (prepared?.commit() ?? true)
           );
@@ -43,14 +43,14 @@ export function useImagePreparation(workspace: Workspace) {
         }
       });
       const promise = work.promise.finally(() => {
-        if (imagePreparations.current[id]?.promise === promise)
-          delete imagePreparations.current[id];
+        if (tabRuntime.current[id]?.imagePreparation?.promise === promise)
+          delete tabRuntime.current[id]?.imagePreparation;
       });
-      imagePreparations.current[id] = { ...work, version, content, path, revision, promise };
+      runtimeOf(id).imagePreparation = { ...work, version, content, path, revision, promise };
       if (!defer) void work.flush();
       return promise;
     },
-    [contentVersions, imagePreparations, resolveContent, tabsRef],
+    [tabRuntime, runtimeOf, resolveContent, tabsRef],
   );
   return prepareCurrentImages;
 }

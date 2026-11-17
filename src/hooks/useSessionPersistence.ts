@@ -40,7 +40,7 @@ export function useSessionPersistence(workspace: Workspace) {
     sourceMode,
     tabsRef,
     currentView,
-    editorRegistry,
+    tabRuntime,
     rememberActive,
     captureTabPlace,
   } = workspace;
@@ -127,12 +127,12 @@ export function useSessionPersistence(workspace: Workspace) {
   const sessionDocument = useCallback(
     (tab: Tab): SessionDocument | null => {
       if (!tab.path) return null;
-      const editor = editorRegistry.current[tab.id];
+      const editor = tabRuntime.current[tab.id]?.editor;
       if (editor) flushEditorUpdate(editor);
       const place = captureTabPlace(tab.id);
       return { path: tab.path, title: tab.title, ...(place ? { place } : {}) };
     },
-    [captureTabPlace, editorRegistry],
+    [captureTabPlace, tabRuntime],
   );
   const fingerprint = useCallback(
     () => JSON.stringify(tabsRef.current.map((tab) => [tab.id, tab.path])),

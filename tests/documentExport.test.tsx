@@ -53,8 +53,8 @@ function deferred() {
 function setup() {
   return renderHook(() => {
     const workspace = useWorkspace([initial()]);
-    if (workspace.tabsRef.current.length && !workspace.editorRegistry.current.tab)
-      workspace.editorRegistry.current.tab = {} as Editor;
+    if (workspace.tabsRef.current.length && !workspace.tabRuntime.current['tab']?.editor)
+      workspace.runtimeOf('tab').editor = {} as Editor;
     const recovery = { prepareCurrentImages: mocks.prepare } as unknown as RecoveryController;
     const exporting = useDocumentExport(workspace, recovery, 'misans', 'jetbrains-sarasa');
     return { workspace, exporting };
@@ -131,7 +131,7 @@ describe('export snapshots with leased native images', () => {
             diskRevision: 'B',
             dirty: true,
           });
-          hook.result.current.workspace.contentVersions.current.tab = 1;
+          hook.result.current.workspace.runtimeOf('tab').contentVersion = 1;
         }
       });
       await act(async () => {

@@ -136,7 +136,9 @@ describe('tab activation synchronization', () => {
         hook.result.current.view.handleSourceChange('a', 'Newest source.\n');
       });
       expect(hook.result.current.workspace.tabsRef.current[0].markdown).toBe('Newest source.\n');
-      expect(hook.result.current.workspace.tabMirror.current.a.markdown).toBe('Newest source.\n');
+      expect(hook.result.current.workspace.tabRuntime.current['a']?.mirror?.markdown).toBe(
+        'Newest source.\n',
+      );
       expect(hook.result.current.workspace.tabs[0].markdown).toBe('Original source.\n');
       expect(computeStats).not.toHaveBeenCalled();
       act(() => vi.advanceTimersByTime(TAB_RENDER_MS / 2));
@@ -198,7 +200,8 @@ describe('tab activation synchronization', () => {
       initialTab('a', '# First\n\nFirst document.\n'),
       initialTab('b', '# Second\n\nSecond document.\n'),
     ]);
-    hook.result.current.workspace.editorRegistry.current = { a: first.editor, b: second.editor };
+    hook.result.current.workspace.runtimeOf('a').editor = first.editor;
+    hook.result.current.workspace.runtimeOf('b').editor = second.editor;
     const firstDoc = first.view.state.doc;
     const secondDoc = second.view.state.doc;
     const firstHeading = first.host.querySelector('h1');
@@ -238,7 +241,7 @@ describe('tab activation synchronization', () => {
     const markdown = '# Original\n\nBody selected target text.\n';
     const first = await createFixture(markdown);
     const hook = setup([initialTab('a', markdown), initialTab('b', 'Other document.\n')]);
-    hook.result.current.workspace.editorRegistry.current.a = first.editor;
+    hook.result.current.workspace.runtimeOf('a').editor = first.editor;
     act(() => {
       first.view.dispatch(first.view.state.tr.insertText(' changed', 9));
       let selected = 0;
@@ -253,7 +256,8 @@ describe('tab activation synchronization', () => {
       );
       hook.result.current.view.handleTabUpdate('a', getCurrentState(first.editor));
     });
-    const departedMarkdown = hook.result.current.workspace.tabMirror.current.a.markdown;
+    const departedMarkdown =
+      hook.result.current.workspace.tabRuntime.current['a']?.mirror?.markdown;
     const remark = first.editor.action((ctx) => ctx.get(remarkCtx));
     const parse = vi.spyOn(remark, 'parse');
     act(() => hook.result.current.workspace.selectTab('b'));
@@ -277,7 +281,9 @@ describe('tab activation synchronization', () => {
     });
     expect(hook.result.current.workspace.captureTabPlace('a')).toBe(place);
     expect(parse).toHaveBeenCalledTimes(1);
-    expect(hook.result.current.workspace.positions.current.a.sessionCapture).toBeUndefined();
+    expect(
+      hook.result.current.workspace.tabRuntime.current['a']?.position?.sessionCapture,
+    ).toBeUndefined();
   });
 
   it('reuses positioned blocks until the Markdown or rich document changes', async () => {
@@ -302,9 +308,9 @@ describe('tab activation synchronization', () => {
     const input = document.createElement('textarea');
     input.value = markdown;
     document.body.append(input);
-    hook.result.current.workspace.editorRegistry.current.a = fixture.editor;
-    hook.result.current.workspace.sourceRegistry.current.a = input;
-    hook.result.current.workspace.positions.current.a = {
+    hook.result.current.workspace.runtimeOf('a').editor = fixture.editor;
+    hook.result.current.workspace.runtimeOf('a').sourceInput = input;
+    hook.result.current.workspace.runtimeOf('a').position = {
       exchange: { markdown, source: sourcePlace(input), rendered: renderedPlace(fixture.editor) },
     };
     const doc = fixture.view.state.doc;
@@ -325,10 +331,11 @@ describe('tab activation synchronization', () => {
       initialTab('a', 'Original rich text.\n'),
       initialTab('b', 'Other document.\n'),
     ]);
-    hook.result.current.workspace.editorRegistry.current = { a: first.editor, b: second.editor };
+    hook.result.current.workspace.runtimeOf('a').editor = first.editor;
+    hook.result.current.workspace.runtimeOf('b').editor = second.editor;
     const input = document.createElement('textarea');
     document.body.append(input);
-    hook.result.current.workspace.sourceRegistry.current.a = input;
+    hook.result.current.workspace.runtimeOf('a').sourceInput = input;
     act(() => hook.result.current.workspace.setSourceMode(true));
     input.value = '# Updated source\n\nLatest source edit.\n';
     act(() => hook.result.current.view.handleSourceChange('a', input.value));
@@ -354,7 +361,8 @@ describe('tab activation synchronization', () => {
     const first = await createFixture(markdown);
     const second = await createFixture('Other document.\n');
     const hook = setup([initialTab('a', markdown), initialTab('b', 'Other document.\n')]);
-    hook.result.current.workspace.editorRegistry.current = { a: first.editor, b: second.editor };
+    hook.result.current.workspace.runtimeOf('a').editor = first.editor;
+    hook.result.current.workspace.runtimeOf('b').editor = second.editor;
     act(() => {
       first.view.dispatch(first.view.state.tr.insertText(' changed', 9));
       hook.result.current.view.handleTabUpdate('a', getCurrentState(first.editor));
@@ -371,17 +379,17 @@ describe('tab activation synchronization', () => {
     expect(undoDepth(first.view.state)).toBe(depth);
     expect(first.parse).not.toHaveBeenCalled();
     expect(first.serialize).not.toHaveBeenCalled();
-    expect(hook.result.current.workspace.tabMirror.current.a.outline[0].text).toBe(
+    expect(hook.result.current.workspace.tabRuntime.current['a']?.mirror?.outline[0].text).toBe(
       'Original changed',
     );
-    expect(hook.result.current.workspace.tabMirror.current.a.canUndo).toBe(true);
+    expect(hook.result.current.workspace.tabRuntime.current['a']?.mirror?.canUndo).toBe(true);
     expect(hook.result.current.workspace.tabsRef.current[0].dirty).toBe(true);
     act(() => {
       undo(first.editor);
       hook.result.current.view.handleTabUpdate('a', getCurrentState(first.editor));
     });
-    expect(hook.result.current.workspace.tabMirror.current.a.markdown).toBe(markdown);
-    expect(hook.result.current.workspace.tabMirror.current.a.canRedo).toBe(true);
+    expect(hook.result.current.workspace.tabRuntime.current['a']?.mirror?.markdown).toBe(markdown);
+    expect(hook.result.current.workspace.tabRuntime.current['a']?.mirror?.canRedo).toBe(true);
   });
 
   it('keeps per-edit generations and recomputes dirty state for coalesced snapshots', () => {
@@ -393,7 +401,7 @@ describe('tab activation synchronization', () => {
       hook.result.current.view.handleEditorActivity('a', activity);
       hook.result.current.view.handleEditorActivity('a', activity);
     });
-    expect(hook.result.current.workspace.contentVersions.current.a).toBe(2);
+    expect(hook.result.current.workspace.tabRuntime.current['a']?.contentVersion).toBe(2);
     expect(hook.result.current.workspace.tabsRef.current[0].dirty).toBe(true);
     expect(hook.result.current.workspace.tabsRef.current[0].markdown).toBe(original);
     expect(hook.recovery.saveRecoverySnapshot).not.toHaveBeenCalled();
@@ -405,7 +413,7 @@ describe('tab activation synchronization', () => {
       ...activity,
     });
     act(() => hook.result.current.view.handleTabUpdate('a', update('# Changed\n'), false, true));
-    expect(hook.result.current.workspace.contentVersions.current.a).toBe(2);
+    expect(hook.result.current.workspace.tabRuntime.current['a']?.contentVersion).toBe(2);
     expect(hook.result.current.workspace.tabsRef.current[0].markdown).toBe('# Changed\n');
     expect(hook.recovery.saveRecoverySnapshot).toHaveBeenCalledWith(
       expect.objectContaining({ markdown: '# Changed\n' }),
@@ -415,7 +423,7 @@ describe('tab activation synchronization', () => {
       hook.result.current.view.handleEditorActivity('a', activity);
       hook.result.current.view.handleTabUpdate('a', update(original), false, true);
     });
-    expect(hook.result.current.workspace.contentVersions.current.a).toBe(3);
+    expect(hook.result.current.workspace.tabRuntime.current['a']?.contentVersion).toBe(3);
     expect(hook.result.current.workspace.tabsRef.current[0].dirty).toBe(false);
   });
 
@@ -424,7 +432,7 @@ describe('tab activation synchronization', () => {
     let identity = 'mdplus-image:first';
     const fixture = await createFixture(markdown, () => identity);
     const hook = setup([initialTab('a', markdown)]);
-    hook.result.current.workspace.editorRegistry.current.a = fixture.editor;
+    hook.result.current.workspace.runtimeOf('a').editor = fixture.editor;
     act(() => hook.result.current.workspace.syncEditor('a', markdown, false));
     const previousDoc = fixture.view.state.doc;
     fixture.parse.mockClear();
@@ -449,7 +457,7 @@ describe('tab activation synchronization', () => {
     act(() => hook.result.current.view.handleSourceChange('a', latest));
     for (let attempt = 0; attempt < 2; attempt++) {
       const fixture = await createFixture(current.initialContent);
-      hook.result.current.workspace.editorRegistry.current.a = fixture.editor;
+      hook.result.current.workspace.runtimeOf('a').editor = fixture.editor;
       const initial = getCurrentState(fixture.editor);
       fixture.parse.mockClear();
       act(() => hook.result.current.view.handleTabUpdate('a', initial, true));
@@ -469,11 +477,11 @@ describe('tab activation synchronization', () => {
     const current = { ...initialTab('a', original), path: 'C:/notes/note.md', isNew: false };
     const hook = setup([current, initialTab('b', 'Other document.\n')]);
     act(() => {
-      hook.result.current.workspace.contentVersions.current.a = 0;
+      hook.result.current.workspace.runtimeOf('a').contentVersion = 0;
       // Save As updates the authoritative draft even when sync cannot reach an
       // editor yet. EditorTab still initializes from the original source.
       hook.result.current.workspace.syncEditor('a', migrated, false);
-      hook.result.current.workspace.tabMirror.current.a = {
+      hook.result.current.workspace.runtimeOf('a').mirror = {
         markdown: migrated,
         outline: [],
         stats: computeStats(migrated),
@@ -488,7 +496,7 @@ describe('tab activation synchronization', () => {
         dirty: false,
       });
     });
-    expect(hook.result.current.workspace.editorRegistry.current.a).toBeUndefined();
+    expect(hook.result.current.workspace.tabRuntime.current['a']?.editor).toBeUndefined();
     const fixture = await createFixture(current.initialContent);
     const staleDoc = fixture.view.state.doc;
     const initial = getCurrentState(fixture.editor);
@@ -511,8 +519,8 @@ describe('tab activation synchronization', () => {
     expect(fixture.view.state.doc).not.toBe(staleDoc);
     expect(fixture.parse).toHaveBeenCalledExactlyOnceWith(migrated);
     expect(undoDepth(fixture.view.state)).toBe(0);
-    expect(hook.result.current.workspace.contentVersions.current.a).toBe(0);
-    expect(hook.result.current.workspace.tabMirror.current.a.markdown).toBe(migrated);
+    expect(hook.result.current.workspace.tabRuntime.current['a']?.contentVersion).toBe(0);
+    expect(hook.result.current.workspace.tabRuntime.current['a']?.mirror?.markdown).toBe(migrated);
     expect(hook.result.current.workspace.tabsRef.current[0]).toMatchObject({
       path: 'C:/copies/note.md',
       markdown: migrated,
@@ -545,8 +553,8 @@ describe('tab activation synchronization', () => {
 
       expect(fixture.parse).not.toHaveBeenCalled();
       expect(fixture.serialize).not.toHaveBeenCalled();
-      expect(hook.result.current.workspace.contentVersions.current.a).toBe(0);
-      expect(hook.result.current.workspace.tabMirror.current.a.markdown).toBe(raw);
+      expect(hook.result.current.workspace.tabRuntime.current['a']?.contentVersion).toBe(0);
+      expect(hook.result.current.workspace.tabRuntime.current['a']?.mirror?.markdown).toBe(raw);
       expect(hook.result.current.workspace.tabsRef.current[0]).toMatchObject({
         markdown: raw,
         initialContent: raw,

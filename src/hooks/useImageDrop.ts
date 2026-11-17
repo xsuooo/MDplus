@@ -63,25 +63,29 @@ export function useImageDrop(
         return 'no-document';
       const point = physicalPosition ? physicalToClientPosition(physicalPosition) : null;
       if (physicalPosition && !point) return 'outside-editor';
-      const modeGeneration = workspace.modeGenerations.current[tabId] ?? 0;
+      const modeGeneration = workspace.tabRuntime.current[tabId]?.modeGeneration ?? 0;
 
       const sameMode = () => {
         const current = workspace.currentView.current;
         return (
           (current.activeId === tabId
             ? current.sourceMode
-            : (workspace.positions.current[tabId]?.sourceMode ?? sourceMode)) === sourceMode
+            : (workspace.tabRuntime.current[tabId]?.position?.sourceMode ?? sourceMode)) ===
+          sourceMode
         );
       };
       const foreground = () => workspace.currentView.current.activeId === tabId && sameMode();
       const lifetimeReason = (): ImageDropReason | undefined => {
         if (!workspace.tabsRef.current.some((tab) => tab.id === tabId)) return 'target-closed';
-        if (!sameMode() || (workspace.modeGenerations.current[tabId] ?? 0) !== modeGeneration)
+        if (
+          !sameMode() ||
+          (workspace.tabRuntime.current[tabId]?.modeGeneration ?? 0) !== modeGeneration
+        )
           return 'target-changed';
       };
       let target: CapturedImageDrop;
       if (sourceMode) {
-        const input = workspace.sourceRegistry.current[tabId];
+        const input = workspace.tabRuntime.current[tabId]?.sourceInput;
         const api = getSourceApi(tabId);
         if (!input || !api) return 'editor-unavailable';
         const offset = point ? sourceOffsetAtPoint(input, point) : api.read().end;
@@ -91,7 +95,7 @@ export function useImageDrop(
           tabId,
           invalidReason: () =>
             lifetimeReason() ??
-            (workspace.sourceRegistry.current[tabId] !== input ||
+            (workspace.tabRuntime.current[tabId]?.sourceInput !== input ||
             getSourceApi(tabId) !== api ||
             !input.isConnected
               ? 'editor-unavailable'
@@ -108,7 +112,7 @@ export function useImageDrop(
           },
         };
       } else {
-        const editor = workspace.editorRegistry.current[tabId];
+        const editor = workspace.tabRuntime.current[tabId]?.editor;
         if (!editor) return 'editor-unavailable';
         try {
           const view = editor.action((ctx) => ctx.get(editorViewCtx));
@@ -128,7 +132,7 @@ export function useImageDrop(
             tabId,
             invalidReason: () =>
               lifetimeReason() ??
-              (workspace.editorRegistry.current[tabId] !== editor || position.read() === null
+              (workspace.tabRuntime.current[tabId]?.editor !== editor || position.read() === null
                 ? 'editor-unavailable'
                 : undefined),
             release: position.release,

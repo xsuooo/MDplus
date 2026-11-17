@@ -21,13 +21,10 @@ export function useExternalChanges(
     setTabs,
     activeId,
     activeTab,
-    tabMirror,
+    tabRuntime,
+    runtimeOf,
     tabsRef,
-    saveTimers,
-    saveQueues,
     saveGenerations,
-    contentVersions,
-    diskSync,
     diskOf,
     resumeAutoSave,
     currentView,
@@ -40,7 +37,7 @@ export function useExternalChanges(
   /* ---------- 外部文件变化检测 ---------- */
   const reportUnreadable = useCallback(
     async (tab: Tab) => {
-      if (diskSync.current[tab.id]?.pausedMtime === null) return;
+      if (tabRuntime.current[tab.id]?.disk?.pausedMtime === null) return;
       pauseAutoSave(tab.id, null);
       if (tab.id === activeId) {
         await showMessage(
@@ -51,18 +48,18 @@ export function useExternalChanges(
         updateTab(tab.id, { externalChanged: true });
       }
     },
-    [activeId, diskSync, pauseAutoSave, updateTab],
+    [activeId, tabRuntime, pauseAutoSave, updateTab],
   );
 
   const promptExternalReload = useCallback(
     async (tabId: string, detectedMtime: number, detectedRevision: string | null) => {
-      if (diskSync.current[tabId]?.prompting) return;
+      if (tabRuntime.current[tabId]?.disk?.prompting) return;
       diskOf(tabId).prompting = true;
       let images: PreparedImageReferences | undefined;
       try {
         const tab = tabsRef.current.find((candidate) => candidate.id === tabId);
-        if (!tab?.path || tab.dirty || tabId in saveQueues.current) return;
-        const version = contentVersions.current[tabId] ?? 0;
+        if (!tab?.path || tab.dirty || tabRuntime.current[tabId]?.saveQueue !== undefined) return;
+        const version = tabRuntime.current[tabId]?.contentVersion ?? 0;
         const saveGeneration = saveGenerations.current[tabId] ?? 0;
         const isCurrentDocument = () => {
           const latest = tabsRef.current.find((candidate) => candidate.id === tabId);
@@ -74,9 +71,9 @@ export function useExternalChanges(
         };
         const canApply = () =>
           isCurrentDocument() &&
-          (contentVersions.current[tabId] ?? 0) === version &&
+          (tabRuntime.current[tabId]?.contentVersion ?? 0) === version &&
           !tabsRef.current.find((candidate) => candidate.id === tabId)?.dirty &&
-          !(tabId in saveQueues.current);
+          !(tabRuntime.current[tabId]?.saveQueue !== undefined);
         const cancelReload = async () => {
           if (!isCurrentDocument()) return;
           // 不推进已知 mtime:下次检测仍需确认,自动保存也必须保留冲突保护。
@@ -135,15 +132,15 @@ export function useExternalChanges(
             await cancelReload();
             return;
           }
-          const previous = tabMirror.current[tabId];
+          const previous = tabRuntime.current[tabId]?.mirror;
           const nextStats = computeStats(content);
-          const timer = saveTimers.current[tabId];
+          const timer = tabRuntime.current[tabId]?.saveTimer;
           if (timer) clearTimeout(timer);
-          delete saveTimers.current[tabId];
-          contentVersions.current[tabId] = version + 1;
+          delete tabRuntime.current[tabId]?.saveTimer;
+          runtimeOf(tabId).contentVersion = version + 1;
           resumeAutoSave(tabId);
           // 先提交新基线,避免同步编辑器回调把重载当作未保存输入。
-          tabMirror.current[tabId] = {
+          runtimeOf(tabId).mirror = {
             markdown: content,
             outline: previous?.outline ?? [],
             stats: nextStats,
@@ -178,7 +175,10 @@ export function useExternalChanges(
         if (tab) await reportUnreadable(tab);
         console.warn('检测外部文件变化失败', error);
       } finally {
-        if (diskSync.current[tabId]) diskSync.current[tabId].prompting = false;
+        {
+          const sync = tabRuntime.current[tabId]?.disk;
+          if (sync) sync.prompting = false;
+        }
         try {
           await images?.dispose();
         } catch (error) {
@@ -188,14 +188,11 @@ export function useExternalChanges(
     },
     [
       tabsRef,
-      saveQueues,
-      contentVersions,
+      tabRuntime,
+      runtimeOf,
       saveGenerations,
       pauseAutoSave,
       reportUnreadable,
-      tabMirror,
-      saveTimers,
-      diskSync,
       diskOf,
       resumeAutoSave,
       updateTab,
@@ -213,10 +210,11 @@ export function useExternalChanges(
     void promptExternalReload(
       activeTab.id,
       activeTab.diskMtime,
-      diskSync.current[activeTab.id]?.detected?.revision ?? activeTab.diskRevision,
+      tabRuntime.current[activeTab.id]?.disk?.detected?.revision ?? activeTab.diskRevision,
     );
   }, [
-    diskSync,
+    tabRuntime,
+    runtimeOf,
     activeTab?.dirty,
     activeTab?.diskRevision,
     activeTab?.externalChanged,
@@ -231,9 +229,9 @@ export function useExternalChanges(
       if (
         !path ||
         candidate.dirty ||
-        candidate.id in saveQueues.current ||
-        diskSync.current[candidate.id]?.checking ||
-        diskSync.current[candidate.id]?.prompting
+        tabRuntime.current[candidate.id]?.saveQueue !== undefined ||
+        tabRuntime.current[candidate.id]?.disk?.checking ||
+        tabRuntime.current[candidate.id]?.disk?.prompting
       )
         return;
       externalLastChecks.current[candidate.id] = Date.now();
@@ -248,13 +246,13 @@ export function useExternalChanges(
             latest.path !== candidate.path ||
             latest.dirty ||
             latest.diskRevision !== candidate.diskRevision ||
-            latest.id in saveQueues.current
+            tabRuntime.current[latest.id]?.saveQueue !== undefined
           )
             return;
           if (disk.revision === null) throw new Error('文件已不在原位置');
           const mtime = disk.mtime ?? 0;
           if (disk.revision === latest.diskRevision && mtime === latest.diskMtime) return;
-          const offered = diskSync.current[latest.id]?.detected;
+          const offered = tabRuntime.current[latest.id]?.disk?.detected;
           if (offered?.revision === disk.revision && offered.mtime === mtime) return;
           diskOf(latest.id).detected = { revision: disk.revision, mtime };
           updateTab(latest.id, { preserveLocal: true });
@@ -268,20 +266,14 @@ export function useExternalChanges(
           if (latest && latest.path === candidate.path) await reportUnreadable(latest);
           console.warn('检测外部文件变化失败', error);
         } finally {
-          if (diskSync.current[candidate.id]) diskSync.current[candidate.id].checking = false;
+          {
+            const sync = tabRuntime.current[candidate.id]?.disk;
+            if (sync) sync.checking = false;
+          }
         }
       })();
     },
-    [
-      activeId,
-      diskOf,
-      diskSync,
-      reportUnreadable,
-      promptExternalReload,
-      saveQueues,
-      tabsRef,
-      updateTab,
-    ],
+    [activeId, diskOf, tabRuntime, reportUnreadable, promptExternalReload, tabsRef, updateTab],
   );
 
   useEffect(() => {
