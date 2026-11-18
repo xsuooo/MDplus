@@ -4,26 +4,33 @@
 
 `App.tsx` 保留页面组合、菜单和快捷键连接。文稿操作由以下模块拥有，避免把同一异步流程分散在多个组件的 effect 中。
 
-| 模块                                                            | 职责                                                                   |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `useWorkspace`                                                  | 标签身份、当前视图、编辑器注册、内容镜像、内容／保存代次及共享队列     |
-| `useDocumentSave`                                               | 自动／手动保存与另存为队列、图片迁移、条件写入与提交基线               |
-| `useDocumentClose`                                              | 标签／窗口关闭协调、独立取消代次、忙碌状态及异步后的重检查             |
-| `useWindowLifecycle` + `services/windowPersistence`             | 物理像素恢复、窗口监听及几何状态保存                                   |
-| `usePreferences` + `services/settingsStore`                     | 设置初始化、用户选择优先、失败重试及固定原生资源访问                   |
-| `useRecovery`                                                   | 延迟图片准备、恢复副本、恢复状态与恢复列表                             |
-| `useDocumentFiles`                                              | 打开、新建、原生启动／单实例／拖放输入及最近列表                       |
-| `useSessionPersistence` + `documentSession` + `sessionPosition` | 会话设置、保存文稿清单、短文本位置锚点、失败条目及退出前完整会话捕获   |
-| `useImageDrop` + `imageDrop`                                    | 捕获鼠标落点或选择器前的选区末尾、异步位置映射、整批导入与模式代次取消 |
-| `documentLinks` + 编辑器链接事件                                | 以来源文稿解析相对 Markdown 路径，按编辑器焦点路由 Ctrl 操作           |
-| `replace` + `sourceEditorApi`                                   | 冻结匹配集、富文本格式保留、源码实时批量编辑及独立撤销边界             |
-| `useExternalChanges`                                            | 字节版本轮询、外改提示、重载并发校验                                   |
-| `useEditorView` + `editorPosition` + `sourceOutline.worker`     | 输入、源码切换、可取消的源码目录解析、选区／滚动位置、字体和缩放       |
-| `useDocumentExport`                                             | 冻结导出快照、图片准备与 HTML/PDF 导出状态                             |
+| 模块                                                                     | 职责                                                                                                                               |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `useWorkspace`                                                           | 标签身份、当前视图、每标签运行时记录 `TabRuntime`（编辑器实例、内容镜像、内容版本、保存队列、磁盘同步、位置）及标签代次 `tabEpoch` |
+| `useDocumentSave`                                                        | 自动／手动保存与另存为队列、图片迁移、条件写入与提交基线                                                                           |
+| `useDocumentClose`                                                       | 标签／窗口关闭协调、独立取消代次、忙碌状态及异步后的重检查                                                                         |
+| `useWindowLifecycle` + `services/windowPersistence`                      | 物理像素恢复、窗口监听及几何状态保存                                                                                               |
+| `usePreferences` + `services/settingsStore`                              | 设置初始化、用户选择优先、失败重试及固定原生资源访问                                                                               |
+| `useRecovery`                                                            | 恢复副本、恢复状态与恢复列表                                                                                                       |
+| `useImagePreparation`                                                    | 延迟图片准备，保存、导出和恢复副本读取图片前共用；经 `useRecovery` 的返回值提供                                                    |
+| `useDocumentFiles`                                                       | 打开、新建、启动文件与会话恢复编排                                                                                                 |
+| `useRecentFiles`                                                         | 最近列表的加载、刷新与移除                                                                                                         |
+| `useNativeOpenRequests`                                                  | 单实例传入的文件与窗口拖放；文稿交给打开流程，图片转给 `useImageDrop`                                                              |
+| `useSessionPersistence` + `documentSession` + `position/sessionPosition` | 会话设置、保存文稿清单、短文本位置锚点、失败条目及退出前完整会话捕获                                                               |
+| `useImageDrop` + `imageDrop`                                             | 捕获鼠标落点或选择器前的选区末尾、异步位置映射、整批导入与模式代次取消                                                             |
+| `imageOps`（入口）+ `images/`                                            | 待存图片：`cache` 身份与回收，`stash` 字节暂存与路径辅助，`lease` 固定与恢复，`migration` 保存迁移，`references` 打开／粘贴／拖入  |
+| `documentLinks` + 编辑器链接事件                                         | 以来源文稿解析相对 Markdown 路径，按编辑器焦点路由 Ctrl 操作                                                                       |
+| `replace` + `sourceEditorApi`                                            | 冻结匹配集、富文本格式保留、源码实时批量编辑及独立撤销边界                                                                         |
+| `useExternalChanges`                                                     | 字节版本轮询、外改提示、重载并发校验                                                                                               |
+| `useEditorView` + `position/editorPosition`                              | 输入、源码切换、选区／滚动位置                                                                                                     |
+| `useTypography`                                                          | 正文／代码字体与版心宽度；变更前捕获阅读位置，字体加载后恢复                                                                       |
+| `useSourceOutline` + `sourceOutline.worker`                              | 目录数据：富文本取自内容镜像，源码模式在 worker 中可取消地解析；目录跳转                                                           |
+| `EditorZoom` + `editorZoom`                                              | 编辑区缩放：控件绑定、按键与本地保存                                                                                               |
+| `useDocumentExport`                                                      | 冻结导出快照、图片准备与 HTML/PDF 导出状态                                                                                         |
 
-同步内容镜像和代次用于跨异步步骤核对最新状态；React 状态用于显示。保存与关闭的代次独立，取消关闭不能使已发出的保存失效。新增异步步骤时，应先补延迟、失败、取消或并发编辑的回归，再调整该流程。
+同步内容镜像和代次用于跨异步步骤核对最新状态；React 状态用于显示。保存与关闭的代次独立，取消关闭不能使已发出的保存失效。新增异步步骤时，应先补延迟、失败、取消或并发编辑的回归，再调整该流程。状态存放位置、七条规则和代次计数器见[标签状态模型](state-model.md)。
 
-保存单测通过公开的会话 hook 注入初始标签，不再依赖 App 的 `useState` 声明索引。设置和关闭协调器另有真实 React hook 测试；浏览器回归继续使用真实 React/Milkdown，仅模拟原生 IPC。
+保存单测通过公开的 `useWorkspace` 注入初始标签，不再依赖 App 的 `useState` 声明索引。设置和关闭协调器另有真实 React hook 测试；浏览器回归继续使用真实 React/Milkdown，仅模拟原生 IPC。
 
 查找替换、会话恢复和图片插入的浏览器用例分别位于 `tests/browser/replace.ts`、`session.ts` 和 `imageDrop.ts`；源码目录、文稿链接、提示和对比度位于 `polish.tsx`。各组注册在统一 runner 与 Windows 用例目录中，`-Cases all` 全部包含。源码的程序化替换与图片插入通过同一 `SourceEditorApi` 读取实时草稿，按操作前坐标提交整批编辑。会话记录只保存路径、标题和短文本锚点，不保存正文，也不复用草稿恢复 ID。
 
