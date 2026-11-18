@@ -77,6 +77,18 @@ ESLint 对应用与测试启用 Hooks 调用规则和完整依赖规则。测试
 
 只有该次实际执行显示三项通过，才能记录真实链接覆盖。若仍报 1314，应报告环境不满足、断言未执行；不要删断言、用普通文件替代符号链接或将环境失败转换成通过。Windows PowerShell 5.1 若因执行策略拒绝已检查的脚本，可在单独子进程使用 `-ExecutionPolicy Bypass -File`，不更改持久执行策略。
 
+## 已知环境问题：本机 cargo test 的临时目录
+
+在部分本机环境里，默认临时目录（`%LOCALAPPDATA%\Temp`）下由测试创建的 `.tmpXXXX` 目录会被拒绝访问（os error 5），`export_validation_tests`、`image_asset_tests`、`image_import`、`image_stash` 的用例因此失败。这是环境问题，不是断言失败。只为该次命令改用项目内临时目录，不要修改项目默认配置：
+
+```bash
+mkdir -p src-tauri/target/tmp
+T=$(cygpath -w "$(pwd)/src-tauri/target/tmp")
+(cd src-tauri && TMP="$T" TEMP="$T" cargo test --locked)
+```
+
+2026-11-18 以此方式执行：**111 passed / 0 failed / 4 ignored**。四个忽略项是三个 `review_p2_` 真实符号链接测试（见上节）和 `safe_files::perf_native::perf_native`（固定性能基线，需 `--release --ignored --nocapture --test-threads=1` 单独运行）。CI 不受影响。
+
 ## 覆盖率基线与门槛
 
 门槛来源为 [config/coverage.json](../config/coverage.json)，不使用全局忽略或空报告回退。前端覆盖 `src/**/*.{ts,tsx}`，排除启动挂载文件和类型声明。Rust 覆盖当前 Windows 生产代码，排除构建脚本与独立的 `*_tests.rs`；稳定 Rust 尚未报告分支覆盖，因此 Rust 门槛只检查行和函数。
