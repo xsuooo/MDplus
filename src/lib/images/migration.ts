@@ -29,8 +29,8 @@ export interface ImageMigration {
     source: { url: string; absolutePath: string };
   }[];
 }
-export const migrationLeases = new WeakMap<ImageMigration, PendingImageLease>();
-export function releaseMigration(migration: ImageMigration): void {
+const migrationLeases = new WeakMap<ImageMigration, PendingImageLease>();
+function releaseMigration(migration: ImageMigration): void {
   migrationLeases.get(migration)?.release();
   migrationLeases.delete(migration);
 }

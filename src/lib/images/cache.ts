@@ -18,13 +18,13 @@ export interface PendingImageFile {
   relativePath: string;
   digest: string;
 }
-export interface BackingBase {
+interface BackingBase {
   mime: string;
   byteLength: number;
   digest: string;
   owners: number;
 }
-export interface StashBacking extends BackingBase {
+interface StashBacking extends BackingBase {
   key: string;
   /** A process-owned, read-only native URL, not a retained JS binary/data URL. */
   previewUrl: string;
@@ -50,9 +50,9 @@ export interface ImageCache {
   docPath: string | null;
 }
 export const imageCaches = new Map<string, ImageCache>();
-export const imageListeners = new Map<string, Set<() => void>>();
-export const imageRoots = new Map<string, Set<() => Iterable<string>>>();
-export const collectionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const imageListeners = new Map<string, Set<() => void>>();
+const imageRoots = new Map<string, Set<() => Iterable<string>>>();
+const collectionTimers = new Map<string, ReturnType<typeof setTimeout>>();
 // Serialize complete read/encode/write operations, not just individual invokes:
 // otherwise many tabs can keep a 64 MiB base64 result alive while queued to write.
 export const imageIO = serialQueue();
