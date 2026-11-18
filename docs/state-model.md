@@ -45,7 +45,7 @@
 | `tabRuntime[id].modeGeneration`           | `setSourceMode`                                                                                    | 使跨模式切换的图片拖放失效                             |
 | `closeGeneration`                         | `useDocumentClose` 每次发起或取消关闭                                                              | 使上一轮关闭确认失效                                   |
 | `tabRuntime[id].imagePreparation.version` | 记录发起准备时的 `contentVersion` 值                                                               | 判断准备结果是否仍对应当前内容                         |
-| `ImageCache.generation`                   | `lib/imageOps` 缓存内容变化时                                                                      | 图片缓存版本                                           |
+| `ImageCache.generation`                   | `lib/images/cache` 缓存内容变化时                                                                  | 图片缓存版本                                           |
 | `Journal.generation`                      | `lib/recovery` 每次安排或清除恢复副本                                                              | 使排队中的恢复写入失效                                 |
 
 ## 磁盘同步状态
