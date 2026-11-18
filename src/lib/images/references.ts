@@ -1,7 +1,6 @@
 /** Turning image URLs in a document into cached images: on open, paste and drop. */
 import { invoke } from '@tauri-apps/api/core';
 import { LIMITS } from '../../config/constants';
-import { pathKey } from '../paths';
 import { getImageUrls, isRelativeImageUrl, rewriteImageReferences } from '../imagePaths';
 import { basename, readImageFile } from '../fileOps';
 import {
@@ -17,27 +16,14 @@ import {
   imageIdentityReferences,
   dropFileImages,
 } from './cache';
-import { IMAGE_EXTENSIONS, imageId, encodeImage, stashImage } from './stash';
-
-export function isSamePath(a: string, b: string): boolean {
-  return pathKey(a) === pathKey(b);
-}
-
-/** Decode Markdown URLs once; native validation still owns filesystem boundaries. */
-export function relativeImageFilePath(url: string): string {
-  let path = url;
-  try {
-    path = decodeURIComponent(url);
-  } catch {
-    // Existing documents can use a literal, malformed percent escape in a filename.
-  }
-  return path.replace(/^\.\//, '');
-}
-
-/** Native receipts contain filesystem paths, whose percent/hash characters are literal. */
-export function imageFilePathUrl(path: string): string {
-  return path.replace(/[%#?]/g, (character) => encodeURIComponent(character));
-}
+import {
+  IMAGE_EXTENSIONS,
+  imageId,
+  encodeImage,
+  stashImage,
+  isSamePath,
+  relativeImageFilePath,
+} from './stash';
 
 export interface PreparedImageReferences {
   markdown: string;
