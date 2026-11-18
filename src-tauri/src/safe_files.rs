@@ -352,7 +352,7 @@ struct SaveCopies {
     previous: PathBuf,
 }
 impl SaveCopies {
-    pub(crate) fn new(target: &Path, bytes: &[u8]) -> Result<Self, Box<FileError>> {
+    fn new(target: &Path, bytes: &[u8]) -> Result<Self, Box<FileError>> {
         let directory = Builder::new()
             .prefix(".mdplus-save-")
             .tempdir_in(target.parent().unwrap())
