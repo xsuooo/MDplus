@@ -22,7 +22,7 @@
 
 文件接口契约位于 [file_contract.json](../../src-tauri/src/file_contract.json)，对应前端类型在 [fileOps.ts](../../src/lib/fileOps.ts)。`read_document`、`document_revision`、`write_document` 的响应新增必填 `path`，包括尚不存在的另存为目标。原生测试和浏览器 mock 已同步该字段。
 
-相对路径必须先由原生接口解析为绝对目标；[pathIdentity.ts](../../src/lib/pathIdentity.ts) 不猜测进程工作目录。已有标签和进行中的打开请求按该身份去重。另存为选择当前文档的等价路径时转入普通保存；迁移图片后再次检查目标版本和其他已打开标签。
+相对路径必须先由原生接口解析为绝对目标；[pathIdentity.ts](../../src/lib/paths.ts) 不猜测进程工作目录。已有标签和进行中的打开请求按该身份去重。另存为选择当前文档的等价路径时转入普通保存；迁移图片后再次检查目标版本和其他已打开标签。
 
 主题、大纲和快捷键的启动读取只更新视图。用户操作通过对应更改函数写回设置；较晚完成的启动读取会忽略已经被用户更改的偏好。
 
