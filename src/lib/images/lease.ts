@@ -96,7 +96,7 @@ export function capturePendingImages(tabId: string, urls?: Iterable<string>): Pe
 export interface StagedPendingImages {
   dispose: () => Promise<void>;
 }
-export const restoredStages = new WeakMap<
+const restoredStages = new WeakMap<
   StagedPendingImages,
   { images: CachedImage[]; consumed: boolean }
 >();

@@ -49,7 +49,7 @@ export function imageByteLength(dataBase64: string): number {
   if (length <= 0 || length > LIMITS.imageFileBytes) throw new Error('图片为空或超过 64 MiB 限制');
   return length;
 }
-export function decodeImage(dataBase64: string): Uint8Array<ArrayBuffer> {
+function decodeImage(dataBase64: string): Uint8Array<ArrayBuffer> {
   const bytes = new Uint8Array(imageByteLength(dataBase64));
   // Avoid a second, image-sized binary JS string from atob.
   let offset = 0;
@@ -67,11 +67,11 @@ export function encodeImage(bytes: Uint8Array): string {
     chunks.push(btoa(String.fromCharCode(...bytes.subarray(offset, offset + 0x6000))));
   return chunks.join('');
 }
-export async function digestImage(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+async function digestImage(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
   return [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
-export function isStashFull(error: unknown): boolean {
+function isStashFull(error: unknown): boolean {
   return (
     typeof error === 'object' &&
     error !== null &&
