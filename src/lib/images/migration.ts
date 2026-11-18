@@ -13,7 +13,7 @@ import {
   dropFileImages,
 } from './cache';
 import { type PendingImageLease, capturePendingImages } from './lease';
-import { isSamePath, relativeImageFilePath, imageFilePathUrl } from './references';
+import { isSamePath, relativeImageFilePath, imageFilePathUrl } from './stash';
 
 export interface ImageMigration {
   tabId: string;
