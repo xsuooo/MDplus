@@ -42,7 +42,7 @@ MDPlus 支持双击 `.md` 或 `.markdown` 文件直接在应用中打开。应�
 - 第二实例的命令行参数同样经 `markdown_files_from_args()` 筛选
 - 已有窗口执行 `show()` / `unminimize()` / `set_focus()` 带到前台
 - 文件路径先写入后端 `PendingOpenFiles` 队列，再发送 `open-files` 事件通知前端
-- 前端 `useDocumentFiles` 通过 `take_pending_open_files` 取出并清空队列，串行处理通知
+- 前端 `src/hooks/useNativeOpenRequests.ts` 通过 `take_pending_open_files` 取出并清空队列，串行处理通知
 - 监听注册完成后主动读取一次队列，避免漏掉启动期间先于监听到达的文件
 
 两条路径的参数筛选逻辑共用 `markdown_files_from_args()`，并有 cargo 测试覆盖「启动文件只消费一次」和「参数在 WebView 创建前被识别」。
