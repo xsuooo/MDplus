@@ -73,7 +73,7 @@ describe('the notice for images a full stash left in their files', () => {
     await prepare(tab, both);
 
     expect(text()).toBe(
-      '图片暂存空间已满，1 张图片暂时无法预览。文字仍可正常保存，图片文件未被改动；关闭其他含图片的文稿后，继续编辑或保存即可恢复预览。',
+      '1 张图片暂时无法预览。文字可以正常保存，原图片不会被改动。关闭其他含图片的文档后，再编辑或保存以恢复预览。',
     );
     expect(screen.getByRole('status').getAttribute('aria-live')).toBe('polite');
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -87,7 +87,7 @@ describe('the notice for images a full stash left in their files', () => {
 
     render(<ImageStashNotice tabId={tab} />);
 
-    expect(text()).toContain('图片暂存空间已满，2 张图片暂时无法预览。');
+    expect(text()).toContain('2 张图片暂时无法预览。');
   });
 
   it('disappears once a later preparation admits the image', async () => {

@@ -88,7 +88,7 @@ describe('status feedback', () => {
   it('does not equate a protected recovery copy with a formal save', () => {
     const html = render('dirty', { ...tab, dirty: true });
     expect(html).toContain('未保存');
-    expect(html).toContain('草稿已保护');
+    expect(html).toContain('可恢复');
     expect(html).toContain('不等于正式保存');
   });
   it('shows one unsaved message and no placeholder path for a new document', () => {
@@ -105,9 +105,9 @@ describe('status feedback', () => {
     expect(html).not.toContain('已保存');
   });
   it('keeps draft failures actionable without a redundant healthy protection message', () => {
-    expect(render('saved')).not.toContain('草稿已保护');
+    expect(render('saved')).not.toContain('可恢复');
     const html = render('dirty', tab, { recoveryStatus: 'error' });
-    expect(html).toContain('草稿保护失败');
+    expect(html).toContain('备份失败');
     expect(html).toContain('手动保存');
   });
   it('preserves the version and build identity when no document is open', () => {

@@ -75,7 +75,9 @@ function parsedDocument(editor: RenderedDOM) {
   return doc;
 }
 function toggleSource() {
-  const button = document.querySelector<HTMLButtonElement>('button[aria-label="切换源码模式"]');
+  const button = document.querySelector<HTMLButtonElement>(
+    'button[aria-label="切换 Markdown 模式"]',
+  );
   check(button, 'Source mode toggle is missing');
   button.click();
 }

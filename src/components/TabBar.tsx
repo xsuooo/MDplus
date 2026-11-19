@@ -105,6 +105,8 @@ export const TabBar = memo(function TabBar({
     }
   };
 
+  if (!tabs.length) return null;
+
   return (
     <div className="tabbar" role="tablist" aria-label="打开的文档" ref={barRef}>
       <div className="tabbar-tabs" ref={stripRef}>
@@ -126,7 +128,7 @@ export const TabBar = memo(function TabBar({
             title={tab.path ? displayPath(tab.path) : tab.title}
             tabIndex={tab.id === activeId ? 0 : -1}
             aria-selected={tab.id === activeId}
-            aria-label={`${tab.title}${tab.path ? `,${displayPath(tab.path)}` : ',尚未保存到磁盘'}${tab.dirty || tab.isNew ? ',尚未保存' : ''}${tab.externalChanged ? ',文件已在外部修改' : ''}`}
+            aria-label={`${tab.title}${tab.path ? `,${displayPath(tab.path)}` : ''}${tab.dirty || tab.isNew ? ',未保存' : ''}${tab.externalChanged ? ',文件已在其他应用中修改' : ''}`}
             onKeyDown={(event) => {
               if (event.target !== event.currentTarget) return;
               if (event.key === 'Enter' || event.key === ' ') {

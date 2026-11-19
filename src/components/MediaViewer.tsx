@@ -43,10 +43,15 @@ export function MediaViewer({ media, onClose }: { media: MediaPreview; onClose: 
       viewport.current.scrollLeft = 0;
     }
   };
-  const stepZoom = (increase: boolean, point?: { x: number; y: number }) => {
+  const stepZoom = (increase: boolean, fine = false, point?: { x: number; y: number }) => {
     const current = manual.current ?? fitted.current;
     if (!increase && current <= 0.1) return;
-    const next = Math.max(0.1, Math.min(4, increase ? current * 1.25 : current / 1.25));
+    const value = fine
+      ? (Math.round(current * 100) + (increase ? 1 : -1)) / 100
+      : increase
+        ? current * 1.25
+        : current / 1.25;
+    const next = Math.max(0.1, Math.min(4, value));
     if (next === current) return;
     const element = viewport.current;
     const image = element?.querySelector<HTMLElement>('.media-viewer-content');
@@ -111,7 +116,7 @@ export function MediaViewer({ media, onClose }: { media: MediaPreview; onClose: 
         return;
       event.preventDefault();
       event.stopPropagation();
-      step.current(event.deltaY < 0, { x: event.clientX, y: event.clientY });
+      step.current(event.deltaY < 0, true, { x: event.clientX, y: event.clientY });
     };
     element.addEventListener('wheel', wheel, { passive: false });
     measure();
@@ -201,7 +206,7 @@ export function MediaViewer({ media, onClose }: { media: MediaPreview; onClose: 
         {failed ? (
           <p role="alert">
             {media.kind === 'diagram'
-              ? '图表预览无法加载。请关闭后检查图表源码，再重试。'
+              ? '图表预览无法加载。请关闭后检查图表内容，再重试。'
               : '预览无法加载。请关闭后检查图片路径或网络，再重试。'}
           </p>
         ) : (
@@ -218,9 +223,7 @@ export function MediaViewer({ media, onClose }: { media: MediaPreview; onClose: 
           </div>
         )}
       </div>
-      <footer>
-        仅查看，不修改文档。Ctrl+滚轮或 Ctrl+加号／减号缩放；可滚动或拖动查看，Esc 返回编辑器。
-      </footer>
+      <footer>拖动查看 · Ctrl+滚轮缩放 · Esc 返回</footer>
     </dialog>
   );
 }

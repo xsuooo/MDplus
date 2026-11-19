@@ -8,7 +8,6 @@ import {
   IconOpen,
   IconNew,
   IconSave,
-  IconSaveAs,
   IconImage,
   IconSearch,
   IconOutline,
@@ -17,7 +16,7 @@ import {
   IconMinimize,
   IconMaximize,
   IconClose,
-  IconExport,
+  IconMore,
 } from './icons';
 
 /** 惰性获取窗口实例;非 Tauri 环境(浏览器预览)返回 null,不影响渲染 */
@@ -33,6 +32,7 @@ interface ToolbarProps {
   bindings: ShortcutBindings;
   onOpen: () => void;
   onNew: () => void;
+  onNewExample: () => void;
   onSave: () => void;
   onSaveAs: () => void;
   onInsertImage: () => void;
@@ -60,6 +60,7 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
     bindings,
     onOpen,
     onNew,
+    onNewExample,
     onSave,
     onSaveAs,
     onInsertImage,
@@ -86,33 +87,36 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
   const saveShortcut = formatActionShortcuts(bindings, 'save');
   const searchShortcut = formatActionShortcuts(bindings, 'search');
 
-  const [exportMenuOpen, setExportMenuOpen] = useState(false);
-  const exportMenuRef = useRef<HTMLDivElement>(null);
-  const exportTriggerRef = useRef<HTMLButtonElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
 
-  // 打开导出菜单后:聚焦首项、Escape 关闭、方向键在菜单项间移动、点击外部关闭
+  // 菜单只聚焦可用操作；键盘离开时关闭，避免截获编辑器按键。
   useEffect(() => {
-    if (!exportMenuOpen) return;
-    const first = exportMenuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]');
+    if (!menuOpen) return;
+    const first = menuRef.current?.querySelector<HTMLButtonElement>(
+      '[role="menuitem"]:not(:disabled)',
+    );
     first?.focus();
 
     const handleClick = (e: MouseEvent) => {
-      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
-        setExportMenuOpen(false);
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
       }
     };
     const handleKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || isComposingEvent(e)) return;
       if (e.key === 'Escape') {
         e.preventDefault();
-        setExportMenuOpen(false);
-        exportTriggerRef.current?.focus();
+        setMenuOpen(false);
+        menuTriggerRef.current?.focus();
         return;
       }
       if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
       e.preventDefault();
       const items = Array.from(
-        exportMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [],
+        menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ??
+          [],
       );
       if (!items.length) return;
       const idx = items.indexOf(document.activeElement as HTMLButtonElement);
@@ -126,7 +130,7 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
       document.removeEventListener('mousedown', handleClick);
       document.removeEventListener('keydown', handleKey);
     };
-  }, [exportMenuOpen]);
+  }, [menuOpen]);
 
   return (
     <header className="toolbar" data-tauri-drag-region>
@@ -164,94 +168,107 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
           <span className="toolbar-btn-label">保存</span>
         </button>
         <button
-          className="toolbar-btn toolbar-btn-secondary"
-          onClick={onSaveAs}
-          title="另存为"
-          disabled={!hasActiveTab || saving}
-        >
-          <IconSaveAs size={16} />
-          <span className="toolbar-btn-label">另存为</span>
-        </button>
-        <div className="toolbar-dropdown" ref={exportMenuRef} style={{ pointerEvents: 'auto' }}>
-          <button
-            ref={exportTriggerRef}
-            className="toolbar-btn toolbar-btn-secondary"
-            onClick={() => setExportMenuOpen(!exportMenuOpen)}
-            title="导出"
-            disabled={!hasActiveTab || exporting}
-            aria-haspopup="menu"
-            aria-expanded={exportMenuOpen && hasActiveTab}
-            style={{ pointerEvents: 'auto' }}
-          >
-            <IconExport size={16} />
-            <span className="toolbar-btn-label">{exporting ? '导出中…' : '导出'}</span>
-          </button>
-          <Presence present={exportMenuOpen && hasActiveTab}>
-            <div className="toolbar-dropdown-menu" role="menu" style={{ pointerEvents: 'auto' }}>
-              <button
-                role="menuitem"
-                onClick={() => {
-                  onExportHTML();
-                  setExportMenuOpen(false);
-                }}
-              >
-                导出为 HTML
-              </button>
-              <button
-                role="menuitem"
-                title="在系统打印窗口选择 PDF 并确认保存；应用无法确认输出文件是否已保存"
-                onClick={() => {
-                  onExportPDF();
-                  setExportMenuOpen(false);
-                }}
-              >
-                打印 / 另存为 PDF
-              </button>
-            </div>
-          </Presence>
-        </div>
-        <button
           className="toolbar-btn toolbar-btn-secondary toolbar-insert-image"
           onClick={onInsertImage}
           disabled={!hasActiveTab || pickingImage}
-          title="插入本地图片（PNG / JPEG）"
+          title="插入图片（PNG / JPEG）"
           aria-label="插入本地图片"
           aria-busy={pickingImage}
         >
           <IconImage size={16} aria-hidden="true" />
-          <span className="toolbar-btn-label">{pickingImage ? '正在插入…' : '插入图片'}</span>
+          <span className="toolbar-btn-label">{pickingImage ? '插入中…' : '插入图片'}</span>
         </button>
+        <div
+          className="toolbar-dropdown"
+          ref={menuRef}
+          onBlur={(event) => {
+            if (
+              event.relatedTarget instanceof Node &&
+              !event.currentTarget.contains(event.relatedTarget)
+            )
+              setMenuOpen(false);
+          }}
+        >
+          <button
+            ref={menuTriggerRef}
+            className="toolbar-btn toolbar-btn-secondary"
+            onClick={() => setMenuOpen(!menuOpen)}
+            title="更多文件操作"
+            aria-label="更多文件操作"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            aria-busy={Boolean(exporting)}
+          >
+            <IconMore size={16} />
+            <span className="toolbar-btn-label">{exporting ? '导出中…' : '更多'}</span>
+          </button>
+          <Presence present={menuOpen}>
+            <div
+              className="toolbar-dropdown-menu"
+              role="menu"
+              aria-label="更多文件操作"
+              onClick={() => {
+                setMenuOpen(false);
+                menuTriggerRef.current?.focus({ preventScroll: true });
+              }}
+            >
+              <button role="menuitem" onClick={onSaveAs} disabled={!hasActiveTab || saving}>
+                另存为
+              </button>
+              <div className="toolbar-menu-separator" role="separator" />
+              <button role="menuitem" onClick={onExportHTML} disabled={!hasActiveTab || exporting}>
+                导出为 HTML
+              </button>
+              <button
+                role="menuitem"
+                title="在打印窗口中选择“Microsoft Print to PDF”以保存 PDF"
+                onClick={onExportPDF}
+                disabled={!hasActiveTab || exporting}
+              >
+                打印 / 保存 PDF
+              </button>
+              <div className="toolbar-menu-separator" role="separator" />
+              <button role="menuitem" onClick={onNewExample}>
+                打开示例文档
+              </button>
+            </div>
+          </Presence>
+        </div>
       </div>
 
       <div className="toolbar-spacer" onDoubleClick={() => void appWindow()?.toggleMaximize()} />
 
-      <div className="toolbar-group">
+      <div className="toolbar-group toolbar-view-actions">
         <button
           className={`toolbar-btn toolbar-btn-icon${searchOpen ? ' active' : ''}`}
           onClick={onSearch}
-          title={`当前文档搜索${searchShortcut ? ` (${searchShortcut})` : ''}`}
+          title={`查找与替换${searchShortcut ? ` (${searchShortcut})` : ''}`}
           aria-label="搜索当前文档"
           aria-pressed={searchOpen}
+          disabled={!hasActiveTab}
         >
           <IconSearch size={16} />
         </button>
         <button
           className={`toolbar-btn toolbar-btn-icon${outlineOpen ? ' active' : ''}`}
           onClick={onToggleOutline}
-          title="目录"
+          title={outlineOpen ? '收起目录' : '打开目录'}
           aria-label="打开目录"
           aria-pressed={outlineOpen}
+          disabled={!hasActiveTab}
         >
           <IconOutline size={16} />
         </button>
         <button
-          className={`toolbar-btn toolbar-btn-icon${sourceMode ? ' active' : ''}`}
+          className={`toolbar-btn toolbar-btn-mode${sourceMode ? ' active' : ''}`}
           onClick={onToggleSource}
-          title="源码模式"
-          aria-label="切换源码模式"
+          title={sourceMode ? '返回正文编辑' : '编辑 Markdown 原文'}
+          aria-label="切换 Markdown 模式"
           aria-pressed={sourceMode}
+          disabled={!hasActiveTab}
         >
           <IconCode size={16} />
+          <span className="toolbar-btn-label">Markdown</span>
         </button>
         <button
           className={`toolbar-btn toolbar-btn-icon${recentOpen ? ' active' : ''}`}

@@ -467,6 +467,116 @@ fn permits_disjoint_valid_attachment_sets_during_snapshot_replacement() {
         );
     }
 }
+
+#[test]
+fn recovery_round_trips_imported_long_unicode_filenames() {
+    let root = Fixture::new();
+    let stash_root = tempfile::tempdir().unwrap();
+    let filename = format!("{}.svg", "图".repeat(100));
+    let state = ImageStash::default();
+    let receipt = serde_json::to_value(
+        state
+            .insert_bytes(stash_root.path(), &filename, SVG)
+            .unwrap(),
+    )
+    .unwrap();
+    cache_stashed_image(
+        &root.0,
+        &state,
+        "test-id",
+        "picture.svg",
+        receipt["key"].as_str().unwrap(),
+        &[],
+    )
+    .unwrap();
+    let mut draft = snapshot();
+    draft.images[0].filename = filename.clone();
+    save(&root.0, draft, &[]).unwrap();
+    let restored = restore(&root.0, "test-id").unwrap();
+    assert_eq!(restored.snapshot.images[0].filename, filename);
+    assert_eq!(restored.snapshot.markdown, snapshot().markdown);
+    assert_eq!(
+        crate::image_data::decode_image(&restored.images[0].data_base64).unwrap(),
+        SVG
+    );
+}
+
+#[test]
+fn recovery_round_trips_maximum_text_after_json_escaping() {
+    let root = Fixture::new();
+    let mut draft = snapshot();
+    draft.images.clear();
+    draft.markdown = "\u{000b}".repeat(MAX_TEXT_FILE_BYTES as usize);
+    save(&root.0, draft.clone(), &[]).unwrap();
+    assert!(restore(&root.0, "test-id").unwrap().snapshot.markdown == draft.markdown);
+    draft.markdown.push('x');
+    assert!(save(&root.0, draft, &[]).is_err());
+    assert_eq!(
+        restore(&root.0, "test-id").unwrap().snapshot.markdown.len() as u64,
+        MAX_TEXT_FILE_BYTES
+    );
+}
+
+#[test]
+#[cfg(windows)]
+fn recovery_lists_healthy_drafts_when_expired_manifest_is_locked() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let root = Fixture::new();
+    let mut expired = snapshot();
+    expired.images.clear();
+    save(&root.0, expired, &[]).unwrap();
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(1)
+        .open(root.0.join("test-id/snapshot.json"))
+        .unwrap();
+    let mut healthy = snapshot();
+    healthy.id = "healthy-id".into();
+    healthy.markdown = "intact draft".into();
+    healthy.images.clear();
+    save(&root.0, healthy, &[]).unwrap();
+    let now = now_ms() + RETENTION_MS + 10000;
+    fs::OpenOptions::new()
+        .write(true)
+        .open(root.0.join("healthy-id/snapshot.json"))
+        .unwrap()
+        .set_modified(UNIX_EPOCH + std::time::Duration::from_millis(now))
+        .unwrap();
+    let entries = list(&root.0, &[], now).unwrap();
+    assert_eq!(entries.len(), 2);
+    let expired = entries.iter().find(|entry| entry.id == "test-id").unwrap();
+    assert!(!expired.damaged);
+    let payload = serde_json::to_value(expired).unwrap();
+    assert!(payload["cleanupError"].is_string());
+    let contract: serde_json::Value =
+        serde_json::from_str(include_str!("file_contract.json")).unwrap();
+    assert!(payload
+        .as_object()
+        .unwrap()
+        .keys()
+        .all(|field| contract["$defs"]["RecoveryEntry"]["properties"]
+            .get(field)
+            .is_some()));
+    let healthy = entries
+        .iter()
+        .find(|entry| entry.id == "healthy-id")
+        .unwrap();
+    assert!(!healthy.damaged);
+    assert!(serde_json::to_value(healthy)
+        .unwrap()
+        .get("cleanupError")
+        .is_none());
+    assert_eq!(
+        restore(&root.0, "healthy-id").unwrap().snapshot.markdown,
+        "intact draft"
+    );
+    drop(lock);
+    let entries = list(&root.0, &[], now).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id, "healthy-id");
+    assert!(!root.0.join("test-id").exists());
+}
+
 #[test]
 fn unicode_paths_round_trip_and_cleanup() {
     let root = Fixture::new();

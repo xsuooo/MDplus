@@ -152,7 +152,7 @@ async function runRich(testCase: ReplaceCase): Promise<string> {
       key(field, 'Enter', { ctrlKey: true });
       await until(() => document.querySelector('.search-replace-result'));
       check(
-        feedback() === '已替换 5 处，跳过 1 处（格式不一致）',
+        feedback() === '已替换 5 处，1 处格式不同，未替换。可在 Markdown 模式中替换。',
         'Mixed-format replacements reported incorrect counts',
       );
       const doc = view.state.doc;
@@ -202,7 +202,7 @@ async function runRich(testCase: ReplaceCase): Promise<string> {
     if (testCase === 'replace-rich-single') {
       const field = await configureSearch('needle', 'needle needle');
       key(field, 'Enter');
-      await until(() => feedback() === '已替换 1 处，跳过 0 处');
+      await until(() => feedback() === '已替换 1 处');
       check(
         view.state.doc.textContent === 'needle needle needle',
         'Single replacement rescanned introduced text',
@@ -233,10 +233,7 @@ async function runRich(testCase: ReplaceCase): Promise<string> {
       const field = await configureSearch('needle', '');
       key(field, 'Enter', { ctrlKey: true });
       await until(() => document.querySelector('.search-replace-result'));
-      check(
-        feedback() === '已替换 3 处，跳过 0 处',
-        'Empty replacement did not delete all three hits',
-      );
+      check(feedback() === '已替换 3 处', 'Empty replacement did not delete all three hits');
       check(view.state.doc.childCount === 3, 'Empty replacement removed blocks');
       check(
         view.state.doc.firstChild!.type.name === 'heading',
@@ -293,12 +290,12 @@ async function newSourceDocument(): Promise<HTMLTextAreaElement> {
   const count = document.querySelectorAll('[role="tab"]').length;
   const previous = document.querySelector('.source-editor:not([hidden]) textarea');
   click('button[title="新建文档 (Ctrl+N)"]');
-  await until(() => document.querySelector('.newfile-card'));
-  click('.newfile-card');
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  await until(() => document.querySelector('.editor-tab.active .ProseMirror'));
   await until(() => document.querySelectorAll('[role="tab"]').length === count + 1);
   await until(() => document.querySelector('.editor-tab.active .ProseMirror'));
   if (!document.querySelector('.source-editor:not([hidden])'))
-    click('button[aria-label="切换源码模式"]');
+    click('button[aria-label="切换 Markdown 模式"]');
   await until(() => {
     const field = document.querySelector('.source-editor:not([hidden]) textarea');
     return field && field !== previous;
@@ -338,7 +335,7 @@ async function runSource(testCase: ReplaceCase): Promise<string> {
         ),
         'Replacement result leaked to another tab',
       );
-      click('button[aria-label="切换源码模式"]');
+      click('button[aria-label="切换 Markdown 模式"]');
       await until(() => !document.querySelector('.source-editor:not([hidden])'));
       await configureSearch('needle', 'rendered');
       click('.search-replace-row button:last-child');
@@ -348,7 +345,7 @@ async function runSource(testCase: ReplaceCase): Promise<string> {
           'rendered first',
       );
       check(second.value === 'updated second', 'Rich replace modified another source document');
-      click('button[aria-label="切换源码模式"]');
+      click('button[aria-label="切换 Markdown 模式"]');
       await until(() => document.querySelector('.source-editor:not([hidden]) textarea') === first);
       check(
         first.value.includes('rendered first'),
@@ -371,10 +368,7 @@ async function runSource(testCase: ReplaceCase): Promise<string> {
       );
       click('.search-replace-row button:last-child');
       await until(() => document.querySelector('.search-replace-result'));
-      check(
-        feedback() === '已替换 3 处，跳过 0 处',
-        'Source replacement count included introduced matches',
-      );
+      check(feedback() === '已替换 3 处', 'Source replacement count included introduced matches');
       check(
         field.value === 'A+B a+b a+b\n\n```mermaid\ngraph TD\nA["a+b a+b"]-->B\n```\n\n$a+b a+b$',
         'Source did not replace exact Markdown including hidden formula/diagram code',

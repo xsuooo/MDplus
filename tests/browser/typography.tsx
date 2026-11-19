@@ -110,7 +110,7 @@ function click(selector: string) {
   element.click();
 }
 async function change(label: string, value: string) {
-  if (label === '源码与代码字体') {
+  if (label === 'Markdown 和代码字体') {
     const radio = document.querySelector<HTMLInputElement>(
       `input[name="code-font"][value="${value}"]`,
     );
@@ -128,10 +128,10 @@ async function change(label: string, value: string) {
 async function openDocument(text = typographyDocument) {
   await until(() => document.querySelector('button[title="新建文档 (Ctrl+N)"]'));
   click('button[title="新建文档 (Ctrl+N)"]');
-  await until(() => document.querySelector('.newfile-card'));
-  click('.newfile-card');
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   await until(() => document.querySelector('.editor-tab.active .ProseMirror'));
-  click('button[aria-label="切换源码模式"]');
+  await until(() => document.querySelector('.editor-tab.active .ProseMirror'));
+  click('button[aria-label="切换 Markdown 模式"]');
   await until(() => document.querySelector('.source-editor:not([hidden]) textarea'));
   const source = document.querySelector<HTMLTextAreaElement>(
     '.source-editor:not([hidden]) textarea',
@@ -139,7 +139,7 @@ async function openDocument(text = typographyDocument) {
   Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(source, text);
   source.dispatchEvent(new Event('input', { bubbles: true }));
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-  click('button[aria-label="切换源码模式"]');
+  click('button[aria-label="切换 Markdown 模式"]');
   await until(() => !document.querySelector('.source-editor:not([hidden])'));
   await document.fonts.ready;
 }
@@ -305,11 +305,11 @@ export async function runTypographyRegression(testCase: TypographyCase): Promise
         await until(() => document.querySelector('.recent-menu'));
         sameFont('.recent-menu-header', editor);
         click('.menu-mask');
-        click('button[title="新建文档 (Ctrl+N)"]');
-        await until(() => document.querySelector('.newfile-modal'));
-        sameFont('.newfile-modal h3', editor);
-        sameFont('.newfile-modal button', editor);
-        click('.newfile-modal .modal-actions button');
+        click('button[aria-label="打开快捷键设置"]');
+        await until(() => document.querySelector('.shortcut-modal'));
+        sameFont('.shortcut-modal h3', editor);
+        sameFont('.shortcut-actions button, .shortcut-modal .modal-actions button', editor);
+        click('button[aria-label="关闭快捷键设置"]');
       }
       check(source.value === original, 'Changing UI fonts modified the document');
     } else if (testCase === 'typography-shortcut-fonts') {
@@ -326,7 +326,7 @@ export async function runTypographyRegression(testCase: TypographyCase): Promise
         click('button[aria-label="排版设置"]');
         await until(() => document.querySelector('.typography-panel'));
         await change('界面与正文字体', body);
-        await change('源码与代码字体', codeFont);
+        await change('Markdown 和代码字体', codeFont);
         click('button[aria-label="关闭排版设置"]');
         click('button[aria-label="打开快捷键设置"]');
         await until(() => document.querySelector('.shortcut-modal'));
@@ -363,7 +363,7 @@ export async function runTypographyRegression(testCase: TypographyCase): Promise
           <BrokenView />
         </ErrorBoundary>,
       );
-      await until(() => host.querySelector('h2')?.textContent === '出了点问题');
+      await until(() => host.querySelector('h2')?.textContent === '编辑器暂时无法显示');
       await document.fonts.ready;
       check(
         getComputedStyle(host.querySelector('h2')!).fontFamily === selected,
@@ -463,7 +463,7 @@ export async function runTypographyRegression(testCase: TypographyCase): Promise
       }
       const body = getComputedStyle(editor).fontFamily;
       for (const preset of ['fira-wenkai', 'cascadia-misans', 'jetbrains-sarasa']) {
-        await change('源码与代码字体', preset);
+        await change('Markdown 和代码字体', preset);
         check(getComputedStyle(editor).fontFamily === body, 'Code choice changed body font');
         check(source.value === original, 'Typography choice modified Markdown');
         check(
@@ -495,16 +495,15 @@ export async function runTypographyRegression(testCase: TypographyCase): Promise
             `Specimen font not loaded: ${family}`,
           );
         }
-        await change('源码与代码字体', font.id);
+        await change('Markdown 和代码字体', font.id);
         check(
           document.querySelector<HTMLInputElement>(`input[value="${font.id}"]`)?.checked,
           'Radio selection not applied',
         );
         check(
-          document
-            .querySelector('.typography-footer [role="status"]')
-            ?.textContent?.includes(font.purpose),
-          'Current scheme feedback is stale',
+          document.querySelector('.font-option.selected .font-option-name')?.textContent ===
+            font.label,
+          'Selected font feedback is stale',
         );
       }
       check(source.value === original, 'Font comparison edited the Markdown');
@@ -520,7 +519,7 @@ export async function runTypographyRegression(testCase: TypographyCase): Promise
       click('button[aria-label="排版设置"]');
       await until(() => document.querySelector('.typography-panel'));
       await change('界面与正文字体', 'wenkai');
-      await change('源码与代码字体', 'cascadia-misans');
+      await change('Markdown 和代码字体', 'cascadia-misans');
       root.unmount();
       root = createRoot(host);
       root.render(<App />);
@@ -545,7 +544,7 @@ export async function runTypographyRegression(testCase: TypographyCase): Promise
         document.querySelector('.ProseMirror pre code')!,
       );
     } else {
-      click('button[aria-label="切换源码模式"]');
+      click('button[aria-label="切换 Markdown 模式"]');
       await until(() => document.querySelector('.source-editor:not([hidden]) textarea'));
       source.focus();
       source.setSelectionRange(500, 530, 'backward');
@@ -555,7 +554,7 @@ export async function runTypographyRegression(testCase: TypographyCase): Promise
       click('button[aria-label="排版设置"]');
       await until(() => document.querySelector('.typography-panel'));
       await change('界面与正文字体', 'wenkai');
-      await change('源码与代码字体', 'cascadia-misans');
+      await change('Markdown 和代码字体', 'cascadia-misans');
       check(
         source.selectionStart === 500 &&
           source.selectionEnd === 530 &&

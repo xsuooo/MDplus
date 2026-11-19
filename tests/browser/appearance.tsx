@@ -133,10 +133,10 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
       );
       return `${testCase}: first layout has final colors without a theme entrance`;
     }
-    click('button[title="新建文档 (Ctrl+N)"]');
-    await until(() => document.querySelector('.newfile-card'));
     if (testCase === 'theme-quiet-dialog') {
-      for (const element of document.querySelectorAll('.modal, .newfile-card')) {
+      click('button[aria-label="打开快捷键设置"]');
+      await until(() => document.querySelector('.shortcut-modal'));
+      for (const element of document.querySelectorAll('.modal, .shortcut-kbd')) {
         check(
           getComputedStyle(element).transform === 'none',
           'Dialog moved or scaled during entry',
@@ -149,9 +149,10 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
           );
         }
       }
-      return `${testCase}: modal and options have no scale, slide or bounce`;
+      return `${testCase}: dialog and controls have no scale, slide or bounce`;
     }
-    click('.newfile-card:nth-child(2)');
+    await until(() => document.querySelector('.welcome-example'));
+    click('.welcome-example');
     const ready = () =>
       document.querySelector('.md-mermaid-holder img') &&
       !document.querySelector('.md-mermaid-node.loading');
@@ -167,7 +168,7 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
         (_, i) =>
           `## Heading ${i}\n\nParagraph ${i}.\n\n${i < 13 ? `![Picture ${i}](${picture})\n\n` : ''}`,
       ).join('');
-      click('button[aria-label="切换源码模式"]');
+      click('button[aria-label="切换 Markdown 模式"]');
       await until(() => document.querySelector('.source-editor:not([hidden]) .source-textarea'));
       const source = document.querySelector<HTMLTextAreaElement>(
         '.source-editor:not([hidden]) .source-textarea',
@@ -177,7 +178,7 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
         markdown,
       );
       source.dispatchEvent(new Event('input', { bubbles: true }));
-      click('button[aria-label="切换源码模式"]');
+      click('button[aria-label="切换 Markdown 模式"]');
       await until(() => !document.querySelector('.source-editor:not([hidden])'));
       click('button[aria-label="打开目录"]');
       await until(() => document.querySelectorAll('.outline-item').length === 400);
@@ -224,7 +225,7 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
       await document.fonts.ready;
       await settleAnimations();
       if (testCase === 'theme-source-colors' || testCase === 'theme-pointer-through') {
-        click('button[aria-label="切换源码模式"]');
+        click('button[aria-label="切换 Markdown 模式"]');
         await until(() => document.querySelector('.source-editor:not([hidden]) .source-textarea'));
       }
       const source = document.querySelector<HTMLTextAreaElement>(
@@ -393,7 +394,7 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
       return `${testCase}: theme feedback, geometry, scroll and source draft passed`;
     }
     if (testCase === 'font-presets') {
-      click('button[aria-label="切换源码模式"]');
+      click('button[aria-label="切换 Markdown 模式"]');
       await until(() => document.querySelector('.source-editor:not([hidden]) .source-textarea'));
       const source = document.querySelector<HTMLTextAreaElement>(
         '.source-editor:not([hidden]) .source-textarea',

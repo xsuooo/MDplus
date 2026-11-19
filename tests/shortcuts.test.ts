@@ -210,9 +210,9 @@ describe('formatShortcut', () => {
     expect(formatShortcut('ctrl+arrowup')).toBe('Ctrl+ArrowUp');
     expect(formatShortcut('f11')).toBe('F11');
     expect(formatShortcut('f2')).toBe('F2');
-    expect(formatShortcut(null)).toBe('未绑定');
-    expect(formatShortcut('ctrl+')).toBe('未绑定');
-    expect(formatShortcut('ctrl + s')).toBe('未绑定');
+    expect(formatShortcut(null)).toBe('未设置');
+    expect(formatShortcut('ctrl+')).toBe('未设置');
+    expect(formatShortcut('ctrl + s')).toBe('未设置');
   });
 });
 

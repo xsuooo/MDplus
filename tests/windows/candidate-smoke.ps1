@@ -312,11 +312,11 @@ function Invoke-SmokePattern($State, $Element, [ValidateSet('Read','Set','Invoke
 
 function Get-SmokeSource($State) {
     $null = Wait-Smoke $State { $State.Window.Current.IsEnabled -and !$State.Window.Current.IsOffscreen } 'main window remained modal or hidden'
-    $source = Find-SmokeElement $State -Name 'Markdown 源码' -Type 'Edit' -Within $State.Window
+    $source = Find-SmokeElement $State -Name 'Markdown 原文' -Type 'Edit' -Within $State.Window
     if ($null -eq $source) {
-        $toggle = Wait-Smoke $State { Find-SmokeElement $State -Name '切换源码模式' -Type 'Button' -Within $State.Window } 'source mode toggle unavailable'
+        $toggle = Wait-Smoke $State { Find-SmokeElement $State -Name '切换 Markdown 模式' -Type 'Button' -Within $State.Window } 'source mode toggle unavailable'
         Invoke-SmokePattern $State $toggle 'Invoke'
-        $source = Wait-Smoke $State { Find-SmokeElement $State -Name 'Markdown 源码' -Type 'Edit' -Within $State.Window } 'source textarea unavailable'
+        $source = Wait-Smoke $State { Find-SmokeElement $State -Name 'Markdown 原文' -Type 'Edit' -Within $State.Window } 'source textarea unavailable'
     }
     return $source
 }
@@ -365,15 +365,22 @@ function Save-SmokeDialog($State, [string[]]$Titles, [string]$Destination) {
 }
 
 function Open-SmokeExport($State, [string]$Kind) {
-    $trigger = Wait-Smoke $State { Find-SmokeElement $State -Name '导出' -Type 'Button' -Within $State.Window } 'export menu unavailable or still locked'
+    $trigger = Wait-Smoke $State { Find-SmokeElement $State -Name '更多文件操作' -Type 'Button' -Within $State.Window } 'file menu unavailable'
     Invoke-SmokePattern $State $trigger 'Invoke'
-    $name = if ($Kind -eq 'html') { '导出为 HTML' } else { '打印 / 另存为 PDF' }
+    $name = if ($Kind -eq 'html') { '导出为 HTML' } else { '打印 / 保存 PDF' }
     $item = Wait-Smoke $State {
         $found = Find-SmokeElement $State -Name $name -Type 'MenuItem' -Within $State.Window
         if ($null -eq $found -and $Kind -eq 'pdf') { $found = Find-SmokeElement $State -Name '导出为 PDF' -Type 'MenuItem' -Within $State.Window }
         $found
     } 'export menu item unavailable'
     Invoke-SmokePattern $State $item 'Invoke'
+}
+
+function Wait-SmokeExportIdle($State) {
+    $trigger = Wait-Smoke $State { Find-SmokeElement $State -Name '更多文件操作' -Type 'Button' -Within $State.Window } 'file menu unavailable after print'
+    Invoke-SmokePattern $State $trigger 'Invoke'
+    $null = Wait-Smoke $State { Find-SmokeElement $State -Name '导出为 HTML' -Type 'MenuItem' -Within $State.Window } 'print did not release export lock'
+    Invoke-SmokePattern $State $trigger 'Invoke'
 }
 
 function Assert-SmokePdfDestination($State, $Destination) {
@@ -550,7 +557,7 @@ function Invoke-CandidateSmoke() {
             @{name='IME composition, candidate selection and undo';status='manual';execution='not_run';reason='UIA ValuePattern text replacement is not IME input'},
             @{name='DPI, zoom, accessibility and visual layout';status='manual';execution='not_run'},
             @{name='Unobserved descendants after the last process snapshot';status='manual';execution='not_run';reason='cleanup passed covers only the root and recorded descendants, not the complete process tree'},
-            @{name='打印 / 另存为 PDF rendered fidelity';status='manual';execution='not_run';reason='Review glyphs, images, pagination and source correspondence in the actual produced PDF'},
+            @{name='打印 / 保存 PDF rendered fidelity';status='manual';execution='not_run';reason='Review glyphs, images, pagination and source correspondence in the actual produced PDF'},
             @{name='Native races, crash recovery and durable storage';status='manual';execution='not_run';reason='Bounded smoke does not replace the native test suite'}
         );cleanup='not_run'}
     foreach ($name in @('preflight','launch_and_open','unicode_save_reopen','external_reload_cancel','external_reload_accept_images','html_export','pdf_export','print_cancel','graceful_close')) {
@@ -682,8 +689,6 @@ function Invoke-CandidateSmoke() {
 
         $stage='html_export'; $report.steps[$stage].status='running'
         Open-SmokeExport $state 'html'
-        $dialog=Wait-Smoke $state { Get-SmokeDialog $state @('MDPlus') '将导出可离线打开' } 'HTML size confirmation unavailable'
-        Invoke-SmokeDialogButton $state $dialog '6'
         $htmlPath=Join-Path $results '中文 候选.html'
         Save-SmokeDialog $state @('导出 HTML') $htmlPath
         $dialog=Wait-Smoke $state { Get-SmokeDialog $state @('MDPlus') 'HTML 导出成功' } 'HTML completion notification unavailable'
@@ -706,7 +711,7 @@ function Invoke-CandidateSmoke() {
         Invoke-SmokePattern $state $button 'Invoke' -PrintPreview $destination -ExpectedNames @('保存','Save')
         $pdfPath=Join-Path $results '中文 候选.pdf'
         Save-SmokeDialog $state @('另存为','Save As','Save Print Output As','将打印输出另存为') $pdfPath
-        $null=Wait-Smoke $state { Find-SmokeElement $state -Name '导出' -Type 'Button' -Within $state.Window } 'print-save did not release export lock'
+        Wait-SmokeExportIdle $state
         $report.outputs.pdf=Test-SmokePdf $state $pdfPath
         if ((Get-FileHash -LiteralPath $state.Document -Algorithm SHA256).Hash -ine $documentHash) { throw 'FAILED_ASSERT: PDF export modified the source fixture.' }
         $report.steps[$stage].status='passed'; $report.steps[$stage].evidence=$report.outputs.pdf
@@ -717,7 +722,7 @@ function Invoke-CandidateSmoke() {
         $destination=Wait-Smoke $state { Get-SmokePrintPreview $state } 'second owned print preview unavailable'
         $button=Get-SmokePrintButton $state $destination @('取消','Cancel')
         Invoke-SmokePattern $state $button 'Invoke' -PrintPreview $destination -ExpectedNames @('取消','Cancel')
-        $null=Wait-Smoke $state { Find-SmokeElement $state -Name '导出' -Type 'Button' -Within $state.Window } 'print-cancel did not release export lock'
+        Wait-SmokeExportIdle $state
         if ((Get-FileHash -LiteralPath $pdfPath -Algorithm SHA256).Hash -ine $pdfHash -or
             (Get-FileHash -LiteralPath $state.Document -Algorithm SHA256).Hash -ine $documentHash) { throw 'FAILED_ASSERT: print cancellation altered the prior PDF or source.' }
         $report.steps[$stage].status='passed'; $report.steps[$stage].evidence='owned preview cancelled, export unlocked, source and prior PDF unchanged'

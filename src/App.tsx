@@ -3,7 +3,6 @@ import { CloseConfirmModal } from './components/CloseConfirmModal';
 import { EditorTab } from './components/EditorTab';
 import { IconBrand } from './components/icons';
 import { MediaViewer } from './components/MediaViewer';
-import { NewFileModal } from './components/NewFileModal';
 import { OutlinePanel } from './components/OutlinePanel';
 import { RecentMenu } from './components/RecentMenu';
 import { RecoveryModal } from './components/RecoveryModal';
@@ -110,7 +109,6 @@ export default function App() {
     setMediaPreview(null);
   }, [activeId, sourceMode]);
   const [outlineWidth, setOutlineWidth] = useState(readOutlineWidth);
-  const [newModalOpen, setNewModalOpen] = useState(false);
   const [recentMenuOpen, setRecentMenuOpen] = useState(false);
   // 快捷键表先用默认值渲染,启动后由已保存的绑定覆盖,避免首帧闪断
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -138,7 +136,7 @@ export default function App() {
         const link = await resolveDocumentLink(href, tab.path);
         const opened = await openFileFromPath(link.path);
         if (opened && link.hasFragment)
-          await showMessage('已打开文稿，未定位到标题；当前暂不支持链接中的标题锚点。');
+          await showMessage('文档已打开，暂时无法跳到链接指定的标题。可在目录中查找。');
       } catch (error) {
         await showMessage(errorMessage(error), 'error');
       }
@@ -189,7 +187,7 @@ export default function App() {
   const handleSessionRestoreChange = useCallback(
     (enabled: boolean) => {
       void changeSessionRestore(enabled).catch((error) => {
-        void showMessage(`无法保存会话恢复设置：${errorMessage(error)}`, 'error');
+        void showMessage(`无法保存启动设置：${errorMessage(error)}`, 'error');
       });
     },
     [changeSessionRestore],
@@ -248,7 +246,7 @@ export default function App() {
     (action: ShortcutAction) => {
       switch (action) {
         case 'new':
-          setNewModalOpen(true);
+          createDocument('blank');
           return;
         case 'open':
           void handleOpen();
@@ -260,7 +258,9 @@ export default function App() {
           void handleSaveAs();
           return;
         case 'search':
-          setSearchOpen((v) => !v);
+          if (!activeId) return;
+          setSearchOpen(true);
+          editorAreaRef.current?.querySelector<HTMLInputElement>('.search-input')?.focus();
           return;
         case 'toggleOutline':
           changeOutlineOpen((v) => !v);
@@ -290,6 +290,8 @@ export default function App() {
       changeOutlineOpen,
       closeTabRequest,
       cycleTab,
+      createDocument,
+      editorAreaRef,
       handleExportHTML,
       handleExportPDF,
       handleOpen,
@@ -310,7 +312,7 @@ export default function App() {
       // 输入法组字中(e.key === 'Process' 覆盖部分中文输入法)不响应
       if (isComposingEvent(e) || e.getModifierState('AltGraph')) return;
       // 有模态框/确认对话框打开时不响应
-      if (newModalOpen || shortcutsOpen || pendingCloseTab || recoveryOpen || mediaPreview) return;
+      if (shortcutsOpen || pendingCloseTab || recoveryOpen || mediaPreview) return;
 
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
@@ -336,7 +338,6 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [
     shortcutIndex,
-    newModalOpen,
     shortcutsOpen,
     pendingCloseTab,
     recoveryOpen,
@@ -378,7 +379,8 @@ export default function App() {
         bindings={shortcuts}
         exporting={exporting}
         onOpen={() => void handleOpen()}
-        onNew={() => setNewModalOpen(true)}
+        onNew={() => createDocument('blank')}
+        onNewExample={() => createDocument('basic')}
         onSave={() => void handleSave()}
         onSaveAs={() => void handleSaveAs()}
         onInsertImage={() => {
@@ -407,13 +409,14 @@ export default function App() {
         onWindowClose={handleWindowClose}
       />
 
+      {view === 'loading' && tabs.length === 0 && <div className="tabbar" aria-hidden="true" />}
       <TabBar
         bindings={shortcuts}
         tabs={tabs}
         activeId={activeId}
         onSelect={selectTab}
         onClose={closeTabRequest}
-        onNew={() => setNewModalOpen(true)}
+        onNew={() => createDocument('blank')}
         onWheelSwitch={cycleTab}
       />
 
@@ -457,11 +460,9 @@ export default function App() {
               <div className="welcome-logo" aria-hidden="true">
                 <IconBrand size={72} />
               </div>
-              <p className="welcome-kicker">Markdown 工作台</p>
-              <h1>开始一个文档</h1>
-              <p className="welcome-sub">新建空白文档,或继续编辑最近打开的文件。</p>
+              <h1>开始写作</h1>
               <div className="welcome-actions">
-                <button className="btn btn-primary" onClick={() => setNewModalOpen(true)}>
+                <button className="btn btn-primary" onClick={() => createDocument('blank')}>
                   新建文档
                 </button>
                 <button className="btn" onClick={() => void handleOpen()}>
@@ -488,6 +489,9 @@ export default function App() {
                 </div>
               )}
               <p className="welcome-drop-hint">也可以把 Markdown 文件拖进窗口打开</p>
+              <button className="welcome-example" onClick={() => createDocument('basic')}>
+                打开示例文档
+              </button>
             </div>
           ) : (
             tabs.map((tab) => (
@@ -495,6 +499,7 @@ export default function App() {
                 key={tab.id}
                 tabId={tab.id}
                 initialContent={tab.initialContent}
+                isNew={tab.isNew}
                 active={tab.id === activeId}
                 sourceMode={tab.id === activeId && sourceMode}
                 onUpdate={handleTabUpdate}
@@ -566,15 +571,6 @@ export default function App() {
 
       <Presence present={Boolean(mediaPreview)}>
         {mediaPreview && <MediaViewer media={mediaPreview} onClose={() => setMediaPreview(null)} />}
-      </Presence>
-      <Presence present={newModalOpen}>
-        <NewFileModal
-          onCancel={() => setNewModalOpen(false)}
-          onConfirm={(kind) => {
-            createDocument(kind);
-            setNewModalOpen(false);
-          }}
-        />
       </Presence>
       <Presence present={recoveryOpen}>
         <RecoveryModal

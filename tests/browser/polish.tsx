@@ -22,6 +22,12 @@ function check(value: unknown, message: string): asserts value {
   if (!value) throw new Error(`Polish: ${message}`);
 }
 const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+async function settled() {
+  await frame();
+  await Promise.all(
+    document.getAnimations().map((animation) => animation.finished.catch(() => {})),
+  );
+}
 async function until(condition: () => unknown, message: string) {
   const end = performance.now() + 15000;
   while (!condition()) {
@@ -34,6 +40,18 @@ function click(selector: string) {
   check(control, `missing ${selector}`);
   control.click();
 }
+
+async function saveAs() {
+  click('button[aria-label="更多文件操作"]');
+  const item = () =>
+    Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(
+      (button) => button.textContent?.trim() === '另存为' && !button.closest('[inert]'),
+    );
+  await until(item, 'Save As menu item');
+  check(!item()!.disabled, 'Save As is disabled');
+  item()!.click();
+}
+
 const source = () =>
   document.querySelector<HTMLTextAreaElement>('.source-editor:not([hidden]) textarea');
 function inputText(input: HTMLTextAreaElement, text: string) {
@@ -215,7 +233,7 @@ export async function runPolishRegression(testCase: PolishCase): Promise<string>
         );
         for (const theme of ['light', 'dark']) {
           document.documentElement.dataset.theme = theme;
-          await new Promise<void>((resolve) => setTimeout(resolve, 180));
+          await settled();
           for (const error of errors)
             check(
               contrast(
@@ -227,7 +245,7 @@ export async function runPolishRegression(testCase: PolishCase): Promise<string>
         }
         check(files.get(sourcePath) === markdown, 'invalid math changed the source file');
       }
-      click('button[aria-label="切换源码模式"]');
+      click('button[aria-label="切换 Markdown 模式"]');
       await until(source, 'source visible');
       click('button[aria-label="打开目录"]');
       await until(
@@ -334,10 +352,7 @@ export async function runPolishRegression(testCase: PolishCase): Promise<string>
         document.querySelector('.toolbar button[title="打开 (F8)"]'),
         'open hint kept default shortcut',
       );
-      check(
-        document.querySelector('.tabbar-new')?.getAttribute('title') === '新建文档 (F9)',
-        'tab hint kept default shortcut',
-      );
+      check(!document.querySelector('.tabbar'), 'Welcome still has an empty tab strip');
       const recents = [...document.querySelectorAll('.welcome-recent-item')];
       check(
         recents.length === 2 &&
@@ -353,9 +368,13 @@ export async function runPolishRegression(testCase: PolishCase): Promise<string>
         ),
         'recent paths are inaccessible',
       );
-      click('.tabbar-new');
-      await until(() => document.querySelector('.newfile-card'), 'new document chooser');
-      click('.newfile-card');
+      click('.toolbar button[title="新建文档 (F9)"]');
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await until(() => document.querySelector('.editor-tab.active .ProseMirror'), 'new editor');
+      check(
+        document.querySelector('.tabbar-new')?.getAttribute('title') === '新建文档 (F9)',
+        'tab hint kept default shortcut',
+      );
       await until(() => document.querySelector('.status-save-unsaved'), 'new draft status');
       check(
         document.querySelector('.status-save-unsaved')?.getAttribute('title')?.includes('F7'),
@@ -394,7 +413,7 @@ export async function runPolishRegression(testCase: PolishCase): Promise<string>
       host.append(highlight);
       for (const theme of ['light', 'dark']) {
         document.documentElement.dataset.theme = theme;
-        await new Promise<void>((resolve) => setTimeout(resolve, 180));
+        await settled();
         for (const element of [primary, commit, highlight]) {
           const style = getComputedStyle(element);
           check(
@@ -405,7 +424,7 @@ export async function runPolishRegression(testCase: PolishCase): Promise<string>
         // Both hover rules use accent-text; measure that same palette through actual CSS variables.
         for (const element of [primary, commit]) {
           element.style.background = 'var(--accent-text)';
-          await new Promise<void>((resolve) => setTimeout(resolve, 180));
+          await settled();
           const style = getComputedStyle(element);
           check(
             contrast(style.color, style.backgroundColor) >= 4.5,
@@ -426,7 +445,7 @@ export async function runPolishRegression(testCase: PolishCase): Promise<string>
         'open recent write feedback',
       );
       check(activePath() === sourcePath, 'recent failure discarded the opened document');
-      click('button[title="另存为"]');
+      await saveAs();
       await until(
         () =>
           files.has(savePath) &&
@@ -444,17 +463,16 @@ export async function runPolishRegression(testCase: PolishCase): Promise<string>
       );
     } else {
       if (testCase === 'polish-document-link-unsaved') {
-        click('.tabbar-new');
-        await until(() => document.querySelector('.newfile-card'), 'new draft chooser');
-        click('.newfile-card');
+        click('button[title="新建文档 (Ctrl+N)"]');
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
         await until(
           () => document.querySelector('.editor-tab.active .ProseMirror'),
           'draft editor ready',
         );
-        click('button[aria-label="切换源码模式"]');
+        click('button[aria-label="切换 Markdown 模式"]');
         await until(source, 'draft source ready');
         inputText(source()!, markdown);
-        click('button[aria-label="切换源码模式"]');
+        click('button[aria-label="切换 Markdown 模式"]');
         await until(
           () => !source() && document.querySelector('.editor-tab.active .ProseMirror a'),
           'draft links rendered',
@@ -469,7 +487,7 @@ export async function runPolishRegression(testCase: PolishCase): Promise<string>
           'unsaved source guessed a relative directory',
         );
       } else if (testCase === 'polish-document-link-save-as') {
-        click('button[title="另存为"]');
+        await saveAs();
         await until(() => activePath() === savePath, 'Save As adopted new source directory');
         await enterLink('Target');
         await until(
@@ -486,7 +504,7 @@ export async function runPolishRegression(testCase: PolishCase): Promise<string>
         );
         clickLink('Target');
         await until(() => activePath() === targetPath, 'Ctrl+click opened relative target');
-        click('button[aria-label="切换源码模式"]');
+        click('button[aria-label="切换 Markdown 模式"]');
         await until(source, 'target source ready');
         inputText(source()!, '# Edited target retained\n');
         click(`[role="tab"][title="${sourcePath}"]`);
@@ -520,7 +538,7 @@ export async function runPolishRegression(testCase: PolishCase): Promise<string>
         );
         clickLink('Anchor');
         await until(
-          () => messages.some((message) => message.includes('未定位到标题')),
+          () => messages.some((message) => message.includes('暂时无法跳到链接指定的标题')),
           'fragment limitation reported',
         );
         check(

@@ -114,9 +114,9 @@ afterEach(() => {
 describe('ShortcutModal capture interactions', () => {
   it('clicking a key replaces that key, keeps the other alias, and cleans up its listener', () => {
     const modal = mount();
-    modal.click('修改「切换大纲」的 Ctrl+Shift+E');
-    expect(modal.button('修改「切换大纲」的 F11')).toBeDefined();
-    expect(modal.button('修改「切换大纲」的 Ctrl+Shift+E')?.props['aria-pressed']).toBe(true);
+    modal.click('修改「切换目录」的 Ctrl+Shift+E');
+    expect(modal.button('修改「切换目录」的 F11')).toBeDefined();
+    expect(modal.button('修改「切换目录」的 Ctrl+Shift+E')?.props['aria-pressed']).toBe(true);
     modal.press('F4');
     expect(modal.bindings().toggleOutline).toEqual(['f4', 'f11']);
     expect(modal.change).toHaveBeenCalledOnce();
@@ -125,9 +125,9 @@ describe('ShortcutModal capture interactions', () => {
 
   it('the Add button keeps existing keys visible and appends a new binding', () => {
     const modal = mount();
-    modal.click('添加「切换大纲」快捷键');
-    expect(modal.button('修改「切换大纲」的 Ctrl+Shift+E')?.props['aria-pressed']).toBe(false);
-    expect(modal.button('修改「切换大纲」的 F11')).toBeDefined();
+    modal.click('添加「切换目录」快捷键');
+    expect(modal.button('修改「切换目录」的 Ctrl+Shift+E')?.props['aria-pressed']).toBe(false);
+    expect(modal.button('修改「切换目录」的 F11')).toBeDefined();
     modal.press('F4');
     expect(modal.bindings().toggleOutline).toEqual(['ctrl+shift+e', 'f11', 'f4']);
   });
@@ -147,13 +147,13 @@ describe('ShortcutModal capture interactions', () => {
     'cancels replacement through %s without changing bindings or closing the modal',
     (method) => {
       const modal = mount();
-      modal.click('修改「切换大纲」的 F11');
+      modal.click('修改「切换目录」的 F11');
       if (method === 'escape') {
         const event = modal.press('Escape');
         expect(event.preventDefault).toHaveBeenCalledOnce();
         expect(event.stopPropagation).toHaveBeenCalledOnce();
       } else {
-        modal.click('取消录制「切换大纲」快捷键');
+        modal.click('取消录制「切换目录」快捷键');
       }
       expect(modal.change).not.toHaveBeenCalled();
       expect(modal.close).not.toHaveBeenCalled();
@@ -184,7 +184,7 @@ describe('ShortcutModal capture interactions', () => {
 
   it('ignores a held key and a bare letter without losing the replacement target', () => {
     const modal = mount();
-    modal.click('修改「切换大纲」的 F11');
+    modal.click('修改「切换目录」的 F11');
     modal.press('F4', { repeat: true });
     modal.press('a');
     expect(modal.change).not.toHaveBeenCalled();

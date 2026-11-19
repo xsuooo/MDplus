@@ -313,7 +313,7 @@ describe('window lifecycle startup', () => {
       </ErrorBoundary>,
     );
     await act(flush);
-    expect(fallback.getByRole('heading', { name: '出了点问题' })).toBeTruthy();
+    expect(fallback.getByRole('heading', { name: '编辑器暂时无法显示' })).toBeTruthy();
     expect(fallback.getByText('startup render failed')).toBeTruthy();
     expect(mocks.setSize).toHaveBeenCalledTimes(1);
     expect(mocks.setPosition).toHaveBeenCalledTimes(1);

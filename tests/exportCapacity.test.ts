@@ -7,15 +7,13 @@ import { LIMITS } from '../src/config/constants';
 import { DEFAULT_BODY_FONT, DEFAULT_CODE_FONT } from '../src/lib/editorFont';
 import { assertExportBytes, exportByteLength, exportHTML } from '../src/lib/export';
 
-const mocks = vi.hoisted(() => ({ confirm: vi.fn(), save: vi.fn(), write: vi.fn() }));
+const mocks = vi.hoisted(() => ({ save: vi.fn(), write: vi.fn() }));
 vi.mock('@tauri-apps/plugin-dialog', () => ({ save: mocks.save }));
-vi.mock('../src/lib/dialog', () => ({ confirmDialog: mocks.confirm }));
 vi.mock('../src/lib/fileOps', () => ({ exportHtmlFile: mocks.write }));
 
 const root = process.cwd();
 beforeEach(() => {
   vi.resetAllMocks();
-  mocks.confirm.mockResolvedValue(true);
   mocks.save.mockResolvedValue('D:/virtual-export/result.html');
   mocks.write.mockImplementation(async (_path: string, html: string) => {
     assertExportBytes(exportByteLength(html));

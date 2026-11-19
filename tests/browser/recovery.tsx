@@ -184,7 +184,7 @@ export async function runRecoveryRegression(testCase: RecoveryCase): Promise<str
           !document.querySelector('[role="tab"]') && snapshots.has(initial.id),
           'Esc prematurely published a tab or removed the only recovery copy',
         );
-        click('button[title="恢复草稿与清理缓存"]');
+        click('button[aria-label="恢复草稿"]');
         await until(
           () =>
             document.querySelector<HTMLButtonElement>('.recovery-entry .btn-primary')?.disabled ===
@@ -220,7 +220,7 @@ export async function runRecoveryRegression(testCase: RecoveryCase): Promise<str
           native.calls.filter((call) => call.command === 'stash_image').length === 1,
           'M1: duplicate restore replaced the live image cache',
         );
-        click('button[aria-label="切换源码模式"]');
+        click('button[aria-label="切换 Markdown 模式"]');
         await until(() => document.querySelector('.source-editor:not([hidden]) textarea'));
         const field = document.querySelector<HTMLTextAreaElement>(
           '.source-editor:not([hidden]) textarea',
@@ -234,7 +234,7 @@ export async function runRecoveryRegression(testCase: RecoveryCase): Promise<str
         await new Promise<void>((resolve) =>
           requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
         );
-        click('button[title="恢复草稿与清理缓存"]');
+        click('button[aria-label="恢复草稿"]');
         await until(() => document.querySelector('.recovery-modal'));
         await until(() => document.querySelectorAll('.recovery-entry').length === 0);
         check(
@@ -254,7 +254,7 @@ export async function runRecoveryRegression(testCase: RecoveryCase): Promise<str
         await until(() => document.querySelector('#close-document-title'));
         const discard = [
           ...document.querySelectorAll<HTMLButtonElement>('.modal-actions button'),
-        ].find((button) => button.textContent?.trim() === '放弃');
+        ].find((button) => button.textContent?.trim() === '不保存');
         check(discard, 'Discard confirmation was not shown');
         discard.click();
         await until(() => !document.querySelector('[role="tab"]'));
@@ -284,7 +284,7 @@ export async function runRecoveryRegression(testCase: RecoveryCase): Promise<str
       }
     } else {
       await until(() => document.querySelector('.editor-tab.active .ProseMirror'));
-      click('button[aria-label="切换源码模式"]');
+      click('button[aria-label="切换 Markdown 模式"]');
       await until(() => document.querySelector('.source-editor:not([hidden]) .source-textarea'));
       const field = document.querySelector<HTMLTextAreaElement>(
         '.source-editor:not([hidden]) .source-textarea',

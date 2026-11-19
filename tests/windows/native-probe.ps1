@@ -23,17 +23,17 @@ function InvokeName([string]$name){
   (ByName $name).GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
 }
 function Source{
-  $toggle=(ByName '切换源码模式').GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern)
+  $toggle=(ByName '切换 Markdown 模式').GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern)
   if($toggle.Current.ToggleState-ne [Windows.Automation.ToggleState]::On){$toggle.Toggle()}
-  Until {$null-ne(ByName 'Markdown 源码')} 'Source field missing'
+  Until {$null-ne(ByName 'Markdown 原文')} 'Source field missing'
 }
 try {
-  Until {$null-ne(ByName '切换源码模式')} 'Native app not ready'
+  Until {$null-ne(ByName '切换 Markdown 模式')} 'Native app not ready'
   if($Mode-eq 'native-seed'){
     InvokeName '新建'
-    InvokeName '空白文档 从一个空白的页面开始'
+    Until {$null-ne(ByName '未命名文档.md')} 'New document is not ready'
     Source
-    $field=ByName 'Markdown 源码'
+    $field=ByName 'Markdown 原文'
     $field.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).SetValue("# 崩溃恢复测试`n`n尚未保存的中文草稿`n`n")
     $bitmap=New-Object Drawing.Bitmap(180,100)
     $g=[Drawing.Graphics]::FromImage($bitmap)
@@ -43,7 +43,7 @@ try {
       $field.SetFocus()
       [Windows.Forms.SendKeys]::SendWait('^{END}')
       [Windows.Forms.SendKeys]::SendWait('^v')
-      Until {(ByName 'Markdown 源码').GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value.Contains('mdplus-image:')} 'Native clipboard paste failed'
+      Until {(ByName 'Markdown 原文').GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value.Contains('mdplus-image:')} 'Native clipboard paste failed'
     }finally{$g.Dispose();$bitmap.Dispose();[Windows.Forms.Clipboard]::Clear()}
     Until {
       $files=@(Get-ChildItem $recovery -Filter snapshot.json -Recurse -ErrorAction SilentlyContinue)
@@ -70,13 +70,13 @@ try {
       $capture.Save('C:\Phase1Results\recovered-native.png',[Drawing.Imaging.ImageFormat]::Png)
     }finally{$graphics.Dispose();$capture.Dispose()}
     Source
-    $text=(ByName 'Markdown 源码').GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value
+    $text=(ByName 'Markdown 原文').GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value
     if(!$text.Contains('尚未保存的中文草稿') -or !$text.Contains('mdplus-image:')){throw 'Recovered draft or image reference missing'}
     $seed=Get-Content 'C:\Phase1Results\native-seed-id.json' -Raw|ConvertFrom-Json
     if(!(Test-Path -LiteralPath $seed.path)){throw 'Recovery deleted its only durable copy'}
     $app=Get-Process mdplus|Where-Object {$_.Path-eq $exe}
     [void]$app.CloseMainWindow()
-    InvokeName '放弃'
+    InvokeName '不保存'
     if(!$app.WaitForExit(15000)){throw 'Explicit discard failed to close the restored session'}
     if(Test-Path -LiteralPath $seed.path){throw 'Explicit discard retained its recovery manifest'}
   }

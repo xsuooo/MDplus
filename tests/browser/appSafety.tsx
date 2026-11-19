@@ -112,6 +112,17 @@ function click(selector: string) {
   button.click();
 }
 
+async function saveAs() {
+  click('button[aria-label="更多文件操作"]');
+  const item = () =>
+    Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(
+      (button) => button.textContent?.trim() === '另存为' && !button.closest('[inert]'),
+    );
+  await until(item, 'Save As menu item');
+  check(!item()!.disabled, 'Save As is disabled');
+  item()!.click();
+}
+
 async function insert(text: string) {
   const editor = document.querySelector<HTMLElement>('.editor-tab.active .ProseMirror');
   check(editor, 'Editor is not mounted');
@@ -578,7 +589,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
   }
   const save = () => click('button[title^="保存 (Ctrl+S)"]');
   const close = () => click('.tab.active .tab-close');
-  const source = () => click('button[title*="源码"]');
+  const source = () => click('button[aria-label="切换 Markdown 模式"]');
   const dirty = () =>
     document.querySelector('.tab.active .tab-dot')?.getAttribute('data-dirty') === '1';
 
@@ -674,7 +685,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     failWrite = true;
     const confirmSave = () =>
       [...document.querySelectorAll<HTMLButtonElement>('.modal-actions button')]
-        .find((button) => button.textContent?.trim() === '保存')!
+        .find((button) => button.textContent?.trim() === '保存并关闭')!
         .click();
     confirmSave();
     await until(() => messages.length > 0, 'save failure feedback');
@@ -826,7 +837,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     );
     const discard = [
       ...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
-    ].find((button) => button.textContent === '放弃');
+    ].find((button) => button.textContent === '不保存');
     check(discard, 'Missing discard button');
     discard.click();
     await until(() => awaitingWindowState, 'final metadata after confirming dirty document');
@@ -863,8 +874,8 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     await until(() => document.querySelector('#close-document-title'), 'close dialog');
     holdWrite = true;
     const buttons = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')];
-    const saveButton = buttons.find((button) => button.textContent === '保存');
-    const cancelButton = buttons.find((button) => button.textContent === '取消');
+    const saveButton = buttons.find((button) => button.textContent === '保存并关闭');
+    const cancelButton = buttons.find((button) => button.textContent === '继续编辑');
     check(saveButton && cancelButton, 'Missing save/cancel buttons');
     saveButton.click();
     await until(() => awaitingWrite, 'save in progress');
@@ -899,9 +910,9 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     await until(() => document.querySelector('#close-document-title'), 'close dialog');
     holdCleanup = true;
     const buttons = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')];
-    buttons.find((button) => button.textContent === '放弃')!.click();
+    buttons.find((button) => button.textContent === '不保存')!.click();
     await until(() => awaitingCleanup, 'held recovery cleanup');
-    buttons.find((button) => button.textContent === '取消')!.click();
+    buttons.find((button) => button.textContent === '继续编辑')!.click();
     holdCleanup = false;
     cleanupGate.resolve();
     await until(
@@ -928,9 +939,9 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     await until(() => document.querySelector('#close-document-title'), 'close dialog');
     holdWrite = true;
     const buttons = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')];
-    const saveButton = buttons.find((button) => button.textContent === '保存')!;
-    const discardButton = buttons.find((button) => button.textContent === '放弃')!;
-    const cancelButton = buttons.find((button) => button.textContent === '取消')!;
+    const saveButton = buttons.find((button) => button.textContent === '保存并关闭')!;
+    const discardButton = buttons.find((button) => button.textContent === '不保存')!;
+    const cancelButton = buttons.find((button) => button.textContent === '继续编辑')!;
     saveButton.click();
     saveButton.click();
     discardButton.click();
@@ -1009,7 +1020,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
       'H1: close confirmation changed either local or external bytes',
     );
     const cancel = [...document.querySelectorAll<HTMLButtonElement>('.modal-actions button')].find(
-      (button) => button.textContent?.trim() === '取消',
+      (button) => button.textContent?.trim() === '继续编辑',
     );
     check(cancel, 'Retained local close has no cancel action');
     cancel.click();
@@ -1128,7 +1139,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
       await until(() => text().includes('other document'), 'second document');
       await insert(' distinct B draft');
       savePath = 'C:/notes/sub/../a.md';
-      click('button[title="另存为"]');
+      await saveAs();
       await until(
         () => messages.some((message) => message.includes('已经打开')),
         'canonical SaveAs collision notice',
@@ -1145,7 +1156,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
       await insert(' local draft');
       files.set('C:/notes/a.md', { content: 'external conflict\n', mtime: 100 });
       savePath = 'a.md';
-      click('button[title="另存为"]');
+      await saveAs();
       await until(
         () => messages.some((message) => message.includes('选择「确定」用当前编辑内容覆盖')),
         'same-file SaveAs conflict check',
@@ -1168,8 +1179,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
       close();
       await until(() => !document.querySelector('[role="tab"]'), 'initial document closed');
       click('button[title="新建文档 (Ctrl+N)"]');
-      await until(() => document.querySelector('.newfile-card'), 'new document dialog');
-      click('.newfile-card');
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       await until(
         () => document.querySelector('.editor-tab.active .ProseMirror'),
         'unsaved editor',
@@ -1260,7 +1270,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
       document.querySelector('.status-save')?.textContent?.includes('自动保存已暂停'),
       'Cancelling overwrite falsely resumed saving',
     );
-    click('button[title="另存为"]');
+    await saveAs();
     await until(
       () =>
         files.get('C:/export/a.md')!.content.includes('local draft') &&
@@ -1304,12 +1314,15 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     return `${testCase}: current path is visible and accessible`;
   }
   if (testCase === 'print-action-label') {
-    click('button[title="导出"]');
+    click('button[aria-label="更多文件操作"]');
     await until(() => document.querySelector('[role="menuitem"]'), 'export menu');
     const item = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(
-      (button) => button.textContent === '打印 / 另存为 PDF',
+      (button) => button.textContent === '打印 / 保存 PDF',
     );
-    check(item?.title.includes('确认保存'), 'Print action falsely implies an already saved PDF');
+    check(
+      item?.title.includes('打印窗口') && item.title.includes('Microsoft Print to PDF'),
+      'Print action does not explain how to choose the system PDF destination',
+    );
     return `${testCase}: print-to-PDF action requires explicit confirmation in the system dialog`;
   }
 
@@ -1379,7 +1392,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     )!;
     const original = field.value;
     holdWrite = true;
-    click('button[title="另存为"]');
+    await saveAs();
     await until(() => awaitingWrite, 'SaveAs pending write');
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
       field,
@@ -1419,7 +1432,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
       files.get('C:/notes/a.md')!.content === original,
       'Original Markdown changed during SaveAs',
     );
-    click('button[title="另存为"]');
+    await saveAs();
     await until(
       () =>
         document.querySelector('.status-file-identity')?.textContent === 'C:/export/a.md' &&
@@ -1493,7 +1506,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
         ),
       'current image bytes in preview',
     );
-    click('button[title="另存为"]');
+    await saveAs();
     await until(
       () => files.get('C:/export/a.md')!.content.includes('./assets/'),
       'portable SaveAs references',
@@ -1507,7 +1520,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
         JSON.stringify(expectedReferenceImage),
       'SaveAs copied stale or missing image bytes',
     );
-    click('button[title="导出"]');
+    click('button[aria-label="更多文件操作"]');
     await until(() => document.querySelector('[role="menuitem"]'), 'export menu');
     const htmlButton = Array.from(
       document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
@@ -1702,8 +1715,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
       close();
       await until(() => !document.querySelector('[role="tab"]'), 'close initial document');
       click('button[title="新建文档 (Ctrl+N)"]');
-      await until(() => document.querySelector('.newfile-card'), 'new document dialog');
-      click('.newfile-card');
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       await until(() => document.querySelector('.editor-tab.active .ProseMirror'), 'new editor');
     }
     const labels = Array.from(
@@ -1712,8 +1724,9 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     );
     check(
       labels.filter((label) => label === '保存').length === 1 &&
-        labels.filter((label) => label === '另存为').length === 1,
-      'Duplicate Save As labels',
+        labels.filter((label) => label === '更多').length === 1 &&
+        !labels.includes('另存为'),
+      'Primary file actions must contain a single Save and More',
     );
     source();
     await until(
@@ -1891,7 +1904,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
       );
     }
     holdWrite = true;
-    if (testCase === 'image-saveas-switch') click('button[title="另存为"]');
+    if (testCase === 'image-saveas-switch') await saveAs();
     else save();
     await until(() => awaitingWrite, 'blocked image write');
     check(!writes[0].includes('mdplus-image:'), 'Image migration did not rewrite the placeholder');
@@ -1963,7 +1976,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
       );
       const discard = [
         ...document.querySelectorAll<HTMLButtonElement>('.modal-actions button'),
-      ].find((button) => button.textContent?.trim() === '放弃');
+      ].find((button) => button.textContent?.trim() === '不保存');
       check(discard, 'Pending reload close skipped the retained-version choice');
       discard.click();
       await until(() => !document.querySelector('[role="tab"]'), 'tab explicitly closed');

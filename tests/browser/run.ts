@@ -15,6 +15,7 @@ import { sessionCases, runSessionRegression, type SessionCase } from './session'
 import { imageDropCases, runImageDropRegression, type ImageDropCase } from './imageDrop';
 import { polishCases, runPolishRegression, type PolishCase } from './polish';
 import { performanceCases, runPerformanceRegression, type PerformanceCase } from './performance';
+import 'katex/dist/katex.min.css';
 
 const testCase = new URLSearchParams(location.search).get('case') ?? 'editor-sync';
 const result = document.createElement('pre');

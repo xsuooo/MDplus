@@ -67,7 +67,7 @@ export const StatusBar = memo(function StatusBar({
           : '已保存';
   const saveTitle =
     displaySaveState === 'paused'
-      ? `自动保存已暂停。${saveAction}核对磁盘版本，或另存为保留两份。`
+      ? `自动保存已暂停。${saveAction}检查文件，或通过「更多」→「另存为」保留两份。`
       : displaySaveState === 'unsaved'
         ? `${saveAction}为文稿选择保存位置。`
         : displaySaveState === 'dirty'
@@ -100,15 +100,15 @@ export const StatusBar = memo(function StatusBar({
                   role="status"
                   title={
                     recoveryStatus === 'error'
-                      ? `恢复副本写入失败，请${saveAction}手动保存文稿。`
-                      : '本机恢复副本包含文稿和图片，未加密；不等于正式保存。'
+                      ? `恢复副本保存失败，请${saveAction}手动保存文稿。`
+                      : '可在「恢复」中找回内容。副本包含文字和图片，保存在本机，未加密；不等于正式保存。'
                   }
                 >
                   {recoveryStatus === 'error'
-                    ? '草稿保护失败'
+                    ? '备份失败'
                     : recoveryStatus === 'pending'
-                      ? '草稿保护中…'
-                      : '草稿已保护'}
+                      ? '备份中…'
+                      : '可恢复'}
                 </span>
               )}
             </div>
@@ -122,9 +122,9 @@ export const StatusBar = memo(function StatusBar({
             <div className="statusbar-group statusbar-location">
               <span
                 className="status-item status-mode"
-                title={sourceMode ? '源码模式' : '编辑模式'}
+                title={sourceMode ? 'Markdown 原文' : '正文编辑'}
               >
-                {sourceMode ? '源码' : '编辑'}
+                {sourceMode ? 'Markdown' : '正文'}
               </span>
               {tab.path && (
                 <span className="status-item status-file-identity" title={displayPath(tab.path)}>
@@ -142,7 +142,7 @@ export const StatusBar = memo(function StatusBar({
             <button
               className="statusbar-theme statusbar-recovery-action"
               onClick={onRecovery}
-              title="恢复草稿与清理缓存"
+              title="找回未保存的内容"
               aria-label="恢复草稿"
             >
               <IconClock size={13} aria-hidden="true" />

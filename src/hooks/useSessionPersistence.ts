@@ -79,14 +79,14 @@ export function useSessionPersistence(workspace: Workspace) {
     if (readFailed.current)
       failures.unshift({
         path: '',
-        title: '上次会话',
-        message: '会话记录暂时无法读取。可重试；现有记录未被覆盖。',
+        title: '上次打开的文档',
+        message: '无法读取上次打开的文档列表。请重试，现有记录仍然保留。',
       });
     if (writeFailed.current)
       failures.unshift({
         path: '',
-        title: '会话记录',
-        message: '会话记录保存失败。可重试；文稿内容不受影响。',
+        title: '上次打开的文档列表',
+        message: '无法保存打开的文档列表。请重试，文档内容不受影响。',
       });
     setFailures((previous) =>
       previous.length === failures.length &&
@@ -330,10 +330,7 @@ export function useSessionPersistence(workspace: Workspace) {
             ) &&
             !tabsRef.current.some((tab) => tab.path && pathKey(tab.path) === key)
           )
-            recordSessionFailure(
-              entry,
-              new Error('会话记录已重新读取，此文稿尚未恢复，可重试打开。'),
-            );
+            recordSessionFailure(entry, new Error('文档列表已更新，请重试打开此文档。'));
         }
     }
     if (!enabled.current || closing.current !== snapshot) return;

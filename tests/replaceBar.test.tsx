@@ -83,10 +83,10 @@ describe('find and replace controls', () => {
 
     fireEvent.click(all);
 
-    expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Markdown 源码' }).value).toBe(
+    expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Markdown 原文' }).value).toBe(
       '  ',
     );
-    expect(screen.getByRole('status').textContent).toBe('已替换 3 处，跳过 0 处');
+    expect(screen.getByRole('status').textContent).toBe('已替换 3 处');
     flushSearch();
     expect(screen.getByText('无匹配')).toBeTruthy();
   });
@@ -95,14 +95,14 @@ describe('find and replace controls', () => {
     render(<Workspace initial="a a a" />);
     query('a');
     const replacement = openReplace('aa');
-    const source = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Markdown 源码' });
+    const source = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Markdown 原文' });
 
     fireEvent.keyDown(replacement, { key: 'Enter' });
     expect(source.value).toBe('aa a a');
-    expect(screen.getByRole('status').textContent).toBe('已替换 1 处，跳过 0 处');
+    expect(screen.getByRole('status').textContent).toBe('已替换 1 处');
     fireEvent.keyDown(replacement, { key: 'Enter', ctrlKey: true });
     expect(source.value).toBe('aaaa aa aa');
-    expect(screen.getByRole('status').textContent).toBe('已替换 4 处，跳过 0 处');
+    expect(screen.getByRole('status').textContent).toBe('已替换 4 处');
   });
 
   it('shares the case switch with replacement and clears stale feedback on another document', () => {
@@ -111,10 +111,10 @@ describe('find and replace controls', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: '区分大小写' }));
     openReplace('updated');
     fireEvent.click(screen.getByRole('button', { name: '全部替换' }));
-    expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Markdown 源码' }).value).toBe(
+    expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Markdown 原文' }).value).toBe(
       'updated needle needle',
     );
-    expect(screen.getByRole('status').textContent).toBe('已替换 1 处，跳过 0 处');
+    expect(screen.getByRole('status').textContent).toBe('已替换 1 处');
 
     rendered.rerender(<Workspace documentId="another-document" />);
     expect(screen.queryByRole('status')).toBeNull();
@@ -129,7 +129,7 @@ describe('find and replace controls', () => {
     fireEvent.keyDown(replacement, { key: 'Enter', ctrlKey: true, isComposing: true });
     fireEvent.keyDown(replacement, { key: 'Escape', keyCode: 229 });
     fireEvent.click(screen.getByRole('button', { name: '全部替换' }));
-    expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Markdown 源码' }).value).toBe(
+    expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Markdown 原文' }).value).toBe(
       'Needle needle needle',
     );
     expect(onClose).not.toHaveBeenCalled();
@@ -144,7 +144,7 @@ describe('find and replace controls', () => {
     query('needle');
     openReplace('updated');
     fireEvent.click(screen.getByRole('button', { name: '全部替换' }));
-    const source = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Markdown 源码' });
+    const source = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Markdown 原文' });
     act(() => source.focus());
 
     fireEvent.keyDown(source, { key: 'z', ctrlKey: true });

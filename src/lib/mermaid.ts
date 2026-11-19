@@ -293,7 +293,7 @@ const mermaidView =
         media = undefined;
         displayedPreview = undefined;
         enlarge.disabled = true;
-        holder.textContent = `图表无法预览。请点击“编辑图表”修正源码。\n${errorMessage(err)}`;
+        holder.textContent = `图表无法预览。请点击“编辑图表”检查内容。\n${errorMessage(err)}`;
         holder.className = 'md-mermaid-holder md-mermaid-error';
         dom.classList.remove('loading');
       } finally {
@@ -313,13 +313,13 @@ const mermaidView =
       const ta = document.createElement('textarea');
       sourceInput = ta;
       ta.className = 'md-mermaid-textarea';
-      ta.setAttribute('aria-label', 'Mermaid 图表源码');
+      ta.setAttribute('aria-label', 'Mermaid 图表内容');
       ta.value = code;
       const bar = document.createElement('div');
       bar.className = 'md-mermaid-bar';
       const hint = document.createElement('span');
       hint.className = 'md-mermaid-hint';
-      hint.textContent = 'Mermaid 源码 · 失焦后自动预览';
+      hint.textContent = '编辑 Mermaid 图表';
       const btn = document.createElement('button');
       btn.className = 'md-mermaid-commit';
       btn.textContent = '预览';

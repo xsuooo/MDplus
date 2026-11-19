@@ -60,14 +60,14 @@ function ChooseCode($label) {
   $element.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
   Until {CodeSelected $label} "Code font selection did not apply: $label"
 }
-function SourceText { (ByName 'Markdown 源码').GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value }
-function SourceSelection { ((ByName 'Markdown 源码').GetCurrentPattern([Windows.Automation.TextPattern]::Pattern).GetSelection()|Select-Object -First 1).GetText(-1) }
+function SourceText { (ByName 'Markdown 原文').GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value }
+function SourceSelection { ((ByName 'Markdown 原文').GetCurrentPattern([Windows.Automation.TextPattern]::Pattern).GetSelection()|Select-Object -First 1).GetText(-1) }
 function Launch {
   $info=New-Object Diagnostics.ProcessStartInfo
   $info.FileName=$exe;$info.Arguments='"'+$doc+'"';$info.UseShellExecute=$false
   $script:app=[Diagnostics.Process]::Start($info)
   Until {$script:app.Refresh();$script:app.MainWindowHandle-ne 0} 'No native window'
-  Until {$null-ne(ByName '切换源码模式')} 'Editor not ready'
+  Until {$null-ne(ByName '切换 Markdown 模式')} 'Editor not ready'
 }
 function Capture($name) {
   $rect=(Root).Current.BoundingRectangle
@@ -87,10 +87,10 @@ try {
   Check (CodeSelected 'JetBrains Mono + 更纱黑体') 'Native code default is JetBrains / Sarasa'
   Capture 'typography-default'
   InvokeName '关闭排版设置'
-  (ByName '切换源码模式').GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern).Toggle()
-  Until {$null-ne(ByName 'Markdown 源码')} 'Source did not open'
+  (ByName '切换 Markdown 模式').GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern).Toggle()
+  Until {$null-ne(ByName 'Markdown 原文')} 'Source did not open'
   $before=SourceText
-  (ByName 'Markdown 源码').SetFocus()
+  (ByName 'Markdown 原文').SetFocus()
   [Windows.Forms.SendKeys]::SendWait('^{HOME}{DOWN 5}{HOME}+{END}')
   Start-Sleep -Milliseconds 100
   $selected=SourceSelection

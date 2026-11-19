@@ -44,11 +44,29 @@ describe('untitled document names', () => {
         path: 'C:/notes/未命名文档.md',
         isNew: false,
       });
-      hook.result.current.files.createDocument('basic');
+      hook.result.current.files.createDocument('blank');
     });
     expect(hook.result.current.workspace.tabsRef.current.map((tab) => tab.title)).toEqual([
       '未命名文档.md',
       '未命名文档 2.md',
     ]);
+  });
+
+  it('opens examples as distinct unsaved documents without replacing an existing draft', async () => {
+    const hook = setup();
+    await act(async () => {
+      hook.result.current.files.createDocument('blank');
+      hook.result.current.files.createDocument('basic');
+      hook.result.current.files.createDocument('basic');
+    });
+    const tabs = hook.result.current.workspace.tabsRef.current;
+    expect(tabs.map((tab) => tab.title)).toEqual([
+      '未命名文档.md',
+      'Markdown 示例.md',
+      'Markdown 示例 2.md',
+    ]);
+    expect(tabs[0].markdown).toBe('');
+    expect(tabs[1]).toMatchObject({ isNew: true, path: null });
+    expect(tabs[1].markdown).toContain('# Markdown 示例');
   });
 });
