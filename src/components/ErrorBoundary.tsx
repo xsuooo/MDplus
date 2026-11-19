@@ -25,31 +25,14 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.error) {
       return (
-        <div
-          style={{
-            height: '100vh',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 12,
-            padding: 24,
-          }}
-        >
-          <h2 style={{ margin: 0 }}>出了点问题</h2>
-          <p style={{ maxWidth: 480, wordBreak: 'break-all', fontSize: 13, opacity: 0.7 }}>
-            {this.state.error.message}
-          </p>
-          <button
-            onClick={() => window.location.reload()}
-            style={{
-              padding: '8px 18px',
-              borderRadius: 6,
-              border: '1px solid currentColor',
-              background: 'transparent',
-              cursor: 'pointer',
-            }}
-          >
+        <div className="welcome error-state" role="alert">
+          <h2>编辑器暂时无法显示</h2>
+          <p>重新加载可能丢失尚未保存的更改；已有恢复副本可在重新打开后找回。</p>
+          <details className="error-details">
+            <summary>错误详情</summary>
+            <pre>{this.state.error.message}</pre>
+          </details>
+          <button className="btn btn-primary" onClick={() => window.location.reload()}>
             重新加载
           </button>
         </div>

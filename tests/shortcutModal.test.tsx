@@ -34,7 +34,7 @@ describe('ShortcutModal', () => {
     expect(html.split('class="shortcut-row"').length - 1).toBe(SHORTCUT_DEFINITIONS.length);
   });
 
-  it('显示当前绑定,未绑定的动作显示「未绑定」', () => {
+  it('显示当前快捷键,空白的动作显示「未设置」', () => {
     const html = render();
     for (const definition of SHORTCUT_DEFINITIONS) {
       for (const accelerator of DEFAULT_SHORTCUTS[definition.id]) {
@@ -43,7 +43,7 @@ describe('ShortcutModal', () => {
     }
 
     const withUnbound = render({ ...DEFAULT_SHORTCUTS, save: [] });
-    expect(withUnbound).toContain('未绑定');
+    expect(withUnbound).toContain('未设置');
     expect(withUnbound).toContain('class="shortcut-kbd shortcut-kbd-unbound"');
   });
 
@@ -54,11 +54,11 @@ describe('ShortcutModal', () => {
     expect(html).toContain('class="shortcut-kbd-list"');
     expect(html).toContain('Ctrl+Shift+E');
     expect(html).toContain('F11');
-    expect(html).toContain('aria-label="移除「切换大纲」的 F11"');
-    expect(html).toContain('aria-label="移除「切换大纲」的 Ctrl+Shift+E"');
-    expect(html).toContain('aria-label="移除「切换源码模式」的 F2"');
-    expect(html).toContain('aria-label="修改「切换大纲」的 F11"');
-    expect(html).toContain('aria-label="修改「切换大纲」的 Ctrl+Shift+E"');
+    expect(html).toContain('aria-label="移除「切换目录」的 F11"');
+    expect(html).toContain('aria-label="移除「切换目录」的 Ctrl+Shift+E"');
+    expect(html).toContain('aria-label="移除「切换 Markdown 模式」的 F2"');
+    expect(html).toContain('aria-label="修改「切换目录」的 F11"');
+    expect(html).toContain('aria-label="修改「切换目录」的 Ctrl+Shift+E"');
     expect(html).toContain('title="点击修改"');
 
     const chips = html.split('class="shortcut-kbd-chip"').length - 1;
@@ -79,7 +79,7 @@ describe('ShortcutModal', () => {
     expect(html).toContain('aria-label="操作项"');
     expect(html).toContain('aria-label="当前快捷键"');
     expect(html).toContain('aria-label="快捷键操作"');
-    expect(html).toContain('恢复默认值');
+    expect(html).toContain('恢复默认设置');
     expect(html).toContain('关闭');
     expect(html).not.toContain('按下快捷键…');
     expect(html).not.toContain('shortcut-conflict');
@@ -93,9 +93,9 @@ describe('ShortcutModal duplicate bindings', () => {
     const html = render({ ...DEFAULT_SHORTCUTS, open: ['ctrl+n'] });
 
     expect(html).toContain('shortcut-duplicate-warning');
-    expect(html).toContain('存在重复绑定');
+    expect(html).toContain('快捷键重复');
     expect(html).toContain('已由「新建」使用');
-    expect(html).toContain('「打开」不会由此键位触发');
+    expect(html).toContain('「打开」无法使用这个快捷键');
     expect(html).toContain('shortcut-ignored');
   });
 

@@ -278,11 +278,9 @@ async function checkCrowdedStatusbar(root: ReturnType<typeof createRoot>, label:
 }
 async function openDocument(text: string) {
   click('button[title="新建文档 (Ctrl+N)"]');
-  await until(() => document.querySelector('.newfile-card'));
-  click('.newfile-card');
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   await until(() => document.querySelector('.editor-tab.active .ProseMirror'));
-  await until(() => !document.querySelector('.newfile-modal'));
-  click('button[aria-label="切换源码模式"]');
+  click('button[aria-label="切换 Markdown 模式"]');
   await until(() => document.querySelector('.source-editor:not([hidden]) textarea'));
   const source = document.querySelector<HTMLTextAreaElement>(
     '.source-editor:not([hidden]) textarea',
@@ -292,7 +290,7 @@ async function openDocument(text: string) {
   await frame();
   source.setSelectionRange(0, 0);
   source.scrollTop = 0;
-  click('button[aria-label="切换源码模式"]');
+  click('button[aria-label="切换 Markdown 模式"]');
   await until(() => !document.querySelector('.source-editor:not([hidden])'));
   await document.fonts.ready;
   await settled();
@@ -319,7 +317,7 @@ export async function runInterfaceRegression(testCase: InterfaceCase): Promise<s
     } else if (testCase === 'interface-search-mode-switch') {
       const source = await openDocument('# Search\n\nNeedle **needle** Needle\n');
       const original = source.value;
-      click('button[aria-label="切换源码模式"]');
+      click('button[aria-label="切换 Markdown 模式"]');
       await until(() => document.querySelector('.source-editor:not([hidden]) textarea'));
       click('button[aria-label="搜索当前文档"]');
       await until(() => document.querySelector('.search-input'));
@@ -333,7 +331,7 @@ export async function runInterfaceRegression(testCase: InterfaceCase): Promise<s
       click('.search-case input');
       await until(() => document.querySelector('.search-count')?.textContent === '2 处');
 
-      click('button[aria-label="切换源码模式"]');
+      click('button[aria-label="切换 Markdown 模式"]');
       await until(() => !document.querySelector('.source-editor:not([hidden])'));
       await until(
         () =>
@@ -376,7 +374,7 @@ export async function runInterfaceRegression(testCase: InterfaceCase): Promise<s
       const sourceCase = testCase === 'interface-search-source';
       const query = sourceCase ? 'source+[marker]' : 'hello world';
       if (sourceCase) {
-        click('button[aria-label="切换源码模式"]');
+        click('button[aria-label="切换 Markdown 模式"]');
         await until(() => document.querySelector('.source-editor:not([hidden]) textarea'));
         const latest =
           Array.from({ length: 60 }, (_, index) => `Line ${index}`).join('\n') + `\n${query}\n`;
@@ -394,12 +392,25 @@ export async function runInterfaceRegression(testCase: InterfaceCase): Promise<s
       const input = document.querySelector<HTMLInputElement>('.search-input')!;
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, query);
       input.dispatchEvent(new Event('input', { bubbles: true }));
-      if (sourceCase)
-        await until(() => document.querySelector('.search-count')?.textContent === '1 处');
+      await until(() => document.querySelector('.search-count')?.textContent === '1 处');
       await settled();
       check(
         document.querySelector('.search-count')?.textContent === '1 处',
         'Search did not count the current visible text',
+      );
+      const writing = sourceCase
+        ? source
+        : document.querySelector<HTMLElement>('.editor-tab.active .ProseMirror')!;
+      writing.focus({ preventScroll: true });
+      writing.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true }),
+      );
+      await frame();
+      check(
+        input.value === query &&
+          document.activeElement === input &&
+          document.querySelectorAll('.searchbar').length === 1,
+        'Repeated Ctrl+F must preserve the query and return focus to search',
       );
       click('button[aria-label="下一条匹配"]');
       await settled();
@@ -433,21 +444,28 @@ export async function runInterfaceRegression(testCase: InterfaceCase): Promise<s
         check(source.value === original, 'Search rewrote source Markdown');
       }
     } else if (testCase === 'interface-presence') {
-      const trigger = document.querySelector<HTMLElement>('button[title="新建文档 (Ctrl+N)"]')!;
       click('button[title="新建文档 (Ctrl+N)"]');
-      await until(() => document.querySelector('.newfile-modal'));
-      const modal = document.querySelector<HTMLElement>('.newfile-modal')!;
+      await until(() => document.querySelector('.editor-tab.active .ProseMirror'));
+      await until(() => document.activeElement?.getAttribute('aria-label') === '文档正文');
+      check(!document.querySelector('[role="dialog"]'), 'New document still requires a chooser');
+      click('.tab-close');
+      await until(() => document.querySelector('.welcome'));
+      check(
+        !document.querySelector('#close-document-title'),
+        'Untouched blank document needs confirmation',
+      );
+      const trigger = document.querySelector<HTMLElement>('button[aria-label="恢复草稿"]')!;
+      click('button[aria-label="恢复草稿"]');
+      await until(() => document.querySelector('.recovery-modal'));
+      const modal = document.querySelector<HTMLElement>('.recovery-modal')!;
       await settled();
-      click('.newfile-modal .modal-actions button');
-      await frame();
+      click('.recovery-modal > .modal-actions button');
+      await until(() => modal.closest('[inert]') || !modal.isConnected);
       check(
         modal.isConnected && modal.closest('[inert][aria-hidden="true"]'),
         'Closing dialog was removed early or still accepts input',
       );
       check(document.activeElement === trigger, 'Dialog exit delayed focus restoration');
-      modal.querySelector<HTMLButtonElement>('.newfile-card')!.click();
-      await frame();
-      check(!document.querySelector('[role="tab"]'), 'Exiting dialog accepted a second action');
       await until(() => !modal.isConnected);
       await openDocument(typographyDocument);
       for (const [triggerSelector, surface, closeSelector] of [
@@ -464,7 +482,7 @@ export async function runInterfaceRegression(testCase: InterfaceCase): Promise<s
         check(element.isConnected && element.closest('[inert]'), `Missing inert exit: ${surface}`);
         await until(() => !element.isConnected);
       }
-      click('button[title="导出"]');
+      click('button[aria-label="更多文件操作"]');
       await until(() => document.querySelector('.toolbar-dropdown-menu'));
       await settled();
       const menu = document.querySelector('.toolbar-dropdown-menu')!;
@@ -570,13 +588,9 @@ export async function runInterfaceRegression(testCase: InterfaceCase): Promise<s
       );
       for (let count = 1; count <= 6; count++) {
         click('button[title="新建文档 (Ctrl+N)"]');
-        await until(() => document.querySelector('.newfile-card'));
-        click('.newfile-card');
-        await until(
-          () =>
-            document.querySelectorAll('[role="tab"]').length === count &&
-            !document.querySelector('.newfile-modal'),
-        );
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await until(() => document.querySelector('.editor-tab.active .ProseMirror'));
+        await until(() => document.querySelectorAll('[role="tab"]').length === count);
       }
       document.querySelector<HTMLElement>('.tabbar')!.style.width = '420px';
       const strip = document.querySelector<HTMLElement>('.tabbar-tabs')!;
@@ -707,19 +721,10 @@ export async function runInterfaceRegression(testCase: InterfaceCase): Promise<s
       const content = document.querySelector<HTMLElement>('.typography-content')!;
       check(content.scrollWidth <= content.clientWidth, 'Font settings have horizontal overflow');
       const options = Array.from(document.querySelectorAll('.font-option'));
-      if (width > 700) {
-        check(
-          Math.abs(
-            options[0].getBoundingClientRect().top - options[2].getBoundingClientRect().top,
-          ) < 1,
-          'Desktop does not compare all three specimens in one row',
-        );
-      } else {
-        check(
-          options[1].getBoundingClientRect().top >= options[0].getBoundingClientRect().bottom,
-          'Narrow font settings are not stacked',
-        );
-      }
+      check(
+        options[1].getBoundingClientRect().top >= options[0].getBoundingClientRect().bottom,
+        'Font options are not stacked for readable comparison',
+      );
       content.scrollTop = content.scrollHeight;
       await frame();
       click('input[name="code-font"][value="cascadia-misans"]');
@@ -739,6 +744,26 @@ export async function runInterfaceRegression(testCase: InterfaceCase): Promise<s
       );
       click('button[aria-label="关闭快捷键设置"]');
       await until(() => !document.querySelector('.shortcut-modal'));
+      click('button[aria-label="搜索当前文档"]');
+      await until(() => document.querySelector('.searchbar'));
+      click('button[aria-label="显示替换"]');
+      await until(() => document.querySelector('.search-replace-input'));
+      await settled();
+      inViewport(document.querySelector('.searchbar')!, 'Search and replace panel');
+      for (const field of document.querySelectorAll('.search-input, .search-replace-input')) {
+        hitTarget(field as HTMLElement, field.getAttribute('aria-label')!);
+        check(field.getBoundingClientRect().width >= 80, 'Search text field is too narrow');
+      }
+      if (width <= 460) {
+        const heading = document.querySelector('.editor-tab.active .ProseMirror h1')!;
+        check(
+          heading.getBoundingClientRect().bottom <=
+            document.querySelector('.searchbar')!.getBoundingClientRect().top,
+          'Narrow search panel covers the beginning of the document',
+        );
+      }
+      click('button[aria-label="关闭搜索"]');
+      await until(() => !document.querySelector('.searchbar'));
       await checkCrowdedStatusbar(root, `${width}x${height}`);
     }
     return `${testCase}: passed (real DOM, CSS transitions, focus, fonts and geometry; browser-only native boundary)`;

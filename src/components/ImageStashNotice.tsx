@@ -39,7 +39,7 @@ export function ImageStashNotice({ tabId }: ImageStashNoticeProps) {
   return (
     <div className="workflow-notice image-stash-notice" role="status" aria-live="polite">
       <span>
-        {`图片暂存空间已满，${count} 张图片暂时无法预览。文字仍可正常保存，图片文件未被改动；关闭其他含图片的文稿后，继续编辑或保存即可恢复预览。`}
+        {`${count} 张图片暂时无法预览。文字可以正常保存，原图片不会被改动。关闭其他含图片的文档后，再编辑或保存以恢复预览。`}
       </span>
       <button
         className="workflow-notice-close"

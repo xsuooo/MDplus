@@ -77,8 +77,8 @@ export const ShortcutModal = memo(function ShortcutModal({
         // 明确告诉用户为什么没录上,而不是停在"按下新组合键…"
         setHint(
           MODIFIER_KEYS.has(event.key)
-            ? '只按下了修饰键,请再按一个主键。'
-            : `「${event.key}」不可录制,请使用 Ctrl / Alt / Shift / Win 组合或 F1–F12。`,
+            ? '请同时按住 Ctrl、Alt、Shift 或 Win，再按另一个键。'
+            : `「${event.key}」不能用作快捷键。请使用 Ctrl 等组合键或 F1–F12。`,
         );
         return;
       }
@@ -162,17 +162,17 @@ export const ShortcutModal = memo(function ShortcutModal({
         )}
         {duplicateGroups.length > 0 && (
           <div className="shortcut-duplicate-warning" role="alert">
-            <strong>存在重复绑定,部分快捷键不会生效</strong>
+            <strong>快捷键重复，部分操作不会生效</strong>
             <ul>
               {duplicateGroups.map((group) => (
                 <li key={group.accelerator}>
                   {formatShortcut(group.accelerator)} 已由「{ACTION_LABELS[group.active]}」使用, 「
                   {group.ignored.map((action) => ACTION_LABELS[action]).join('、')}
-                  」不会由此键位触发
+                  」无法使用这个快捷键
                 </li>
               ))}
             </ul>
-            <span>同一组合键只执行第一个匹配的操作,请清除或修改重复项。</span>
+            <span>请修改或移除重复的快捷键。</span>
           </div>
         )}
         <div className="shortcut-table-wrap">
@@ -180,7 +180,7 @@ export const ShortcutModal = memo(function ShortcutModal({
             <thead>
               <tr>
                 <th scope="col" aria-label="操作项">
-                  操作项
+                  操作
                 </th>
                 <th scope="col" aria-label="当前快捷键">
                   当前快捷键
@@ -208,9 +208,7 @@ export const ShortcutModal = memo(function ShortcutModal({
                         <th scope="row">{label}</th>
                         <td>
                           {list.length === 0 && !isCapturing ? (
-                            <kbd className="shortcut-kbd shortcut-kbd-unbound">
-                              {formatShortcut(null)}
-                            </kbd>
+                            <kbd className="shortcut-kbd shortcut-kbd-unbound">未设置</kbd>
                           ) : (
                             <span className="shortcut-kbd-list">
                               {list.map((accelerator) => (
@@ -234,7 +232,7 @@ export const ShortcutModal = memo(function ShortcutModal({
                                     className="shortcut-kbd-remove"
                                     onClick={() => removeBinding(definition.id, accelerator)}
                                     aria-label={`移除「${label}」的 ${formatShortcut(accelerator)}`}
-                                    title="移除这个键位"
+                                    title="移除这个快捷键"
                                   >
                                     ×
                                   </button>
@@ -256,7 +254,7 @@ export const ShortcutModal = memo(function ShortcutModal({
                             </span>
                           )}
                           {ignoredActions.has(definition.id) && (
-                            <span className="shortcut-ignored">存在不生效的键位</span>
+                            <span className="shortcut-ignored">存在重复快捷键</span>
                           )}
                           {list
                             .filter((accelerator) => shortcutWarning(accelerator))
@@ -314,7 +312,7 @@ export const ShortcutModal = memo(function ShortcutModal({
             onClick={restoreDefaults}
             aria-label="恢复默认快捷键"
           >
-            恢复默认值
+            恢复默认设置
           </button>
           <button type="button" className="btn" onClick={onClose} aria-label="关闭快捷键设置">
             关闭

@@ -65,7 +65,7 @@ async function selectFile(name: string) {
 }
 async function sourceField() {
   if (!document.querySelector('.source-editor:not([hidden])'))
-    click('button[aria-label="切换源码模式"]');
+    click('button[aria-label="切换 Markdown 模式"]');
   const ready: { input?: HTMLTextAreaElement } = {};
   await until(() => {
     const candidate = document.querySelector<HTMLTextAreaElement>(
@@ -319,8 +319,8 @@ export async function runSessionRegression(testCase: SessionCase): Promise<strin
     }
     if (testCase === 'session-failure-retry') {
       await until(
-        () => document.querySelector('.session-restore-notice li'),
-        'aggregated restoration failure',
+        () => tabPaths().join('|') === ['a', 'c'].map(filePath).join('|'),
+        'remaining documents restored',
       );
       check(
         tabPaths().join('|') === ['a', 'c'].map(filePath).join('|') && messages.length === 0,
@@ -333,7 +333,6 @@ export async function runSessionRegression(testCase: SessionCase): Promise<strin
           ),
         'retained failure record',
       );
-      click('button[aria-label="关闭会话恢复提示"]');
       await observe(650);
       check(
         (settings.get('document-session') as SavedDocumentSession).documents.some(
@@ -343,12 +342,26 @@ export async function runSessionRegression(testCase: SessionCase): Promise<strin
       );
       check(
         !document.querySelector('.session-restore-notice'),
-        'A dismissed failure banner reappeared without a changed failure',
+        'Unavailable saved documents produced a startup reminder',
       );
       click('button[aria-label="打开最近文件"]');
       await until(
         () => document.querySelector('.recent-session-retry'),
-        'retry entry after dismissal',
+        'retry entry for retained unavailable documents',
+      );
+      click('.recent-session-retry');
+      await until(
+        () =>
+          reads.filter((requested) => requested === filePath('b')).length === 2 &&
+          document.querySelector<HTMLButtonElement>('.recent-session-retry')?.disabled === false,
+        'unsuccessful retry remains available',
+      );
+      check(
+        !document.querySelector('.session-restore-notice') &&
+          (settings.get('document-session') as SavedDocumentSession).documents.some(
+            (entry) => entry.path === filePath('b'),
+          ),
+        'Unsuccessful retry showed a banner or discarded the failed path',
       );
       files.set(filePath('b'), '# Latest B after transient failure\n');
       retrying = true;
@@ -357,6 +370,7 @@ export async function runSessionRegression(testCase: SessionCase): Promise<strin
         () => document.querySelector<HTMLButtonElement>('.recent-session-retry')?.disabled,
         'busy retry guard',
       );
+      check(!document.querySelector('.session-restore-notice'), 'Retry reopened a reminder');
       releaseRetry();
       await until(
         () => tabPaths().length === 3 && !document.querySelector('.recent-session-retry'),
@@ -367,11 +381,11 @@ export async function runSessionRegression(testCase: SessionCase): Promise<strin
         'Retried file did not return to its saved slot',
       );
       check(
-        reads.filter((requested) => requested === filePath('b')).length === 2 &&
+        reads.filter((requested) => requested === filePath('b')).length === 3 &&
           messages.length === 0,
         'Retry duplicated I/O or opened native dialogs',
       );
-      return `${testCase}: partial startup, durable failed path, dismissed banner, menu retry and original slot restored`;
+      return `${testCase}: silent partial startup/retry, durable failed path, menu retry and original slot restored`;
     }
     if (testCase === 'session-disabled') {
       check(
@@ -400,8 +414,11 @@ export async function runSessionRegression(testCase: SessionCase): Promise<strin
     }
     if (testCase === 'session-untitled-discard') {
       click('button[title="新建文档 (Ctrl+N)"]');
-      await until(() => document.querySelector('.newfile-card'), 'new document chooser');
-      click('.newfile-card');
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await until(
+        () => document.querySelector('.editor-tab.active .ProseMirror'),
+        'untitled editor',
+      );
       const input = await sourceField();
       prepend(input, 'Explicitly abandoned untitled draft\n');
       await until(() => native.recoverySnapshots.size === 2, 'untitled recovery protection');
@@ -411,7 +428,7 @@ export async function runSessionRegression(testCase: SessionCase): Promise<strin
         () => document.querySelector('#close-document-title'),
         'untitled close confirmation',
       );
-      button('放弃');
+      button('不保存');
       await until(
         () => tabPaths().length === 1 && !native.recoverySnapshots.has(untitledId),
         'discarded untitled cleanup',
@@ -463,12 +480,12 @@ export async function runSessionRegression(testCase: SessionCase): Promise<strin
       () => document.querySelector('#close-document-title')?.textContent?.includes('a.md'),
       'first close confirmation',
     );
-    button('放弃');
+    button('不保存');
     await until(
       () => document.querySelector('#close-document-title')?.textContent?.includes('b.md'),
       'second close confirmation',
     );
-    button('取消');
+    button('继续编辑');
     await observe(750);
     const persisted = settings.get('document-session') as SavedDocumentSession;
     check(

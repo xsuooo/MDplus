@@ -24,17 +24,17 @@ export const SHORTCUT_DEFINITIONS: readonly ShortcutDefinition[] = [
   { id: 'save', label: '保存', group: '文件' },
   { id: 'saveAs', label: '另存为', group: '文件' },
   { id: 'exportHtml', label: '导出 HTML', group: '文件' },
-  { id: 'exportPdf', label: '导出 PDF', group: '文件' },
+  { id: 'exportPdf', label: '打印 / 保存 PDF', group: '文件' },
   { id: 'search', label: '查找', group: '视图' },
-  { id: 'toggleOutline', label: '切换大纲', group: '视图' },
-  { id: 'toggleSource', label: '切换源码模式', group: '视图' },
+  { id: 'toggleOutline', label: '切换目录', group: '视图' },
+  { id: 'toggleSource', label: '切换 Markdown 模式', group: '视图' },
   { id: 'closeTab', label: '关闭标签', group: '标签' },
   { id: 'nextTab', label: '下一个标签', group: '标签' },
   { id: 'prevTab', label: '上一个标签', group: '标签' },
 ];
 
 /**
- * 一个动作可以挂多个键位(例如「切换大纲」同时有 Ctrl+Shift+E 和 F11)。
+ * 一个动作可以挂多个键位(例如「切换目录」同时有 Ctrl+Shift+E 和 F11)。
  * 旧版本的 Record<Action, string | null> 由 sanitizeShortcuts 自动迁移:
  * 缺失 → 新默认值;显式 null → 空数组(用户主动解绑)。
  */
@@ -260,7 +260,7 @@ export function matchesShortcut(binding: string | null, event: ShortcutEventLike
 
 export function formatShortcut(binding: string | null): string {
   const parsed = binding === null ? null : parseAccelerator(binding);
-  if (!parsed) return '未绑定';
+  if (!parsed) return '未设置';
   const parts: string[] = [];
   if (parsed.ctrl) parts.push('Ctrl');
   if (parsed.alt) parts.push('Alt');

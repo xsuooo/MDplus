@@ -23,6 +23,20 @@ const tab: Tab = {
 };
 
 describe('tab keyboard interaction', () => {
+  it('does not show an empty tab strip before a document is opened', () => {
+    render(
+      <TabBar
+        bindings={DEFAULT_SHORTCUTS}
+        tabs={[]}
+        activeId={null}
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+        onNew={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('tablist')).toBeNull();
+  });
+
   it('uses a readable full path in the tooltip and accessible tab name', () => {
     render(
       <TabBar

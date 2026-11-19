@@ -408,15 +408,14 @@ export async function runImageDropRegression(testCase: ImageDropCase): Promise<s
     if (draft) {
       await until(() => document.querySelector('.welcome'), 'welcome ready');
       click('button[title="新建文档 (Ctrl+N)"]');
-      await until(() => document.querySelector('.newfile-card'), 'new draft modal');
-      click('.newfile-card');
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     }
     await until(
       () => document.querySelector('.editor-tab.active .ProseMirror'),
       'rich editor ready',
     );
     if (!richApp) {
-      click('button[aria-label="切换源码模式"]');
+      click('button[aria-label="切换 Markdown 模式"]');
       await until(() => activeSource(), 'source editor ready');
     }
     const input = (
@@ -543,10 +542,10 @@ export async function runImageDropRegression(testCase: ImageDropCase): Promise<s
         testCase === 'image-drop-mode-roundtrip-during-read'
       ) {
         nativeInput(input, `${original} NEW INPUT`);
-        click('button[aria-label="切换源码模式"]');
+        click('button[aria-label="切换 Markdown 模式"]');
         await until(() => !activeSource(), 'mode changed during native read');
         if (testCase === 'image-drop-mode-roundtrip-during-read') {
-          click('button[aria-label="切换源码模式"]');
+          click('button[aria-label="切换 Markdown 模式"]');
           await until(() => activeSource(), 'mode returned before native read finished');
         }
       } else {
@@ -564,7 +563,7 @@ export async function runImageDropRegression(testCase: ImageDropCase): Promise<s
             secondPath,
           'second tab active',
         );
-        click('button[aria-label="切换源码模式"]');
+        click('button[aria-label="切换 Markdown 模式"]');
         await until(() => activeSource() && activeSource() !== input, 'second source visible');
         activeSource()!.focus();
       }
@@ -584,7 +583,7 @@ export async function runImageDropRegression(testCase: ImageDropCase): Promise<s
         testCase === 'image-drop-mode-during-read' ||
         testCase === 'image-drop-mode-roundtrip-during-read'
       ) {
-        if (!activeSource()) click('button[aria-label="切换源码模式"]');
+        if (!activeSource()) click('button[aria-label="切换 Markdown 模式"]');
         await until(() => activeSource(), 'source returned');
         check(
           sourceApi(activeSource()!).read().text.includes('NEW INPUT'),
@@ -618,9 +617,8 @@ export async function runImageDropRegression(testCase: ImageDropCase): Promise<s
     );
     if (testCase.endsWith('-progress'))
       await until(
-        () =>
-          document.querySelector('.image-drop-notice')?.textContent?.includes('已插入 3 张图片'),
-        'successful insertion notice',
+        () => !document.querySelector('.image-drop-notice'),
+        'successful insertion clears its progress notice',
       );
     check(
       imports

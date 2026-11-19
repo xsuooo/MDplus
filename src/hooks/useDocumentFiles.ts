@@ -385,8 +385,9 @@ export function useDocumentFiles(workspace: Workspace, options: DocumentFileOpti
       const content = getTemplate(kind);
       const occupiedTitles = new Set(tabsRef.current.map((tab) => tab.title.toLowerCase()));
       let number = 1;
-      let title = '未命名文档.md';
-      while (occupiedTitles.has(title.toLowerCase())) title = `未命名文档 ${++number}.md`;
+      const name = kind === 'basic' ? 'Markdown 示例' : '未命名文档';
+      let title = `${name}.md`;
+      while (occupiedTitles.has(title.toLowerCase())) title = `${name} ${++number}.md`;
       addTab({ title, path: null, isNew: true, content, mtime: 0 });
     },
     [addTab, tabsRef],

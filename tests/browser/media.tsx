@@ -134,10 +134,10 @@ export async function runMediaRegression(testCase: MediaCase): Promise<string> {
     try {
       await until(() => document.querySelector('button[title="新建文档 (Ctrl+N)"]'));
       click('button[title="新建文档 (Ctrl+N)"]');
-      await until(() => document.querySelector('.newfile-card'));
-      click('.newfile-card');
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await until(() => document.querySelector('.editor-tab.active .ProseMirror'));
       await until(() => document.querySelector('.ProseMirror'));
-      click('button[aria-label="切换源码模式"]');
+      click('button[aria-label="切换 Markdown 模式"]');
       await until(() => document.querySelector('.source-textarea'));
       const input = document.querySelector<HTMLTextAreaElement>('.source-textarea')!;
       const draft = `![preview](${image(100, 60)})\n`;
@@ -147,7 +147,7 @@ export async function runMediaRegression(testCase: MediaCase): Promise<string> {
       );
       input.dispatchEvent(new Event('input', { bubbles: true }));
       await new Promise(requestAnimationFrame);
-      click('button[aria-label="返回编辑模式"]');
+      click('button[aria-label="返回正文编辑"]');
       await until(
         () =>
           document.querySelector<HTMLButtonElement>('.md-media-controls button')?.disabled ===
@@ -164,10 +164,9 @@ export async function runMediaRegression(testCase: MediaCase): Promise<string> {
         }),
       );
       await new Promise(requestAnimationFrame);
-      const newFile = document.querySelector('.newfile-card');
       check(
-        !newFile || newFile.closest('[inert]'),
-        'Viewer shortcut opened an interactive background dialog',
+        document.querySelectorAll('[role="tab"]').length === 1,
+        'Viewer shortcut created a background document',
       );
       // This calls the same close handler as a native window-close request.
       click('button[aria-label="关闭窗口"]');
@@ -656,6 +655,22 @@ export async function runMediaRegression(testCase: MediaCase): Promise<string> {
           .find((button) => button.textContent === '原始大小')!
           .click();
         await until(() => output() === '100%');
+        if (testCase === 'media-viewer-controls') {
+          const increase = dialog.querySelector<HTMLButtonElement>(
+            'button[aria-label="放大预览"]',
+          )!;
+          const decrease = dialog.querySelector<HTMLButtonElement>(
+            'button[aria-label="缩小预览"]',
+          )!;
+          increase.click();
+          await until(() => output() === '125%');
+          decrease.click();
+          await until(() => output() === '100%');
+          for (let i = 0; i < 3; i++) increase.click();
+          await until(() => output() === '195%');
+          for (let i = 0; i < 3; i++) decrease.click();
+          await until(() => output() === '100%');
+        }
         area.scrollTop = 500;
         const rect = area.getBoundingClientRect(),
           point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
@@ -674,14 +689,29 @@ export async function runMediaRegression(testCase: MediaCase): Promise<string> {
           return event;
         };
         check(wheel(-40).defaultPrevented, 'Viewer did not consume Ctrl+wheel');
-        await until(() => output() === '125%');
+        await until(() => output() === '101%');
         check(
-          Math.abs((point.y - picture.getBoundingClientRect().top) / 1.25 - originalY) < 2,
+          Math.abs((point.y - picture.getBoundingClientRect().top) / 1.01 - originalY) < 2,
           'Viewer wheel lost the image point under the pointer',
         );
         if (testCase === 'media-viewer-controls') {
           check(!wheel(40, false).defaultPrevented, 'Viewer consumed ordinary scroll');
           for (let i = 0; i < 8; i++) wheel(-40);
+          await until(() => output() === '109%');
+          wheel(40);
+          await until(() => output() === '108%');
+          const increase = dialog.querySelector<HTMLButtonElement>(
+            'button[aria-label="放大预览"]',
+          )!;
+          const decrease = dialog.querySelector<HTMLButtonElement>(
+            'button[aria-label="缩小预览"]',
+          )!;
+          for (let i = 0; i < 8; i++) increase.click();
+          await until(() => output() === '400%');
+          check(increase.disabled, 'Plus stayed enabled at the zoom maximum');
+          decrease.click();
+          await until(() => output() === '320%');
+          increase.click();
           await until(() => output() === '400%');
           const key = (value: string, extra = {}) => {
             const event = new KeyboardEvent('keydown', {
@@ -705,6 +735,11 @@ export async function runMediaRegression(testCase: MediaCase): Promise<string> {
           );
           for (let i = 0; i < 30; i++) key('-');
           await until(() => output() === '10%');
+          check(decrease.disabled, 'Minus stayed enabled at the zoom minimum');
+          wheel(-40);
+          await until(() => output() === '11%');
+          wheel(40);
+          await until(() => output() === '10%');
           wheel(-40);
           [...dialog.querySelectorAll<HTMLButtonElement>('button')]
             .find((button) => button.textContent === '适合窗口')!
@@ -714,6 +749,21 @@ export async function runMediaRegression(testCase: MediaCase): Promise<string> {
             area.scrollTop === 0 &&
               dialog.querySelector('button[aria-pressed="true"]')?.textContent === '适合窗口',
             'Fit reset failed to cancel a queued zoom',
+          );
+          const fitScale = parseFloat(picture.style.height) / selected!.height;
+          const fitPercent = Math.round(fitScale * 100);
+          check(
+            fitScale > 0.1 && fitScale < 1 && Math.abs(fitScale * 100 - fitPercent) > 0.01,
+            'Fine zoom fixture must start at a fractional fitted percentage',
+          );
+          wheel(-40);
+          await until(() => output() === `${fitPercent + 1}%`);
+          wheel(40);
+          await until(() => output() === `${fitPercent}%`);
+          check(
+            Math.abs(parseFloat(picture.style.height) / selected!.height - fitPercent / 100) <
+              0.00001,
+            'Fine zoom display and image scale disagree',
           );
         } else {
           if (testCase === 'media-viewer-close-queued') {

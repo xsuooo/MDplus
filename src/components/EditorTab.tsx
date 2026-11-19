@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useRef } from 'react';
 import { useEditor, Milkdown, MilkdownProvider } from '@milkdown/react';
-import type { Editor } from '@milkdown/kit/core';
+import { editorViewCtx, type Editor } from '@milkdown/kit/core';
 import { createEditor, getCurrentState, getEditorImageReferences } from '../lib/editor';
 import {
   imagePreviewUrl,
@@ -17,6 +17,7 @@ import type { MediaPreview } from '../lib/media';
 interface EditorTabProps {
   tabId: string;
   initialContent: string;
+  isNew: boolean;
   active: boolean;
   sourceMode: boolean;
   onUpdate: (id: string, update: EditorUpdate, isInitial?: boolean, coalesced?: boolean) => void;
@@ -101,6 +102,15 @@ function EditorTabInner(props: EditorTabProps) {
     if (!editor || initializedRef.current) return;
     initializedRef.current = true;
     latest.current.onUpdate(tabId, getCurrentState(editor, initialContentRef.current), true);
+    const view = editor.action((ctx) => ctx.get(editorViewCtx));
+    view.dom.setAttribute('aria-label', '文档正文');
+    if (
+      latest.current.isNew &&
+      latest.current.active &&
+      !latest.current.sourceMode &&
+      !document.activeElement?.closest('input, textarea, select, [role="dialog"], .recent-menu')
+    )
+      view.focus();
   }, [editor, tabId]);
 
   return (

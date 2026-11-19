@@ -66,6 +66,32 @@ afterEach(() => {
 });
 
 describe('recovery identity and publication', () => {
+  it('shows a cleanup warning while keeping an intact recovery available', () => {
+    const entries = [
+      {
+        id: 'locked',
+        title: 'intact draft',
+        originalPath: null,
+        updatedAt: 1,
+        damaged: false,
+        cleanupError: 'file is locked',
+      },
+    ];
+    render(
+      <RecoveryModal
+        entries={entries}
+        onRestore={async () => {}}
+        onRemove={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByRole('status').textContent).toContain('自动清理');
+    expect(screen.getByText('intact draft')).toBeTruthy();
+    expect((screen.getByRole('button', { name: '恢复副本' }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+
   it('shares an in-flight restore instead of adding a duplicate id or installing images twice', async () => {
     const gate = deferred<ReturnType<typeof restored>>();
     mocks.restore.mockReturnValue(gate.promise);

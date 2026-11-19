@@ -30,6 +30,7 @@ export interface RecoveryEntry {
   originalPath: string | null;
   updatedAt: number;
   damaged: boolean;
+  cleanupError?: string;
 }
 export type RecoveryStatus = 'pending' | 'protected' | 'error' | 'idle';
 

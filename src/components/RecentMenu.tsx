@@ -34,34 +34,6 @@ export const RecentMenu = memo(function RecentMenu({
       <div className="menu-mask" onClick={onClose} role="presentation" />
       <div ref={menuRef} className="recent-menu" role="menu" aria-label="最近打开" tabIndex={-1}>
         <div className="recent-menu-header">最近打开</div>
-        {onRestoreSessionChange && (
-          <div className="recent-session-preference">
-            <button
-              type="button"
-              className="recent-session-setting"
-              role="menuitemcheckbox"
-              aria-checked={restoreSessionEnabled}
-              disabled={sessionRestoreBusy}
-              onClick={() => onRestoreSessionChange(!restoreSessionEnabled)}
-            >
-              <span className="recent-session-check" aria-hidden="true">
-                {restoreSessionEnabled ? '✓' : ''}
-              </span>
-              <span>恢复上次会话</span>
-            </button>
-            <p>下次启动时继续上次打开的文稿。</p>
-            {sessionFailureCount > 0 && onRetrySession && (
-              <button
-                className="recent-session-retry"
-                role="menuitem"
-                onClick={onRetrySession}
-                disabled={sessionRestoreBusy}
-              >
-                {sessionRestoreBusy ? '正在重试…' : '重试会话恢复'}
-              </button>
-            )}
-          </div>
-        )}
         {items.length === 0 ? (
           <div className="recent-menu-empty">暂无最近打开的文件</div>
         ) : (
@@ -75,7 +47,12 @@ export const RecentMenu = memo(function RecentMenu({
                   role="menuitem"
                 >
                   <IconClock size={14} />
-                  <span className="recent-menu-name">{f.name}</span>
+                  <span className="recent-menu-file">
+                    <span className="recent-menu-name">{f.name}</span>
+                    <span className="recent-menu-path">
+                      {displayPath(f.path).replace(/[^\\/]+$/, '')}
+                    </span>
+                  </span>
                 </button>
                 <button
                   className="recent-menu-remove"
@@ -83,13 +60,40 @@ export const RecentMenu = memo(function RecentMenu({
                     e.stopPropagation();
                     onRemove(f.path);
                   }}
-                  title="从最近列表移除"
+                  title="从列表移除，文件不会被删除"
                   aria-label={`从最近列表移除 ${f.name}`}
                 >
                   <IconClose size={12} />
                 </button>
               </div>
             ))}
+          </div>
+        )}
+        {onRestoreSessionChange && (
+          <div className="recent-session-preference">
+            <button
+              type="button"
+              className="recent-session-setting"
+              role="menuitemcheckbox"
+              aria-checked={restoreSessionEnabled}
+              disabled={sessionRestoreBusy}
+              onClick={() => onRestoreSessionChange(!restoreSessionEnabled)}
+            >
+              <span className="recent-session-check" aria-hidden="true">
+                {restoreSessionEnabled ? '✓' : ''}
+              </span>
+              <span>启动时打开上次的文档</span>
+            </button>
+            {sessionFailureCount > 0 && onRetrySession && (
+              <button
+                className="recent-session-retry"
+                role="menuitem"
+                onClick={onRetrySession}
+                disabled={sessionRestoreBusy}
+              >
+                {sessionRestoreBusy ? '正在重试…' : '重新打开失败的文档'}
+              </button>
+            )}
           </div>
         )}
       </div>

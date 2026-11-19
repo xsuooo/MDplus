@@ -19,6 +19,11 @@ function ByName($name){
   $condition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty,$name)
   (Root).FindFirst([Windows.Automation.TreeScope]::Descendants,$condition)
 }
+function WaitExportIdle{
+  (ByName '更多文件操作').GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+  Until {$null-ne(ByName '导出为 HTML') -and (ByName '导出为 HTML').Current.IsEnabled} 'Print did not release the export lock'
+  (ByName '更多文件操作').GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+}
 function Inspect{
   $root=Root
   $items=$root.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
@@ -41,19 +46,17 @@ try{
     $info=New-Object Diagnostics.ProcessStartInfo;$info.FileName=$exe;$info.Arguments='"'+$doc+'"';$info.UseShellExecute=$false
     $script:app=[Diagnostics.Process]::Start($info)
     Until {$script:app.Refresh();$script:app.MainWindowHandle-ne 0} 'No native editor'
-    Until {$null-ne(ByName '导出')} 'Export unavailable'
-    (ByName '导出').SetFocus()
+    Until {$null-ne(ByName '更多文件操作')} 'File menu unavailable'
+    (ByName '更多文件操作').SetFocus()
     [Windows.Forms.SendKeys]::SendWait('^+h')
     Until {
-      $texts=(Root).FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
-      @($texts|Where-Object {$_.Current.Name -like '将导出可离线打开*MB*'}).Count-gt 0
-    } 'Native HTML size confirmation did not appear'
+      $condition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::AutomationIdProperty,'1001')
+      $null-ne((Root).FindFirst([Windows.Automation.TreeScope]::Descendants,$condition))
+    } 'Native HTML save dialog did not appear'
     Inspect
-    Check ($true) 'Native HTML size confirmation appeared'
+    Check ($true) 'HTML export opened the native save dialog directly'
   }elseif($Stage-eq 'html'){
-    # Caller invokes this while the size confirmation is foreground.
-    [Windows.Forms.SendKeys]::SendWait('{ENTER}')
-    Start-Sleep -Milliseconds 700
+    # Caller invokes this while the native save dialog is foreground.
     Paste 'C:\Phase1Results\离线 原生文档.html'
     [Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Until {Test-Path 'C:\Phase1Results\离线 原生文档.html'} 'HTML was not written'
@@ -66,7 +69,7 @@ try{
   }elseif($Stage-eq 'pdf'){
     # WebView2 can focus its download bubble after saving a PDF.
     [Windows.Forms.SendKeys]::SendWait('{ESC}')
-    (ByName '导出').SetFocus()
+    (ByName '更多文件操作').SetFocus()
     [Windows.Forms.SendKeys]::SendWait('^+p')
     Until {$null-ne(ByName '打印')} 'Native print preview did not open'
     Start-Sleep -Seconds 2
@@ -77,16 +80,16 @@ try{
     Paste 'C:\Phase1Results\原生 打印.pdf'
     [Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Until {(Test-Path 'C:\Phase1Results\原生 打印.pdf') -and (Get-Item 'C:\Phase1Results\原生 打印.pdf').Length-gt 1000} 'Native PDF was not saved'
-    Until {$null-ne(ByName '导出') -and (ByName '导出').Current.IsEnabled} 'Print did not release the export lock'
+    WaitExportIdle
     Check ($true) 'Actual print preview saved PDF and released export lock'
   }elseif($Stage-eq 'cancel-pdf'){
     (ByName '取消').GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Until {$null-ne(ByName '导出') -and (ByName '导出').Current.IsEnabled} 'Print cancel did not release export lock'
+    WaitExportIdle
     Check ($true) 'Native print cancellation returned to usable editor'
   }elseif($Stage-eq 'finish'){
     Check (Test-Path 'C:\Phase1Results\原生 打印.pdf') 'Native PDF exists'
     Check ((Get-FileHash -LiteralPath $doc).Hash-eq (Get-Content C:\Phase1Results\export-original-hash.txt)) 'Print did not modify original document'
-    Until {$null-ne(ByName '导出') -and (ByName '导出').Current.IsEnabled} 'Editor did not return after print'
+    WaitExportIdle
     Inspect
     [void]$script:app.CloseMainWindow()
     Check ($script:app.WaitForExit(15000)) 'Export session closed without unsaved prompt'

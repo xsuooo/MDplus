@@ -267,10 +267,10 @@ export async function runContinuityRegression(testCase: ContinuityCase): Promise
   try {
     await until(() => document.querySelector('button[title="新建文档 (Ctrl+N)"]'));
     click('button[title="新建文档 (Ctrl+N)"]');
-    await until(() => document.querySelector('.newfile-card'));
-    click('.newfile-card');
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await until(() => document.querySelector('.editor-tab.active .ProseMirror'));
     await until(() => document.querySelector('.ProseMirror'));
-    click('button[aria-label="切换源码模式"]');
+    click('button[aria-label="切换 Markdown 模式"]');
     await until(() => document.querySelector('.source-editor:not([hidden]) .source-textarea'));
     let field = document.querySelector<HTMLTextAreaElement>(
       '.source-editor:not([hidden]) .source-textarea',
@@ -278,13 +278,13 @@ export async function runContinuityRegression(testCase: ContinuityCase): Promise
     if (testCase === 'mode-input-isolation') {
       input(field, '```text\n题目内容\n```');
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      click('button[aria-label="切换源码模式"]');
+      click('button[aria-label="切换 Markdown 模式"]');
       await until(() => document.querySelector('.md-code-copy'));
       const rendered = document.querySelector<HTMLElement>('.editor-tab.active')!;
       const mirror = rendered.querySelector('.ProseMirror');
       const copy = rendered.querySelector<HTMLButtonElement>('.md-code-copy')!;
       const height = rendered.getBoundingClientRect().height;
-      click('button[aria-label="切换源码模式"]');
+      click('button[aria-label="切换 Markdown 模式"]');
       await until(() => document.querySelector('.source-editor:not([hidden])'));
       check(
         rendered.inert && rendered.getAttribute('aria-hidden') === 'true',
@@ -298,7 +298,7 @@ export async function runContinuityRegression(testCase: ContinuityCase): Promise
         rendered.getBoundingClientRect().height === height,
         'Input isolation changed rendered-editor geometry',
       );
-      click('button[aria-label="切换源码模式"]');
+      click('button[aria-label="切换 Markdown 模式"]');
       await until(() => !document.querySelector('.source-editor:not([hidden])'));
       check(
         !rendered.inert &&
@@ -330,13 +330,13 @@ export async function runContinuityRegression(testCase: ContinuityCase): Promise
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
         const at = markdown.indexOf(selected);
         field.setSelectionRange(at, at + selected.length);
-        click('button[aria-label="切换源码模式"]');
+        click('button[aria-label="切换 Markdown 模式"]');
         await until(() => !document.querySelector('.source-editor:not([hidden])'));
         check(
           window.getSelection()?.toString() === selected,
           `Lost selected text in structured block: ${selected} => ${window.getSelection()?.toString()}`,
         );
-        click('button[aria-label="切换源码模式"]');
+        click('button[aria-label="切换 Markdown 模式"]');
         await until(() => document.querySelector('.source-editor:not([hidden])'));
         field = document.querySelector<HTMLTextAreaElement>(
           '.source-editor:not([hidden]) textarea',
@@ -353,7 +353,7 @@ export async function runContinuityRegression(testCase: ContinuityCase): Promise
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     if (testCase.startsWith('zoom-')) {
       await document.fonts.ready;
-      click('button[aria-label="切换源码模式"]');
+      click('button[aria-label="切换 Markdown 模式"]');
       await until(() => !document.querySelector('.source-editor:not([hidden])'));
       const rich = document.querySelector<HTMLElement>('.editor-tab.active .milkdown')!;
       const editor = rich.querySelector<HTMLElement>('.ProseMirror')!;
@@ -384,7 +384,7 @@ export async function runContinuityRegression(testCase: ContinuityCase): Promise
       );
       if (testCase === 'zoom-mode-switch') {
         const mode = document.querySelector<HTMLButtonElement>(
-          'button[aria-label="切换源码模式"]',
+          'button[aria-label="切换 Markdown 模式"]',
         )!;
         mode.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
         check(
@@ -746,7 +746,7 @@ export async function runContinuityRegression(testCase: ContinuityCase): Promise
         document.fonts.load = nativeLoad;
       }
     } else if (testCase === 'rendered-tab-position') {
-      click('button[aria-label="切换源码模式"]');
+      click('button[aria-label="切换 Markdown 模式"]');
       await until(() => !document.querySelector('.source-editor:not([hidden])'));
       const editor = document.querySelector<HTMLElement>('.editor-tab.active .ProseMirror')!;
       const scroller = document.querySelector<HTMLElement>(
@@ -754,8 +754,8 @@ export async function runContinuityRegression(testCase: ContinuityCase): Promise
       )!;
       scroller.scrollTop = 1500;
       click('button[title="新建文档 (Ctrl+N)"]');
-      await until(() => document.querySelector('.newfile-card'));
-      click('.newfile-card');
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await until(() => document.querySelector('.editor-tab.active .ProseMirror'));
       await until(() => document.querySelectorAll('[role="tab"]').length === 2);
       click('[role="tab"]');
       await until(() => document.querySelector('.editor-tab.active .ProseMirror') === editor);
@@ -766,13 +766,13 @@ export async function runContinuityRegression(testCase: ContinuityCase): Promise
       );
     } else if (testCase === 'source-tab-history') {
       click('button[title="新建文档 (Ctrl+N)"]');
-      await until(() => document.querySelector('.newfile-card'));
-      click('.newfile-card');
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await until(() => document.querySelector('.editor-tab.active .ProseMirror'));
       await until(() => document.querySelectorAll('[role="tab"]').length === 2);
       click('[role="tab"]');
       await until(() => document.querySelector('[role="tab"]')?.classList.contains('active'));
       if (!document.querySelector('.source-editor:not([hidden])'))
-        click('button[aria-label="切换源码模式"]');
+        click('button[aria-label="切换 Markdown 模式"]');
       await until(() => document.querySelector('.source-editor:not([hidden])'));
       field = document.querySelector<HTMLTextAreaElement>('.source-editor:not([hidden]) textarea')!;
       check(field.value === longDocument, 'Tab switch changed the source draft');
@@ -786,7 +786,7 @@ export async function runContinuityRegression(testCase: ContinuityCase): Promise
       );
       await until(() => field.value === '');
     } else {
-      click('button[aria-label="切换源码模式"]');
+      click('button[aria-label="切换 Markdown 模式"]');
       await until(() => !document.querySelector('.source-editor:not([hidden])'));
       const scroller = document.querySelector<HTMLElement>(
         '.editor-tab.active .milkdown-container',
@@ -797,7 +797,7 @@ export async function runContinuityRegression(testCase: ContinuityCase): Promise
           'Mode switch returned to document top instead of the reading paragraph',
         );
       }
-      click('button[aria-label="切换源码模式"]');
+      click('button[aria-label="切换 Markdown 模式"]');
       await until(() => document.querySelector('.source-editor:not([hidden])'));
       field = document.querySelector<HTMLTextAreaElement>('.source-editor:not([hidden]) textarea')!;
       check(

@@ -298,28 +298,30 @@ export async function runWindowOpenRegression(testCase: WindowOpenCase): Promise
         () =>
           native.geometry.visible &&
           document.querySelector('.app[data-starting="false"]') &&
-          document.querySelector('.welcome') &&
-          document
-            .querySelector('.session-restore-notice')
-            ?.textContent?.includes('fixture startup file unavailable'),
-        'visible startup error',
+          document.querySelector('.welcome'),
+        'welcome after unavailable startup file',
       );
       const showIndex = commands.findIndex((entry) => entry.command === 'plugin:window|show');
       const focusIndex = commands.findIndex((entry) => entry.command === 'plugin:window|set_focus');
       check(
         showIndex >= 0 && showIndex < focusIndex && messages.length === 0,
-        'The aggregated startup error blocked revealing and focusing its parent window',
+        'An unavailable startup file blocked revealing and focusing its parent window',
       );
       check(
-        document.querySelector('.session-restore-notice li')?.textContent?.includes(filePath) &&
-          document.querySelector('.session-restore-notice button')?.textContent === '重试恢复',
-        'The failed launch file was not identified with a retryable error',
+        !document.querySelector('.session-restore-notice'),
+        'An unavailable startup file showed a persistent reminder',
       );
       check(
         !document.querySelector('.welcome-recent-item') &&
           JSON.stringify(settings.get('recent-files')) === '[]',
         'The failed startup document remained in the recent list',
       );
+      document.querySelector<HTMLButtonElement>('button[aria-label="打开最近文件"]')!.click();
+      await until(
+        () => document.querySelector('.recent-session-retry'),
+        'failed startup file remains retryable from recent files',
+      );
+      document.querySelector<HTMLElement>('.menu-mask')!.click();
       await observe(200);
     }
     check(shows.length === 1, `Startup showed the window ${shows.length} times`);

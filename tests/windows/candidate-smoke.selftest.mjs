@@ -89,7 +89,7 @@ test('automation reports blocked/manual separately and validates real outputs', 
     'not_run',
     'candidateAccepted',
     'UIA ValuePattern',
-    '打印 / 另存为 PDF',
+    '打印 / 保存 PDF',
     '%PDF-',
     '%%EOF',
     'data:image/png;base64,',
@@ -171,7 +171,7 @@ test('PowerShell 5.1 decodes real Unicode selectors and only exposes fixed contr
   );
   assert.deepEqual(syntaxAudit().parameters, ['HostComputerName', 'ExpectedExeSha256', 'RunId']);
   const strings = syntaxAudit().functions.flatMap((item) => item.strings);
-  for (const label of ['Markdown 源码', '切换源码模式', '导出为 HTML', '导出为 PDF'])
+  for (const label of ['Markdown 原文', '切换 Markdown 模式', '导出为 HTML', '导出为 PDF'])
     assert.ok(strings.includes(label), label);
 });
 test('real guard expressions reject machine identity, hash and process stamp mismatches', () => {

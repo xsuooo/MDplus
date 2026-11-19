@@ -15,6 +15,8 @@ use crate::config::{
     MAX_IMAGE_STASH_ENTRIES, MAX_RECOVERY_IMAGES as MAX_IMAGES, MAX_SNAPSHOT_IMAGE_BYTES,
     RECOVERY_RETENTION_MS as RETENTION_MS,
 };
+// JSON can expand each text byte to six bytes; leave room for bounded metadata.
+const MAX_SNAPSHOT_BYTES: u64 = 6 * MAX_TEXT_FILE_BYTES + 1024 * 1024;
 static IO_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -45,6 +47,8 @@ pub struct Entry {
     original_path: Option<String>,
     updated_at: u64,
     damaged: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cleanup_error: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -176,11 +180,7 @@ fn validate(snapshot: &Snapshot) -> Result<(), String> {
         image_path(Path::new(""), &image.key)?;
         if !image.key.starts_with(&format!("{id}."))
             || !keys.insert(&image.key)
-            || image.filename.is_empty()
-            || image.filename.len() > 255
-            || image.filename.contains(['/', '\\', ':'])
-            || image.filename == "."
-            || image.filename == ".."
+            || !crate::safe_files::valid_basename(&image.filename)
         {
             return Err("invalid recovery image metadata".into());
         }
@@ -251,7 +251,7 @@ fn cache_image(
         }
     }
     // Keep the last complete snapshot while a disjoint replacement attachment set is staged.
-    if total > 2 * MAX_SNAPSHOT_IMAGE_BYTES + MAX_TEXT_FILE_BYTES + 1024 * 1024 {
+    if total > 2 * MAX_SNAPSHOT_IMAGE_BYTES + MAX_SNAPSHOT_BYTES {
         return Err("recovery cache exceeds per-document limit".into());
     }
     if path.exists() {
@@ -293,7 +293,7 @@ fn save(root: &Path, mut snapshot: Snapshot, retained_keys: &[String]) -> Result
         regular_path(&path, false)?;
     }
     let data = serde_json::to_vec(&snapshot).map_err(|e| e.to_string())?;
-    if data.len() as u64 > MAX_TEXT_FILE_BYTES + 1024 * 1024 {
+    if data.len() as u64 > MAX_SNAPSHOT_BYTES {
         return Err("encoded recovery snapshot exceeds size limit".into());
     }
     // Images are durable before the manifest replaces the previous complete snapshot.
@@ -303,10 +303,7 @@ fn save(root: &Path, mut snapshot: Snapshot, retained_keys: &[String]) -> Result
 }
 
 fn read_snapshot(dir: &Path, id: &str) -> Result<Snapshot, String> {
-    let data = read_limited(
-        &dir.join("snapshot.json"),
-        MAX_TEXT_FILE_BYTES + 1024 * 1024,
-    )?;
+    let data = read_limited(&dir.join("snapshot.json"), MAX_SNAPSHOT_BYTES)?;
     let snapshot: Snapshot =
         serde_json::from_slice(&data).map_err(|_| "invalid recovery snapshot")?;
     validate(&snapshot)?;
@@ -386,10 +383,14 @@ fn list(root: &Path, active_ids: &[String], now: u64) -> Result<Vec<Entry>, Stri
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
-        if now.saturating_sub(newest) > RETENTION_MS {
-            delete(root, &id)?;
-            continue;
-        }
+        let cleanup_error = if now.saturating_sub(newest) > RETENTION_MS {
+            match delete(root, &id) {
+                Ok(()) => continue,
+                Err(error) => Some(error),
+            }
+        } else {
+            None
+        };
         if !dir.join("snapshot.json").exists() {
             entries.push(Entry {
                 id,
@@ -397,6 +398,7 @@ fn list(root: &Path, active_ids: &[String], now: u64) -> Result<Vec<Entry>, Stri
                 original_path: None,
                 updated_at: newest,
                 damaged: true,
+                cleanup_error,
             });
             continue;
         }
@@ -408,6 +410,7 @@ fn list(root: &Path, active_ids: &[String], now: u64) -> Result<Vec<Entry>, Stri
                     original_path: snapshot.original_path,
                     updated_at: snapshot.updated_at,
                     damaged: false,
+                    cleanup_error,
                 })
             }
             _ => entries.push(Entry {
@@ -416,6 +419,7 @@ fn list(root: &Path, active_ids: &[String], now: u64) -> Result<Vec<Entry>, Stri
                 original_path: None,
                 updated_at: newest,
                 damaged: true,
+                cleanup_error,
             }),
         }
     }

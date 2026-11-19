@@ -7,7 +7,7 @@ export async function resolveDocumentLink(
 ): Promise<{ path: string; hasFragment: boolean }> {
   const hash = href.indexOf('#');
   const rawPath = hash < 0 ? href : href.slice(0, hash);
-  if (!rawPath) throw new Error('暂不支持标题锚点定位。请使用相对 .md 或 .markdown 文稿链接。');
+  if (!rawPath) throw new Error('暂时无法跳到链接指定的标题。请链接到 .md 或 .markdown 文档。');
   if (rawPath.includes('?')) throw new Error('暂不支持带查询参数的文稿链接。');
   let relative = rawPath;
   try {

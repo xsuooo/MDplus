@@ -26,16 +26,16 @@ export const CloseConfirmModal = memo(function CloseConfirmModal({
         tabIndex={-1}
       >
         <h3 id="close-document-title">关闭「{title}」</h3>
-        <p id="close-document-description">该文档有未保存的改动,是否保存?</p>
+        <p id="close-document-description">更改尚未保存。不保存就关闭会丢弃这些改动。</p>
         <div className="modal-actions">
           <button className="btn btn-primary" disabled={busy} onClick={() => onConfirm('save')}>
-            保存
+            保存并关闭
           </button>
-          <button className="btn" disabled={busy} onClick={() => onConfirm('discard')}>
-            放弃
+          <button className="btn btn-danger" disabled={busy} onClick={() => onConfirm('discard')}>
+            不保存
           </button>
           <button className="btn" onClick={() => onConfirm('cancel')}>
-            取消
+            继续编辑
           </button>
         </div>
       </div>

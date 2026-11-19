@@ -1,10 +1,16 @@
 // @vitest-environment jsdom
 import type { ReactNode } from 'react';
-import { render } from '@testing-library/react';
+import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EditorUpdate } from '../src/lib/types';
 
-const editorFactory = vi.hoisted(() => ({ create: vi.fn(() => ({})) }));
+const editorFactory = vi.hoisted(() => ({
+  focus: vi.fn(),
+  create: vi.fn((root: HTMLElement) => ({
+    action: (run: (ctx: any) => unknown) =>
+      run({ get: () => ({ dom: root, focus: editorFactory.focus }) }),
+  })),
+}));
 vi.mock('../src/lib/editor', () => ({
   createEditor: editorFactory.create,
   getCurrentState: (): EditorUpdate => ({
@@ -31,7 +37,11 @@ vi.mock('@milkdown/react', async () => {
 
 import { EditorTab } from '../src/components/EditorTab';
 
-afterEach(() => editorFactory.create.mockClear());
+afterEach(() => {
+  cleanup();
+  editorFactory.create.mockClear();
+  editorFactory.focus.mockClear();
+});
 
 function tabs(active: 'a' | 'b') {
   return (['a', 'b'] as const).map((tabId) => (
@@ -39,6 +49,7 @@ function tabs(active: 'a' | 'b') {
       key={tabId}
       tabId={tabId}
       initialContent={`# ${tabId}`}
+      isNew={false}
       active={active === tabId}
       sourceMode={false}
       onUpdate={() => {}}
@@ -49,6 +60,30 @@ function tabs(active: 'a' | 'b') {
 }
 
 describe('EditorTab activation', () => {
+  it('focuses a new document when ready without stealing focus from an input', () => {
+    const props = {
+      tabId: 'new',
+      initialContent: '',
+      isNew: true,
+      active: true,
+      sourceMode: false,
+      onUpdate: vi.fn(),
+      onActivity: vi.fn(),
+      onRegister: vi.fn(),
+    };
+    const view = render(<EditorTab {...props} />);
+    expect(editorFactory.focus).toHaveBeenCalledOnce();
+    view.unmount();
+    editorFactory.focus.mockClear();
+    const input = document.createElement('input');
+    document.body.append(input);
+    input.focus();
+    render(<EditorTab {...props} />);
+    expect(editorFactory.focus).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(input);
+    input.remove();
+  });
+
   it('creates hidden editors only on first activation and retains visited editors', () => {
     const view = render(<>{tabs('a')}</>);
     expect(editorFactory.create).toHaveBeenCalledTimes(1);

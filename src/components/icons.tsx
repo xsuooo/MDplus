@@ -47,15 +47,6 @@ export const IconSave = (p: IconProps) => (
   </svg>
 );
 
-export const IconSaveAs = (p: IconProps) => (
-  <svg {...base(p.size, p)}>
-    <path d="M4 3h13l3 3v15H4Z" />
-    <path d="M8 3v5h8V3" />
-    <path d="M8 21v-6h8v6" />
-    <path d="M18 10v5M15.5 12.5H20.5" />
-  </svg>
-);
-
 export const IconImage = (p: IconProps) => (
   <svg {...base(p.size, p)}>
     <rect x="3" y="3" width="18" height="18" rx="2" />
@@ -147,10 +138,10 @@ export const IconChevronDown = (p: IconProps) => (
   </svg>
 );
 
-export const IconExport = (p: IconProps) => (
+export const IconMore = (p: IconProps) => (
   <svg {...base(p.size, p)}>
-    <path d="M12 3v12" />
-    <path d="m8 11 4-4 4 4" />
-    <path d="M3 15v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4" />
+    <circle cx="5" cy="12" r="1" />
+    <circle cx="12" cy="12" r="1" />
+    <circle cx="19" cy="12" r="1" />
   </svg>
 );

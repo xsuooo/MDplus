@@ -6,7 +6,6 @@ import katex from 'katex';
 import Prism from 'prismjs';
 import 'prismjs/components/prism-typescript';
 import { exportHtmlFile } from './fileOps';
-import { confirmDialog } from './dialog';
 import { BODY_FONTS, CODE_FONTS, type BodyFont, type CodeFont } from './editorFont';
 import { embeddedFonts, dataURL } from './fontResources';
 import { renderDiagramMedia } from './diagramRender';
@@ -258,13 +257,6 @@ export async function buildExport(snapshot: ExportSnapshot): Promise<string> {
 /** Returns false on cancellation; callers must not announce a successful write. */
 export async function exportHTML(snapshot: ExportSnapshot): Promise<boolean> {
   const html = await buildExport(snapshot);
-  const mb = exportByteLength(html) / 1024 / 1024;
-  if (
-    !(await confirmDialog(
-      `将导出可离线打开的单文件 HTML，包含字体、图片、公式和图表，约 ${mb.toFixed(1)} MB。继续？`,
-    ))
-  )
-    return false;
   const path = await save({
     defaultPath: `${snapshot.title.replace(/\.(md|markdown)$/i, '')}.html`,
     filters: [{ name: 'HTML', extensions: ['html'] }],

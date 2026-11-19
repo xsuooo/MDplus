@@ -203,7 +203,9 @@ export const SearchBar = memo(function SearchBar({
   const feedback = result
     ? result.reason === 'unavailable'
       ? '当前无法替换，请结束输入后重试'
-      : `${result.reason === 'unchanged' ? '文本未变化；' : ''}已替换 ${result.replaced} 处，跳过 ${result.skipped} 处${result.skipped ? '（格式不一致）' : ''}`
+      : result.reason === 'unchanged'
+        ? '内容没有变化'
+        : `已替换 ${result.replaced} 处${result.skipped ? `，${result.skipped} 处格式不同，未替换。可在 Markdown 模式中替换。` : ''}`
     : '';
 
   return (
@@ -235,6 +237,7 @@ export const SearchBar = memo(function SearchBar({
           title={replaceOpen ? '隐藏替换' : '显示替换'}
         >
           <IconChevronDown size={15} aria-hidden="true" />
+          <span>替换</span>
         </button>
         <div className="search-field">
           <IconSearch size={16} aria-hidden="true" />
@@ -242,7 +245,7 @@ export const SearchBar = memo(function SearchBar({
             ref={searchInput}
             className="search-input"
             aria-label="搜索关键词"
-            placeholder="搜索当前文档…"
+            placeholder="查找…"
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
             onKeyDown={(e) => {

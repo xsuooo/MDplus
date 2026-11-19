@@ -401,18 +401,18 @@ export const SourceEditor = memo(function SourceEditor({
   };
 
   return (
-    <div className="source-editor" hidden={!active} aria-label="Markdown 源码编辑">
+    <div className="source-editor" hidden={!active} aria-label="Markdown 原文编辑">
       <div className="source-editor-head">
         <div className="source-editor-title">
-          <IconCode size={15} /> <span>源码模式</span>
+          <IconCode size={15} /> <span>Markdown 原文</span>
         </div>
         <button
           className="source-editor-close"
           onClick={onClose}
-          title="返回编辑模式"
-          aria-label="返回编辑模式"
+          title="返回正文编辑"
+          aria-label="返回正文编辑"
         >
-          完成
+          返回正文
         </button>
       </div>
       <textarea
@@ -448,7 +448,7 @@ export const SourceEditor = memo(function SourceEditor({
         onMouseUp={rememberSelection}
         onPaste={handlePaste}
         spellCheck={false}
-        aria-label="Markdown 源码"
+        aria-label="Markdown 原文"
       />
     </div>
   );

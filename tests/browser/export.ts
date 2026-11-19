@@ -155,8 +155,8 @@ export async function runExportRegression(testCase: ExportCase): Promise<string>
         },
       }).install();
       check(
-        (await exportHTML(snapshot)) === false && writes === 0 && confirmations === 1,
-        'Cancelled export reported success or wrote a file',
+        (await exportHTML(snapshot)) === false && writes === 0 && confirmations === 0,
+        'Cancelled export reported success, wrote a file or required an extra confirmation',
       );
     } else if (testCase === 'export-missing-image') {
       const failed = captureExport(

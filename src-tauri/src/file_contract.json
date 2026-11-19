@@ -621,6 +621,9 @@
         },
         "damaged": {
           "type": "boolean"
+        },
+        "cleanupError": {
+          "type": "string"
         }
       }
     },

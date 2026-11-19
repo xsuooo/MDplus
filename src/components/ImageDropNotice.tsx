@@ -25,14 +25,12 @@ export function ImageDropNotice({ result, progress, onDismiss }: ImageDropNotice
         </span>
       </div>
     );
-  if (!result || (!result.reason && !result.inserted && !result.failures.length)) return null;
+  if (!result || (!result.reason && !result.failures.length)) return null;
   const message = result.reason
     ? reasons[result.reason]
-    : result.failures.length
-      ? result.inserted
-        ? `已插入 ${result.inserted} 张图片，${result.failures.length} 张未能插入。`
-        : `有 ${result.failures.length} 张图片未能插入。`
-      : `已插入 ${result.inserted} 张图片。Ctrl+Z 可撤销本批插入。`;
+    : result.inserted
+      ? `已插入 ${result.inserted} 张图片，${result.failures.length} 张未能插入。`
+      : `有 ${result.failures.length} 张图片未能插入。`;
 
   return (
     <div className="workflow-notice image-drop-notice" role="status" aria-live="polite">
