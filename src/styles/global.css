@@ -2778,6 +2778,25 @@ body.dragging::after {
   .statusbar-zoom {
     min-width: 38px;
   }
+  :root:has(.statusbar .status-save-paused, .statusbar .recovery-status-error) {
+    --statusbar-h: 80px;
+  }
+  .statusbar:has(.status-save-paused, .recovery-status-error) {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+  }
+  .statusbar:has(.status-save-paused, .recovery-status-error) .statusbar-left {
+    flex: 0 0 auto;
+  }
+  .statusbar:has(.status-save-paused, .recovery-status-error) .statusbar-document {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+  .statusbar:has(.status-save-paused, .recovery-status-error) .statusbar-right {
+    justify-content: flex-end;
+  }
 }
 
 /* ---------- 快捷键设置 ---------- */

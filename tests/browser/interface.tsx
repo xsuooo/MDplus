@@ -33,6 +33,7 @@ export const interfaceCases = [
   'interface-layout-390-844',
   'interface-layout-360-640',
   'interface-layout-320-640',
+  'interface-statusbar-clipping',
   'window-open-delayed-recents',
   'window-open-delayed-preferences',
   'window-open-delayed-file',
@@ -66,8 +67,7 @@ async function settled() {
     document.getAnimations().map((animation) => animation.finished.catch(() => {})),
   );
 }
-function inViewport(element: Element, label: string) {
-  const box = element.getBoundingClientRect();
+function inViewport(element: Element, label: string, box = element.getBoundingClientRect()) {
   check(
     box.width > 0 &&
       box.height > 0 &&
@@ -77,6 +77,106 @@ function inViewport(element: Element, label: string) {
       box.bottom <= innerHeight + 1,
     `${label} is outside the viewport: ${JSON.stringify(box.toJSON())}`,
   );
+}
+function visibleRect(
+  element: HTMLElement,
+  box: DOMRectReadOnly = element.getBoundingClientRect(),
+  clipSelf = false,
+): DOMRect {
+  let left = Math.max(0, box.left);
+  let top = Math.max(0, box.top);
+  let right = Math.min(innerWidth, box.right);
+  let bottom = Math.min(innerHeight, box.bottom);
+  for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
+    const style = getComputedStyle(ancestor);
+    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0)
+      return new DOMRect(left, top, 0, 0);
+    if (ancestor === element && !clipSelf) continue;
+    const bounds = ancestor.getBoundingClientRect();
+    const scaleX = ancestor.offsetWidth ? bounds.width / ancestor.offsetWidth : 1;
+    const scaleY = ancestor.offsetHeight ? bounds.height / ancestor.offsetHeight : 1;
+    const clientLeft = bounds.left + ancestor.clientLeft * scaleX;
+    const clientTop = bounds.top + ancestor.clientTop * scaleY;
+    if (['hidden', 'clip', 'scroll', 'auto'].includes(style.overflowX)) {
+      left = Math.max(left, clientLeft);
+      right = Math.min(right, clientLeft + ancestor.clientWidth * scaleX);
+    }
+    if (['hidden', 'clip', 'scroll', 'auto'].includes(style.overflowY)) {
+      top = Math.max(top, clientTop);
+      bottom = Math.min(bottom, clientTop + ancestor.clientHeight * scaleY);
+    }
+  }
+  return new DOMRect(left, top, Math.max(0, right - left), Math.max(0, bottom - top));
+}
+function checkReadableText(element: HTMLElement, text: string, label: string) {
+  const start = element.textContent?.indexOf(text) ?? -1;
+  check(start >= 0, `${label}: critical text is missing: ${text}`);
+  const style = getComputedStyle(element);
+  let textLeft = -Infinity;
+  let textRight = Infinity;
+  if (style.textOverflow === 'ellipsis' && element.scrollWidth > element.clientWidth + 1) {
+    const marker = document.createElement('span');
+    marker.textContent = '…';
+    marker.style.cssText = 'position:fixed;visibility:hidden;white-space:pre;width:max-content';
+    marker.style.font = style.font;
+    marker.style.letterSpacing = style.letterSpacing;
+    document.body.append(marker);
+    const markerWidth = marker.getBoundingClientRect().width;
+    marker.remove();
+    const bounds = element.getBoundingClientRect();
+    const scale = element.offsetWidth ? bounds.width / element.offsetWidth : 1;
+    const clientLeft = bounds.left + element.clientLeft * scale;
+    if (style.direction === 'rtl')
+      textLeft = clientLeft + ((parseFloat(style.paddingLeft) || 0) + markerWidth) * scale;
+    else
+      textRight =
+        clientLeft +
+        (element.clientWidth - (parseFloat(style.paddingRight) || 0) - markerWidth) * scale;
+  }
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  let offset = 0;
+  let measured = 0;
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    const content = node.textContent ?? '';
+    for (
+      let index = Math.max(0, start - offset);
+      index < content.length && offset + index < start + text.length;
+      index++
+    ) {
+      const range = document.createRange();
+      range.setStart(node, index);
+      range.setEnd(node, index + 1);
+      const boxes = Array.from(range.getClientRects());
+      check(boxes.length > 0, `${label}: critical text has no visible glyph: ${text}`);
+      for (const box of boxes) {
+        const visible = visibleRect(node.parentElement!, box, true);
+        const geometry = JSON.stringify({
+          raw: box.toJSON(),
+          visible: visible.toJSON(),
+          textLeft,
+          textRight,
+        });
+        check(
+          visible.width > 0 &&
+            visible.height > 0 &&
+            box.left >= Math.max(visible.left, textLeft) - 0.5 &&
+            box.right <= Math.min(visible.right, textRight) + 0.5 &&
+            box.top >= visible.top - 0.5 &&
+            box.bottom <= visible.bottom + 0.5,
+          `${label}: critical text is clipped: ${text} (${content[index]}): ${geometry}`,
+        );
+        const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        check(
+          hit && element.contains(hit),
+          `${label}: critical text is covered: ${text} (${content[index]}): ${geometry}`,
+        );
+      }
+      measured++;
+    }
+    offset += content.length;
+  }
+  check(measured === text.length, `${label}: critical text was not fully measured: ${text}`);
 }
 function hitTarget(element: HTMLElement, label: string) {
   inViewport(element, label);
@@ -135,20 +235,27 @@ function checkStatusbarLayout(label: string, hasDocument: boolean) {
     ),
     ...buttons,
     version,
-  ].filter((element) => {
-    const box = element.getBoundingClientRect();
-    return box.width > 0 && box.height > 0;
-  });
-  for (const item of items) inViewport(item, `${label}: ${item.className}`);
+  ]
+    .map((element) => {
+      const box = visibleRect(element);
+      if (element.matches('.status-save-paused, .status-recovery.recovery-status-error'))
+        check(
+          box.width > 0 && box.height > 0,
+          `${label}: critical feedback has no visible area: ${element.className}: ${JSON.stringify({ raw: element.getBoundingClientRect().toJSON(), visible: box.toJSON() })}`,
+        );
+      return { element, box };
+    })
+    .filter(({ box }) => box.width > 0 && box.height > 0);
+  for (const { element, box } of items) inViewport(element, `${label}: ${element.className}`, box);
   for (let first = 0; first < items.length; first++) {
-    const before = items[first].getBoundingClientRect();
+    const before = items[first].box;
     for (const after of items.slice(first + 1)) {
-      const box = after.getBoundingClientRect();
+      const box = after.box;
       const overlapWidth = Math.min(before.right, box.right) - Math.max(before.left, box.left);
       const overlapHeight = Math.min(before.bottom, box.bottom) - Math.max(before.top, box.top);
       check(
         overlapWidth <= 0.5 || overlapHeight <= 0.5,
-        `${label}: status bar items overlap: ${items[first].className} / ${after.className}`,
+        `${label}: status bar items overlap: ${items[first].element.className} / ${after.element.className}: ${JSON.stringify({ first: before.toJSON(), second: box.toJSON() })}`,
       );
     }
   }
@@ -234,15 +341,23 @@ async function checkCrowdedStatusbar(root: ReturnType<typeof createRoot>, label:
   await document.fonts.ready;
   await settled();
   checkStatusbarLayout(`${label}: paused save and recovery error`, true);
-  for (const selector of ['.status-save-paused', '.status-recovery.recovery-status-error']) {
+  for (const [selector, text] of [
+    ['.status-save-paused', '自动保存已暂停'],
+    ['.status-recovery.recovery-status-error', '恢复副本失败'],
+  ]) {
     const feedback = document.querySelector<HTMLElement>(selector);
     check(
       feedback && feedback.textContent?.trim(),
       `${label}: critical save/recovery feedback is missing`,
     );
+    check(
+      feedback.getAttribute('role') === 'status',
+      `${label}: critical feedback lacks status semantics`,
+    );
+    checkReadableText(feedback, text, `${label}: ${selector}`);
     hitTarget(feedback, `${label}: ${selector}`);
     check(
-      feedback.title.includes('Ctrl+S'),
+      feedback.title.includes('Ctrl+S') && /保存|另存为/.test(feedback.title),
       `${label}: critical feedback lacks a manual save instruction`,
     );
   }
@@ -297,7 +412,84 @@ async function openDocument(text: string) {
   return source;
 }
 
+function checkClippingRegression() {
+  const host = document.createElement('div');
+  host.style.cssText =
+    'position:fixed;left:20px;top:20px;width:120px;height:100px;box-sizing:border-box;border:4px solid black;padding:6px;overflow:hidden;background:white;color:black;z-index:2147483647';
+  const auxiliary = document.createElement('span');
+  auxiliary.style.cssText = 'position:absolute;left:80px;top:60px;width:160px;height:20px';
+  const action = document.createElement('button');
+  action.style.cssText = 'position:fixed;left:160px;top:84px;width:20px;height:20px';
+  const feedback = document.createElement('span');
+  feedback.style.cssText =
+    'position:absolute;left:6px;top:6px;width:max-content;white-space:nowrap;font:14px monospace';
+  feedback.textContent = '自动保存已暂停';
+  host.append(auxiliary, feedback);
+  document.body.append(host, action);
+  const overlaps = (before: DOMRectReadOnly, after: DOMRectReadOnly) =>
+    Math.min(before.right, after.right) - Math.max(before.left, after.left) > 0.5 &&
+    Math.min(before.bottom, after.bottom) - Math.max(before.top, after.top) > 0.5;
+  const expectClipped = (label: string) => {
+    let message = '';
+    try {
+      checkReadableText(feedback, '自动保存已暂停', label);
+    } catch (error) {
+      if (!(error instanceof Error)) throw error;
+      message = error.message;
+    }
+    check(
+      message.includes('critical text is clipped'),
+      `${label}: critical clipping was not rejected: ${message}`,
+    );
+  };
+  try {
+    check(
+      overlaps(auxiliary.getBoundingClientRect(), action.getBoundingClientRect()),
+      'Controlled fixture did not reproduce raw overlap',
+    );
+    check(
+      !overlaps(visibleRect(auxiliary), visibleRect(action)),
+      'Clipped auxiliary still produces visible overlap',
+    );
+    host.style.width = '260px';
+    check(
+      overlaps(visibleRect(auxiliary), visibleRect(action)),
+      'Genuine visible overlap was incorrectly removed',
+    );
+    checkReadableText(feedback, '自动保存已暂停', 'fully readable feedback');
+    const textWidth = feedback.getBoundingClientRect().width;
+    host.style.width = `${Math.floor(textWidth * 0.75) + 14}px`;
+    hitTarget(feedback, 'partially clipped feedback with a hittable raw center');
+    expectClipped('essential suffix clipped by ancestor');
+    host.style.width = '260px';
+    feedback.style.width = `${Math.floor(textWidth * 0.75)}px`;
+    feedback.style.overflow = 'hidden';
+    feedback.style.textOverflow = 'ellipsis';
+    expectClipped('essential suffix ellipsized by feedback itself');
+    feedback.textContent = '自动保存已暂停' + ' · Ctrl+S'.repeat(5);
+    feedback.style.width = `${textWidth}px`;
+    expectClipped('ellipsis marker covers otherwise unclipped essential suffix');
+    feedback.style.width = `${textWidth + 24}px`;
+    checkReadableText(feedback, '自动保存已暂停', 'only redundant instructions are ellipsized');
+    feedback.style.left = '400px';
+    expectClipped('fully clipped critical feedback');
+    check(
+      visibleRect(feedback).width === 0,
+      'Fully clipped critical feedback retains visible width',
+    );
+    host.style.width = '80px';
+    check(visibleRect(auxiliary).width === 0, 'Fully clipped auxiliary retains visible width');
+  } finally {
+    host.remove();
+    action.remove();
+  }
+}
 export async function runInterfaceRegression(testCase: InterfaceCase): Promise<string> {
+  if (testCase === 'interface-statusbar-clipping') {
+    await document.fonts.ready;
+    checkClippingRegression();
+    return `${testCase}: passed (controlled ancestor/self clipping, text ranges and genuine overlap)`;
+  }
   if (windowOpenCases.includes(testCase as WindowOpenCase))
     return runWindowOpenRegression(testCase as WindowOpenCase);
   const switching =

@@ -39,10 +39,25 @@ function click(selector: string) {
   check(button && !button.disabled, `Missing enabled button: ${selector}`);
   button.click();
 }
-function button(label: string) {
-  const target = [...document.querySelectorAll<HTMLButtonElement>('.modal button')].find(
-    (item) => item.textContent?.trim() === label,
-  );
+async function button(
+  label: string,
+  dialogSelector = '[role="dialog"][aria-labelledby="close-document-title"]',
+) {
+  const candidate = () =>
+    [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        `.presence:not([data-exiting]) ${dialogSelector} button`,
+      ),
+    ].find(
+      (item) =>
+        item.textContent?.trim() === label &&
+        item.isConnected &&
+        !item.disabled &&
+        !item.closest('[inert], [hidden], [data-exiting], [aria-hidden="true"]') &&
+        item.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }),
+    );
+  await until(candidate, `enabled active modal button: ${label}`);
+  const target = candidate();
   check(target && !target.disabled, `Missing modal button: ${label}`);
   target.click();
 }
@@ -245,7 +260,7 @@ export async function runSessionRegression(testCase: SessionCase): Promise<strin
     );
     if (native.recoverySnapshots.has(independentId)) {
       await until(() => document.querySelector('.recovery-modal'), 'independent draft prompt');
-      button('稍后处理');
+      await button('稍后处理', '.recovery-modal');
       await until(() => !document.querySelector('.recovery-modal'), 'draft prompt dismissal');
     }
     if (testCase === 'session-latest-disk') {
@@ -428,7 +443,7 @@ export async function runSessionRegression(testCase: SessionCase): Promise<strin
         () => document.querySelector('#close-document-title'),
         'untitled close confirmation',
       );
-      button('不保存');
+      await button('丢弃更改并关闭');
       await until(
         () => tabPaths().length === 1 && !native.recoverySnapshots.has(untitledId),
         'discarded untitled cleanup',
@@ -480,12 +495,12 @@ export async function runSessionRegression(testCase: SessionCase): Promise<strin
       () => document.querySelector('#close-document-title')?.textContent?.includes('a.md'),
       'first close confirmation',
     );
-    button('不保存');
+    await button('丢弃更改并关闭');
     await until(
       () => document.querySelector('#close-document-title')?.textContent?.includes('b.md'),
       'second close confirmation',
     );
-    button('继续编辑');
+    await button('继续编辑');
     await observe(750);
     const persisted = settings.get('document-session') as SavedDocumentSession;
     check(

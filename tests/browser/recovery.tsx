@@ -252,9 +252,21 @@ export async function runRecoveryRegression(testCase: RecoveryCase): Promise<str
       if (testCase === 'recovery-discard') {
         click('.tab.active .tab-close');
         await until(() => document.querySelector('#close-document-title'));
-        const discard = [
-          ...document.querySelectorAll<HTMLButtonElement>('.modal-actions button'),
-        ].find((button) => button.textContent?.trim() === '不保存');
+        const candidate = () =>
+          [
+            ...document.querySelectorAll<HTMLButtonElement>(
+              '.presence:not([data-exiting]) [role="dialog"][aria-labelledby="close-document-title"] .modal-actions button',
+            ),
+          ].find(
+            (button) =>
+              button.textContent?.trim() === '丢弃更改并关闭' &&
+              button.isConnected &&
+              !button.disabled &&
+              !button.closest('[inert], [hidden], [data-exiting], [aria-hidden="true"]') &&
+              button.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }),
+          );
+        await until(candidate);
+        const discard = candidate();
         check(discard, 'Discard confirmation was not shown');
         discard.click();
         await until(() => !document.querySelector('[role="tab"]'));

@@ -167,13 +167,18 @@ async function inspect(path, root) {
 }
 
 async function ancestors(root) {
-  const nodes = [];
+  const paths = [];
   for (let path = root; ; path = dirname(path)) {
+    paths.push(path);
+    if (path === dirname(path)) break;
+  }
+  const nodes = [];
+  for (const path of paths.reverse()) {
     const node = await inspect(path);
     if (!node.stat.isDirectory()) throw new Error('Source root and ancestors must be directories.');
     nodes.push(node);
-    if (path === dirname(path)) return nodes;
   }
+  return nodes;
 }
 
 // Node exposes junctions/symlinks but not every Windows reparse tag. This fixed

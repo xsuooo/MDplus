@@ -112,6 +112,26 @@ function click(selector: string) {
   button.click();
 }
 
+async function closeButton(label: string) {
+  const candidate = () =>
+    [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        '.presence:not([data-exiting]) [role="dialog"][aria-labelledby="close-document-title"] .modal-actions button',
+      ),
+    ].find(
+      (button) =>
+        button.textContent?.trim() === label &&
+        button.isConnected &&
+        !button.disabled &&
+        !button.closest('[inert], [hidden], [data-exiting], [aria-hidden="true"]') &&
+        button.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }),
+    );
+  await until(candidate, `enabled active close button: ${label}`);
+  const button = candidate();
+  check(button, `Missing enabled active close button: ${label}`);
+  return button;
+}
+
 async function saveAs() {
   click('button[aria-label="更多文件操作"]');
   const item = () =>
@@ -835,9 +855,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
       () => document.querySelector('#close-document-title'),
       'dirty document confirmation',
     );
-    const discard = [
-      ...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
-    ].find((button) => button.textContent === '不保存');
+    const discard = await closeButton('丢弃更改并关闭');
     check(discard, 'Missing discard button');
     discard.click();
     await until(() => awaitingWindowState, 'final metadata after confirming dirty document');
@@ -909,10 +927,11 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     close();
     await until(() => document.querySelector('#close-document-title'), 'close dialog');
     holdCleanup = true;
-    const buttons = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')];
-    buttons.find((button) => button.textContent === '不保存')!.click();
+    const discard = await closeButton('丢弃更改并关闭');
+    discard.click();
     await until(() => awaitingCleanup, 'held recovery cleanup');
-    buttons.find((button) => button.textContent === '继续编辑')!.click();
+    const cancel = await closeButton('继续编辑');
+    cancel.click();
     holdCleanup = false;
     cleanupGate.resolve();
     await until(
@@ -938,10 +957,9 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     close();
     await until(() => document.querySelector('#close-document-title'), 'close dialog');
     holdWrite = true;
-    const buttons = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')];
-    const saveButton = buttons.find((button) => button.textContent === '保存并关闭')!;
-    const discardButton = buttons.find((button) => button.textContent === '不保存')!;
-    const cancelButton = buttons.find((button) => button.textContent === '继续编辑')!;
+    const saveButton = await closeButton('保存并关闭');
+    const discardButton = await closeButton('丢弃更改并关闭');
+    const cancelButton = await closeButton('继续编辑');
     saveButton.click();
     saveButton.click();
     discardButton.click();
@@ -1258,7 +1276,9 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     await until(() => messages.length > noticesBeforeSave, 'manual overwrite confirmation');
     await until(
       () =>
-        document.querySelector('.status-save')?.textContent === '自动保存已暂停' &&
+        document
+          .querySelector('.status-save-paused[role="status"]')
+          ?.textContent?.includes('自动保存已暂停') &&
         !document.querySelector<HTMLButtonElement>('button[title^="保存 (Ctrl+S)"]')!.disabled,
       'manual conflict cancellation',
     );
@@ -1274,7 +1294,9 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
     await until(
       () =>
         files.get('C:/export/a.md')!.content.includes('local draft') &&
-        document.querySelector('.status-save')?.textContent === '已保存',
+        document
+          .querySelector('.status-save-saved[role="status"]')
+          ?.textContent?.includes('已保存到文件'),
       'SaveAs resolves pause',
     );
     check(
@@ -1974,9 +1996,7 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
         () => document.querySelector('#close-document-title'),
         'retained version close confirmation',
       );
-      const discard = [
-        ...document.querySelectorAll<HTMLButtonElement>('.modal-actions button'),
-      ].find((button) => button.textContent?.trim() === '不保存');
+      const discard = await closeButton('丢弃更改并关闭');
       check(discard, 'Pending reload close skipped the retained-version choice');
       discard.click();
       await until(() => !document.querySelector('[role="tab"]'), 'tab explicitly closed');

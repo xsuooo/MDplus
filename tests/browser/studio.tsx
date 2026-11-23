@@ -241,8 +241,9 @@ export async function runStudioRegression(testCase: StudioCase): Promise<string>
           contrast(primaryStyle.color, primaryStyle.backgroundColor) >= 4.5,
           `${material.id}/${mode} primary contrast is below AA`,
         );
-        for (const selector of ['.welcome h1', '.welcome h1 > span', '.welcome-description']) {
-          const element = document.querySelector(selector)!;
+        for (const selector of ['.welcome h1', '.welcome h1 > span', '.welcome-drop-hint']) {
+          const element = document.querySelector(selector);
+          check(element, `Missing contrast target: ${material.id}/${mode} ${selector}`);
           check(
             contrast(getComputedStyle(element).color, surface) >= 4.5,
             `${material.id}/${mode} ${selector} contrast is below AA`,

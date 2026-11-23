@@ -394,6 +394,25 @@ describe('source manifest content binding (TEST-SOURCE)', () => {
     expect(open).not.toHaveBeenCalled();
   });
 
+  it('018a rejects ancestor links before inspecting descendant metadata', async () => {
+    const root = await fixture();
+    const outside = await fixture();
+    const alias = join(root, 'alias');
+    const descendant = join(alias, 'src');
+    await symlink(outside, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const inspected = vi.spyOn(fs, 'lstat');
+    const opened = vi.spyOn(fs, 'open');
+    try {
+      await expect(createSourceManifest(descendant)).rejects.toThrow(/link|reparse|outside/i);
+      const paths = inspected.mock.calls.map(([path]) => path);
+      expect(paths).toContain(alias);
+      expect(paths).not.toContain(descendant);
+      expect(opened).not.toHaveBeenCalled();
+    } finally {
+      await rm(alias);
+    }
+  });
+
   it('019 rejects malformed schemas, noncanonical names, unknown keys and invalid byte records', async () => {
     const current = await createSourceManifest(await fixture());
     for (const bad of [
