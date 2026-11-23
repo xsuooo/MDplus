@@ -22,8 +22,21 @@ const faces = [
   ['MDPlus Cascadia Code', cascadiaCode, '200 700', 'CascadiaCode-OFL.txt'],
 ] as const;
 
+function normalizeWoff2Mime(value: string): string {
+  const prefix = /^data:[^,]*;base64,/.exec(value)?.[0];
+  if (!prefix || prefix === 'data:font/woff2;base64,') return value;
+  try {
+    if (atob(value.slice(prefix.length, prefix.length + 8)).startsWith('wOF2')) {
+      return `data:font/woff2;base64,${value.slice(prefix.length)}`;
+    }
+  } catch {
+    return value;
+  }
+  return value;
+}
+
 export async function dataURL(url: string): Promise<string> {
-  if (url.startsWith('data:')) return url;
+  if (url.startsWith('data:')) return normalizeWoff2Mime(url);
   let response: Response;
   try {
     response = await fetch(url, { signal: AbortSignal.timeout(20000) });
@@ -38,7 +51,7 @@ export async function dataURL(url: string): Promise<string> {
 export function blobDataURL(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
+    reader.onload = () => resolve(normalizeWoff2Mime(String(reader.result)));
     reader.onerror = () => reject(new Error('资源转换失败'));
     reader.readAsDataURL(blob);
   });
