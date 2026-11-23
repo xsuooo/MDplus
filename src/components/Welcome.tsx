@@ -58,7 +58,7 @@ export function Welcome({
     <div className="welcome welcome-studio">
       <div className="welcome-topline" aria-hidden="true">
         <span>YOUR WRITING ROOM</span>
-        <span>一个只属于文字的空间</span>
+        <span />
       </div>
       <div className="welcome-composition">
         <section className="welcome-copy" aria-labelledby="welcome-title">
@@ -69,19 +69,14 @@ export function Welcome({
             <span>MDPLUS / 开始写作</span>
           </div>
           <h1 id="welcome-title">
-            每个想法，
+            开始写作，
             <br />
-            <span>值得落笔。</span>
+            <span>或继续文稿。</span>
           </h1>
-          <p className="welcome-description">
-            从一行文字开始。
-            <br />
-            专注表达，其余交给这个安静的写作空间。
-          </p>
           <div className="welcome-actions">
             <button className="btn btn-primary" onClick={onNew}>
               <IconNew size={17} aria-hidden="true" />
-              <span>新建文档</span>
+              <span>新建空白文稿</span>
               <span className="welcome-action-arrow" aria-hidden="true">
                 ↗
               </span>
@@ -99,10 +94,10 @@ export function Welcome({
         <WritingScene />
       </div>
       <div className="welcome-bottomline">
-        {recents.length > 0 ? (
-          <section className="welcome-recents" aria-label="最近打开">
+        {recents.length > 0 && (
+          <section className="welcome-recents" aria-label="最近文件">
             <div className="welcome-recents-title">
-              <span>继续上次的思绪</span>
+              <span>继续写作</span>
               <span aria-hidden="true">RECENT DOCUMENTS</span>
             </div>
             <div className="welcome-recent-list">
@@ -111,7 +106,7 @@ export function Welcome({
                   key={file.path}
                   className="welcome-recent-item"
                   title={displayPath(file.path)}
-                  aria-label={`${file.name}，${displayPath(file.path)}`}
+                  aria-label={`打开 ${file.name}，${displayPath(file.path)}`}
                   onClick={() => onRecent(file.path)}
                 >
                   <span className="welcome-recent-name">{file.name}</span>
@@ -125,13 +120,9 @@ export function Welcome({
               ))}
             </div>
           </section>
-        ) : (
-          <p className="welcome-footnote">
-            <span aria-hidden="true">✳</span> 不必准备好，开始就好。
-          </p>
         )}
         <button className="welcome-example" onClick={onExample}>
-          <span>先看看示例文档</span>
+          <span>打开示例文档</span>
           <span aria-hidden="true">↗</span>
         </button>
       </div>

@@ -122,9 +122,11 @@ export function useRecovery(workspace: Workspace) {
           // No await may separate them: a stale read must not reset a live cache.
           if (!prepared.commit()) return;
           const snapshot = prepared.snapshot;
+          const stem = basename(snapshot.title).replace(/\.md$/i, '');
+          const title = snapshot.originalPath ? stem : stem.replace(/(?: \(恢复\))+$/, '');
           addTab(
             {
-              title: `${basename(snapshot.title).replace(/\.md$/i, '')} (恢复).md`,
+              title: `${title} (恢复).md`,
               path: null,
               isNew: true,
               content: snapshot.markdown,

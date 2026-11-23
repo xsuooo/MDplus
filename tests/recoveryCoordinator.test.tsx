@@ -1,5 +1,13 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  within,
+} from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RecoveryModal } from '../src/components/RecoveryModal';
 import { useWorkspace } from '../src/hooks/useWorkspace';
@@ -66,6 +74,46 @@ afterEach(() => {
 });
 
 describe('recovery identity and publication', () => {
+  it.each([
+    ['recovered.md', 'recovered (恢复).md'],
+    ['recovered (恢复).md', 'recovered (恢复).md'],
+    ['recovered (恢复) (恢复).MD', 'recovered (恢复).md'],
+    ['2026 (恢复) notes.md', '2026 (恢复) notes (恢复).md'],
+  ])('marks recovery once for %s', async (title, expected) => {
+    mocks.restore.mockImplementation(async (id: string) => {
+      const copy = restored(id);
+      return { ...copy, snapshot: { ...copy.snapshot, title } };
+    });
+    const hook = setup();
+    await act(async () => {
+      await hook.result.current.recovery.handleRestore('title-check');
+    });
+    const tab = hook.result.current.workspace.tabs.find((entry) => entry.id === 'title-check');
+    expect(tab).toMatchObject({ id: 'title-check', title: expected, path: null, isNew: true });
+    expect(hook.result.current.workspace.resolveContent(tab!)).toBe('original');
+    expect(mocks.restore).toHaveBeenCalledTimes(1);
+    expect(mocks.installImages).toHaveBeenCalledTimes(1);
+  });
+  it('preserves a recovery suffix belonging to an original file', async () => {
+    mocks.restore.mockImplementation(async (id: string) => {
+      const copy = restored(id);
+      return {
+        ...copy,
+        snapshot: {
+          ...copy.snapshot,
+          title: 'saved (恢复).md',
+          originalPath: 'C:\\notes\\saved (恢复).md',
+        },
+      };
+    });
+    const hook = setup();
+    await act(async () => {
+      await hook.result.current.recovery.handleRestore('saved-name');
+    });
+    const tab = hook.result.current.workspace.tabs.find((entry) => entry.id === 'saved-name');
+    expect(tab).toMatchObject({ title: 'saved (恢复) (恢复).md', path: null, isNew: true });
+    expect(hook.result.current.workspace.resolveContent(tab!)).toBe('original');
+  });
   it('shows a cleanup warning while keeping an intact recovery available', () => {
     const entries = [
       {
@@ -143,8 +191,11 @@ describe('recovery identity and publication', () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: '恢复管理' }));
     fireEvent.click(screen.getByRole('button', { name: '恢复副本' }));
-    expect((screen.getByRole('button', { name: '恢复副本' }) as HTMLButtonElement).disabled).toBe(
+    expect((screen.getByRole('button', { name: '恢复中…' }) as HTMLButtonElement).disabled).toBe(
       true,
+    );
+    expect(within(screen.getByRole('dialog')).getByRole('status').textContent).toContain(
+      '正在恢复「recovered」为新副本',
     );
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
     expect(screen.queryByRole('dialog')).toBeNull();

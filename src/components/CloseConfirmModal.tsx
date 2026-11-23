@@ -23,16 +23,23 @@ export const CloseConfirmModal = memo(function CloseConfirmModal({
         aria-modal="true"
         aria-labelledby="close-document-title"
         aria-describedby="close-document-description"
+        aria-busy={busy}
         tabIndex={-1}
       >
         <h3 id="close-document-title">关闭「{title}」</h3>
-        <p id="close-document-description">更改尚未保存。不保存就关闭会丢弃这些改动。</p>
+        <p id="close-document-description">
+          {busy ? (
+            <span role="status">正在处理关闭，可选择「继续编辑」取消本次关闭。</span>
+          ) : (
+            '更改尚未保存。丢弃更改并关闭后，这些改动不会自动恢复。'
+          )}
+        </p>
         <div className="modal-actions">
           <button className="btn btn-primary" disabled={busy} onClick={() => onConfirm('save')}>
             保存并关闭
           </button>
           <button className="btn btn-danger" disabled={busy} onClick={() => onConfirm('discard')}>
-            不保存
+            丢弃更改并关闭
           </button>
           <button className="btn" onClick={() => onConfirm('cancel')}>
             继续编辑

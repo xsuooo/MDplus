@@ -32,10 +32,10 @@ export const RecentMenu = memo(function RecentMenu({
   return (
     <>
       <div className="menu-mask" onClick={onClose} role="presentation" />
-      <div ref={menuRef} className="recent-menu" role="menu" aria-label="最近打开" tabIndex={-1}>
-        <div className="recent-menu-header">最近打开</div>
+      <div ref={menuRef} className="recent-menu" role="menu" aria-label="最近文件" tabIndex={-1}>
+        <div className="recent-menu-header">最近文件</div>
         {items.length === 0 ? (
-          <div className="recent-menu-empty">暂无最近打开的文件</div>
+          <div className="recent-menu-empty">暂无最近文件</div>
         ) : (
           <div className="recent-menu-list">
             {items.map((f) => (
@@ -44,6 +44,7 @@ export const RecentMenu = memo(function RecentMenu({
                   className="recent-menu-item"
                   onClick={() => onOpen(f.path)}
                   title={displayPath(f.path)}
+                  aria-label={`打开 ${f.name}，${displayPath(f.path)}`}
                   role="menuitem"
                 >
                   <IconClock size={14} />
@@ -60,8 +61,8 @@ export const RecentMenu = memo(function RecentMenu({
                     e.stopPropagation();
                     onRemove(f.path);
                   }}
-                  title="从列表移除，文件不会被删除"
-                  aria-label={`从最近列表移除 ${f.name}`}
+                  title="从最近文件列表移除，不会删除文件"
+                  aria-label={`从最近文件移除 ${f.name}，${displayPath(f.path)}；不会删除文件`}
                 >
                   <IconClose size={12} />
                 </button>

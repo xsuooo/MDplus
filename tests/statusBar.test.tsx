@@ -6,8 +6,9 @@ import type { ComponentProps } from 'react';
 import { APP_VERSION_DETAILS, APP_VERSION_LABEL } from '../src/lib/appVersion';
 import { DEFAULT_SHORTCUTS } from '../src/lib/shortcuts';
 
-// The browser-only typography popover is covered by the browser suite, not these status-copy checks.
+// Keep browser-only controls out of these status-copy checks.
 vi.mock('../src/components/TypographyPanel', () => ({ TypographyPanel: () => null }));
+vi.mock('../src/components/EditorZoom', () => ({ EditorZoom: () => null }));
 
 const tab: Tab = {
   id: 'test',
@@ -88,7 +89,7 @@ describe('status feedback', () => {
   it('does not equate a protected recovery copy with a formal save', () => {
     const html = render('dirty', { ...tab, dirty: true });
     expect(html).toContain('未保存');
-    expect(html).toContain('可恢复');
+    expect(html).toContain('本机恢复副本可用');
     expect(html).toContain('不等于正式保存');
   });
   it('shows one unsaved message and no placeholder path for a new document', () => {
@@ -105,11 +106,50 @@ describe('status feedback', () => {
     expect(html).not.toContain('已保存');
   });
   it('keeps draft failures actionable without a redundant healthy protection message', () => {
-    expect(render('saved')).not.toContain('可恢复');
+    expect(render('saved')).not.toContain('本机恢复副本可用');
     const html = render('dirty', tab, { recoveryStatus: 'error' });
-    expect(html).toContain('备份失败');
+    expect(html).toContain('本机恢复副本失败');
     expect(html).toContain('手动保存');
   });
+  it('visibly distinguishes a local recovery copy from a formal file save', () => {
+    const visible = render('dirty', { ...tab, dirty: true }).replace(/<[^>]*>/g, '');
+    expect(visible).toContain('更改未保存');
+    expect(visible).toContain('本机恢复副本可用');
+    expect(visible).not.toContain('已保存');
+    const saved = render('saved').replace(/<[^>]*>/g, '');
+    expect(saved).toContain('已保存到文件');
+    expect(saved).not.toContain('恢复副本');
+  });
+  it.each([
+    [{ ...DEFAULT_SHORTCUTS, save: ['f8'] }, '按 F8'],
+    [{ ...DEFAULT_SHORTCUTS, save: [] }, '点击工具栏「保存」'],
+  ])(
+    'makes paused-save and recovery-failure next actions visible for current bindings',
+    (bindings, action) => {
+      const paused = render('paused', tab, { bindings }).replace(/<[^>]*>/g, '');
+      expect(paused).toContain(action);
+      expect(paused).toContain('重试');
+      expect(paused).toContain('另存为');
+      const failed = render('dirty', tab, { bindings, recoveryStatus: 'error' }).replace(
+        /<[^>]*>/g,
+        '',
+      );
+      expect(failed).toContain('本机恢复副本失败');
+      expect(failed).toContain(action);
+      expect(failed).toContain('手动保存');
+      expect(failed).not.toContain('副本可用');
+    },
+  );
+  it('does not announce a pending local recovery write as an available or formally saved copy', () => {
+    const visible = render('dirty', { ...tab, dirty: true }, { recoveryStatus: 'pending' }).replace(
+      /<[^>]*>/g,
+      '',
+    );
+    expect(visible).toContain('本机恢复副本更新中');
+    expect(visible).not.toContain('副本可用');
+    expect(visible).not.toContain('已保存');
+  });
+
   it('preserves the version and build identity when no document is open', () => {
     const html = render('idle', null);
     expect(html).toContain(`>${APP_VERSION_LABEL}</span>`);

@@ -66,10 +66,12 @@ export const StatusBar = memo(function StatusBar({
     displaySaveState === 'saving'
       ? '保存中…'
       : displaySaveState === 'paused'
-        ? '自动保存已暂停'
-        : displaySaveState === 'unsaved' || displaySaveState === 'dirty'
+        ? `自动保存已暂停 · ${saveAction}重试或另存为`
+        : displaySaveState === 'unsaved'
           ? '未保存'
-          : '已保存';
+          : displaySaveState === 'dirty'
+            ? '更改未保存'
+            : '已保存到文件';
   const saveTitle =
     displaySaveState === 'paused'
       ? `自动保存已暂停。${saveAction}检查文件，或通过「更多」→「另存为」保留两份。`
@@ -110,10 +112,10 @@ export const StatusBar = memo(function StatusBar({
                   }
                 >
                   {recoveryStatus === 'error'
-                    ? '备份失败'
+                    ? `本机恢复副本失败 · ${saveAction}手动保存`
                     : recoveryStatus === 'pending'
-                      ? '备份中…'
-                      : '可恢复'}
+                      ? '本机恢复副本更新中…'
+                      : '本机恢复副本可用'}
                 </span>
               )}
             </div>
