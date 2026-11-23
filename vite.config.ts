@@ -61,7 +61,6 @@ export default defineConfig(async () => ({
             '@milkdown/kit',
             '@milkdown/react',
             '@milkdown/theme-nord',
-            '@milkdown/plugin-math',
             '@milkdown/plugin-prism',
             'katex',
             'refractor',

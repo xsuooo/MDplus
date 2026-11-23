@@ -28,7 +28,6 @@
   },
   "dependencies": {
     "@milkdown/kit": "^7.21.3",
-    "@milkdown/plugin-math": "^7.5.9",
     "@milkdown/plugin-prism": "^7.21.3",
     "@milkdown/react": "^7.21.3",
     "@milkdown/theme-nord": "^7.21.3",
@@ -38,7 +37,8 @@
     "mermaid": "11.16.1",
     "prismjs": "^1.29.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "remark-math": "6.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

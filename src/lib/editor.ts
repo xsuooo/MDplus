@@ -24,7 +24,7 @@ import { gfm, keepTableAlignPlugin } from '@milkdown/kit/preset/gfm';
 import { history } from '@milkdown/kit/plugin/history';
 
 import { $prose, $view, getMarkdown as utilsGetMarkdown } from '@milkdown/kit/utils';
-import { math, katexOptionsCtx, mathInlineSchema, mathBlockSchema } from '@milkdown/plugin-math';
+import { math, katexOptionsCtx, mathInlineSchema, mathBlockSchema } from './math';
 import katex from 'katex';
 import { prism } from '@milkdown/plugin-prism';
 import { nord } from '@milkdown/theme-nord';
