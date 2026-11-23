@@ -10,9 +10,11 @@ import { undoDepth } from '@milkdown/prose/history';
 import {
   captureRenderedSessionPlace,
   captureSourceSessionPlace,
+  renderedPlace,
   renderedSessionPlace,
   restoreSessionRendered,
   restoreSessionSource,
+  sourcePlace,
   sourceSessionPlace,
   toRendered,
   toSource,
@@ -23,6 +25,7 @@ import type { RecoveryController } from '../src/hooks/useRecovery';
 import { computeStats } from '../src/lib/stats';
 import type { Tab } from '../src/lib/types';
 import { ImageSelection } from '../src/lib/imageSelection';
+import { configureMarkdownSchemas } from '../src/lib/markdownSchemas';
 
 vi.mock('../src/lib/mermaid', () => ({ refreshMermaidTheme: vi.fn() }));
 const editors: { editor: Editor; host: HTMLElement }[] = [];
@@ -56,6 +59,7 @@ async function fixture(markdown: string) {
       ctx.set(rootCtx, host);
       ctx.set(defaultValueCtx, markdown);
     })
+    .config(configureMarkdownSchemas)
     .use(commonmark)
     .use(gfm)
     .use(history);
@@ -110,8 +114,10 @@ describe('mode selection mapping', () => {
               kind === 'backward' ? imagePosition : imagePosition + 1,
             );
       view.dispatch(view.state.tr.setSelection(selection));
+      const rendered = renderedPlace(editor);
       const saved = renderedSessionPlace(editor, markdown);
       const field = input(markdown);
+      field.style.lineHeight = '20px';
       toSource(editor, markdown, field);
       const start = markdown.indexOf(image);
       const end = start + image.length;
@@ -125,6 +131,17 @@ describe('mode selection mapping', () => {
         text: image,
         session: [start, end, direction],
       });
+      toRendered(editor, markdown, field, { markdown, rendered, source: sourcePlace(field) });
+      expect(view.state.selection.eq(selection)).toBe(true);
+      if (kind === 'node') {
+        expect(view.state.selection).toBeInstanceOf(NodeSelection);
+        expect((view.state.selection as NodeSelection).node.attrs).toEqual({
+          src: 'x.png',
+          alt: 'pic',
+          title: 'title',
+        });
+      }
+      view.state.doc.check();
     },
   );
 
@@ -159,6 +176,19 @@ describe('serialized editor positions', () => {
     original.view.state.doc.descendants((node, pos) => {
       if (node.type.name === 'image') positions.push(pos);
     });
+    expect(positions).toHaveLength(3);
+    expect(
+      Array.from(original.host.querySelectorAll('img[src]'), (image) => ({
+        src: image.getAttribute('src'),
+        alt: image.getAttribute('alt'),
+        title: image.getAttribute('title'),
+      })),
+    ).toEqual([
+      { src: 'left.png', alt: 'left', title: '' },
+      { src: 'right.png', alt: 'right', title: '' },
+      { src: 'last.png', alt: 'last', title: '' },
+    ]);
+    original.view.state.doc.check();
     original.view.dispatch(
       original.view.state.tr.setSelection(
         ImageSelection.create(original.view.state.doc, [positions[0], positions[2]]),
@@ -173,6 +203,8 @@ describe('serialized editor positions', () => {
     expect(current.view.state.selection.empty).toBe(true);
     current.view.dispatch(current.view.state.tr.deleteSelection());
     expect(current.view.state.doc).toBe(documentBefore);
+    expect(current.host.querySelectorAll('img[src]')).toHaveLength(3);
+    current.view.state.doc.check();
     expect(undoDepth(current.view.state)).toBe(0);
   });
 
