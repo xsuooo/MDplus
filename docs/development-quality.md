@@ -36,6 +36,33 @@
 
 恢复回收在原生侧测试完整旧快照、在途批次、损坏 manifest、辅助失败及两套合法大附件过渡；前端测试删除回执失效缓存、重新缓存和 pending capture 保全。两个写命令的响应与测试模拟同步，独立撤销 stash 不参加恢复回收。2026-11-08 的实际验证见[本轮记录](history/quality-fixes-2026-11-08.md)。
 
+## 条件式回归与迁移复核
+
+仅在下表触发条件命中时执行对应复核；不新增全仓扫描、依赖或门槛。正例证明应接纳或继续的业务路径，反例证明破坏性操作的安全前置仍然有效。
+
+| 已证实共因（提交）                                                      | 触发条件                                      | 执行方式：正例 / 反例                                                                                                                                                                                                                                                                                                                                                          | 验收入口                     |
+| ----------------------------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------- |
+| 错误缺少业务含义（`a1d6c6f`、`e7e1ce6`、`bbbb57d`）                     | 修改打开、外改重载或设置冲突的错误分支        | 复用既有测试：已证实 missing 才移除 recent，图片准备失败保留正文，`CONFLICT` 且 `writeState=unchanged` 才合并重试；反例为锁定/网络不可达不删 recent，其他写入状态不重读或重写，重试冲突不无限循环。                                                                                                                                                                            | E1                           |
+| 辅助失败影响主流程（`a740432`、`3639829`、`07ae81b`）                   | 调整关闭会话持久化、图片 stash 降级或恢复清理 | 复用既有失败注入：文稿已保护时 session 写失败仍可退出，`STASH_FULL` 下核验磁盘图片后保存，过期清理失败仍列出健康副本；反例为未保护的文稿不丢弃、其他 stash 错误不降级、摘要不符或缺失附件拒绝替换旧 manifest。不要把安全前置一并吞错。                                                                                                                                         | E2、N                        |
+| 跨表示准入不一致（`07ae81b`）                                           | 修改文件名、正文、manifest 或传输容量         | 复用往返测试：合法长中文文件名按 Windows UTF-16 单元校验，最大正文经 JSON 最坏转义后仍能恢复；反例为正文超上限、路径逃逸或无效附件拒绝写入且保留旧副本。原生往返不等于真实桌面 IPC 覆盖；变更传输边界时另做宿主验收并记录结果，超时记未知而非通过。                                                                                                                            | N；桌面 IPC 为人工验收       |
+| 拆分后依赖/证据指针未收拢（`7b19275`、`b211de8`、`3cebc23`、`5fcd78f`） | 拆分/迁移模块、扩大 exports 或调整历史导航    | 自动：仅禁止 `stash.ts` → `./references`（含扩展名），正例允许 `references` → `stash` 和 `stash` → `cache`，反例必须报 `no-restricted-imports`。人工：读迁移 diff 核对新增 exports 与调用点，更新本页当前职责导航；历史记录的源码行号保留当时版本，依据 [归档说明](history/README.md) 回读对应提交，不随当前重构重写。人工复核不是自动覆盖，其他依赖方向不在本规则保证范围内。 | E3；迁移 diff / 指针人工复核 |
+
+以下命令均复用现有入口；按命中行选择，不要求每次全部运行：
+
+```powershell
+# E1：错误语义与有界 CAS 重试
+npm test -- tests/sessionRestore.test.tsx tests/documentProtection.test.tsx tests/settingsStore.test.ts
+# E2：辅助失败隔离与降级前置
+npm test -- tests/sessionRestore.test.tsx tests/imageStashFull.test.ts tests/imageStashFullSave.test.tsx
+# E3：真实项目 ESLint 配置的允许/拒绝反例；既有 lint 已纳入 npm run check
+npm test -- tests/projectRules.test.ts
+npm run lint
+# N：恢复往返、拒绝危险输入、旧副本保全和清理失败隔离
+cargo test --manifest-path src-tauri/Cargo.toml --locked recovery::tests -- --test-threads=1
+```
+
+N 遇到临时目录权限问题时按下文的进程级 TEMP/TMP 方案处理；必须确认筛选实际执行了用例，零用例、未执行断言或环境失败不能记为通过。查找步进、空段缓存、卸载 timer 等单点修改沿用 `tests/searchBar.test.tsx`、`tests/markdownCache.test.ts`、`tests/tabSwitchSync.test.tsx` 的现有回归，不因此扩充流程。
+
 ## 本地入口与 CI
 
 需要 Node 22.13+（CI 使用 Node 22 / 浏览器使用 26.13）、Rust stable、rustfmt、Clippy 和 `llvm-tools-preview`。项目格式由 Prettier、EditorConfig 和 Git LF 规则统一；Rust 使用 rustfmt。CI 的 Rust 任务固定为 1.99.1（见 [ci.yml](../.github/workflows/ci.yml)），不随 stable 自动更新；升级时修改该处的版本号，并确认覆盖率门槛仍然通过。

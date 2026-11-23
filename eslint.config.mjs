@@ -30,6 +30,23 @@ export default tseslint.config(
     },
   },
   {
+    files: ['src/lib/images/stash.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['./references', './references.*'],
+              message:
+                'Keep image path helpers in stash; references may depend on stash, not back.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ['src/**/*.{ts,tsx}', 'tests/**/*.{ts,tsx}'],
     plugins: { 'react-hooks': hooks },
     rules: { 'react-hooks/rules-of-hooks': 'error', 'react-hooks/exhaustive-deps': 'error' },
