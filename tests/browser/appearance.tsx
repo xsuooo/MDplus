@@ -33,6 +33,16 @@ async function until(condition: () => unknown) {
   }
 }
 
+// Compare rendered surfaces with semantic tokens, not a superseded fixed palette.
+function tokenColor(token: string): string {
+  const probe = document.createElement('span');
+  probe.style.color = `var(${token})`;
+  document.body.append(probe);
+  const color = getComputedStyle(probe).color;
+  probe.remove();
+  return color;
+}
+
 function click(selector: string) {
   const element = document.querySelector<HTMLButtonElement>(selector);
   check(element, `Missing control: ${selector}`);
@@ -124,7 +134,7 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
       );
       const surface = document.querySelector('.app')!;
       check(
-        getComputedStyle(surface).backgroundColor === 'rgb(238, 242, 245)',
+        getComputedStyle(surface).backgroundColor === tokenColor('--bg'),
         'Initial surface is fading from an unthemed background',
       );
       check(
@@ -347,11 +357,11 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
               ),
             'Diagram surface did not follow the fast surface feedback',
           );
-          for (const [selector, expectedColor] of [
-            ['.ProseMirror', 'rgb(213, 221, 229)'],
-            ['.ProseMirror h1', 'rgb(244, 247, 250)'],
-            ['.ProseMirror strong', 'rgb(244, 247, 250)'],
-            ['.ProseMirror code', 'rgb(209, 218, 226)'],
+          for (const [selector, colorToken] of [
+            ['.ProseMirror', '--text'],
+            ['.ProseMirror h1', '--text-strong'],
+            ['.ProseMirror strong', '--text-strong'],
+            ['.ProseMirror code', '--code-text'],
           ]) {
             const element = document.querySelector(selector)!;
             check(
@@ -359,7 +369,7 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
               `Document leaf still queues its own theme animation: ${selector}`,
             );
             check(
-              getComputedStyle(element).color === expectedColor,
+              getComputedStyle(element).color === tokenColor(colorToken),
               `Document colors did not reach the latest theme immediately: ${selector}`,
             );
           }
@@ -368,8 +378,7 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
         await until(ready);
       }
       await settleAnimations();
-      const expectedBackground =
-        testCase === 'theme-rapid-toggle' ? 'rgb(251, 252, 253)' : 'rgb(21, 30, 39)';
+      const expectedBackground = tokenColor('--editor-bg');
       check(
         getComputedStyle(document.querySelector('.editor-area')!).backgroundColor ===
           expectedBackground,

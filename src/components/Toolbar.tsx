@@ -138,7 +138,14 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
         <span className="toolbar-brand-logo" aria-hidden="true">
           <IconBrand size={18} />
         </span>
-        <span className="toolbar-brand-mark">MDPlus</span>
+        <span className="toolbar-brand-copy">
+          <span className="toolbar-brand-mark">
+            MD<span className="toolbar-brand-plus">Plus</span>
+          </span>
+          <span className="toolbar-brand-caption" aria-hidden="true">
+            THE WRITING ROOM
+          </span>
+        </span>
       </div>
 
       <div className="toolbar-group toolbar-file-actions" aria-label="文件操作">

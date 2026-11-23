@@ -90,7 +90,13 @@ export const OutlinePanel = memo(function OutlinePanel({
       )}
       <div className="outline-content">
         <div className="outline-header">
-          <span className="outline-title">目录</span>
+          <span className="outline-kicker" aria-hidden="true">
+            DOCUMENT INDEX
+          </span>
+          <span className="outline-title">
+            目录
+            <span className="outline-heading-rule" aria-hidden="true" />
+          </span>
         </div>
         <div className="outline-body">
           {status ? (
@@ -106,6 +112,7 @@ export const OutlinePanel = memo(function OutlinePanel({
               <button
                 key={`${item.pos}-${i}`}
                 className="outline-item"
+                data-level={item.level}
                 style={{ paddingLeft: 8 + (item.level - 1) * 12 }}
                 onClick={() => onJump(item.pos)}
                 title={item.text}

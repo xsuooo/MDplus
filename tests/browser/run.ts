@@ -15,6 +15,7 @@ import { sessionCases, runSessionRegression, type SessionCase } from './session'
 import { imageDropCases, runImageDropRegression, type ImageDropCase } from './imageDrop';
 import { polishCases, runPolishRegression, type PolishCase } from './polish';
 import { performanceCases, runPerformanceRegression, type PerformanceCase } from './performance';
+import { studioCases, runStudioRegression, type StudioCase } from './studio';
 import 'katex/dist/katex.min.css';
 
 const testCase = new URLSearchParams(location.search).get('case') ?? 'editor-sync';
@@ -26,6 +27,8 @@ document.body.append(result);
 try {
   if (testCase === 'editor-sync') {
     result.textContent = JSON.stringify(await runEditorSyncRegression());
+  } else if (studioCases.includes(testCase as StudioCase)) {
+    result.textContent = await runStudioRegression(testCase as StudioCase);
   } else if (performanceCases.includes(testCase as PerformanceCase)) {
     result.textContent = await runPerformanceRegression(testCase as PerformanceCase);
   } else if (polishCases.includes(testCase as PolishCase)) {

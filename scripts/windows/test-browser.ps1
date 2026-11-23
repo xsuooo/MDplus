@@ -10,7 +10,7 @@ param(
 $repository = Get-LocalPath (Join-Path $PSScriptRoot '../..')
 function Get-AllBrowserCases {
     $catalog = @('editor-sync')
-    foreach ($entry in @(@('export.ts','exportCases'), @('media.tsx','mediaCases'), @('typography.tsx','typographyCases'), @('continuity.tsx','continuityCases'), @('recovery.tsx','recoveryCases'), @('appearance.tsx','appearanceCases'), @('markdownRoundtrip.ts','markdownCases'), @('mermaidCommit.ts','mermaidCases'), @('appSafety.tsx','safetyCases'), @('interface.tsx','interfaceCases'), @('codeBlock.ts','codeBlockCases'), @('replace.ts','replaceCases'), @('session.ts','sessionCases'), @('imageDrop.ts','imageDropCases'), @('polish.tsx','polishCases'), @('performance.ts','performanceCases'))) {
+    foreach ($entry in @(@('export.ts','exportCases'), @('media.tsx','mediaCases'), @('typography.tsx','typographyCases'), @('continuity.tsx','continuityCases'), @('recovery.tsx','recoveryCases'), @('appearance.tsx','appearanceCases'), @('studio.tsx','studioCases'), @('markdownRoundtrip.ts','markdownCases'), @('mermaidCommit.ts','mermaidCases'), @('appSafety.tsx','safetyCases'), @('interface.tsx','interfaceCases'), @('codeBlock.ts','codeBlockCases'), @('replace.ts','replaceCases'), @('session.ts','sessionCases'), @('imageDrop.ts','imageDropCases'), @('polish.tsx','polishCases'), @('performance.ts','performanceCases'))) {
         $source = Get-Content -LiteralPath (Join-Path $repository "tests/browser/$($entry[0])") -Raw -Encoding UTF8
         $array = [regex]::Match($source, "(?s)export const $($entry[1]) = \[(.*?)\]").Groups[1].Value
         $found = @([regex]::Matches($array, "'([^']+)'") | ForEach-Object { $_.Groups[1].Value })
@@ -91,12 +91,12 @@ try {
     foreach ($case in $Cases) {
         if ($case -notmatch '^[a-z0-9-]+$') { throw 'Invalid browser case name.' }
         $width = '1280'; $height = '800'
-        if ($case -match '^(?:interface|code-block|typography(?:-width)?)-layout-(\d+)-(\d+)$') { $width = $Matches[1]; $height = $Matches[2] }
+        if ($case -match '^(?:interface|studio|code-block|typography(?:-width)?)-layout-(\d+)-(\d+)$') { $width = $Matches[1]; $height = $Matches[2] }
         if ($viewport -ne "$width-$height") {
             $null = Invoke-Browser @('set', 'viewport', $width, $height)
             $viewport = "$width-$height"
         }
-        $reduce = $case -in @('interface-reduced-motion', 'interface-tab-scroll-reduced', 'theme-reduced-motion', 'export-diagram-bounds-reduced', 'polish-source-outline-reduced')
+        $reduce = $case -in @('interface-reduced-motion', 'interface-tab-scroll-reduced', 'theme-reduced-motion', 'export-diagram-bounds-reduced', 'polish-source-outline-reduced', 'studio-reduced-motion')
         if ($reduce -ne $reducedMotion) {
             $arguments = @('set', 'media', 'light')
             if ($reduce) { $arguments += 'reduced-motion' }

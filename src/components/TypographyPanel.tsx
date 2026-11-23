@@ -10,6 +10,7 @@ import { isComposingEvent } from '../lib/shortcuts';
 import { normalizeEditorWidth, type EditorWidth } from '../lib/editorWidth';
 import { Presence } from '../lib/presence';
 import { IconClose } from './icons';
+import { APPEARANCES, type Appearance } from '../lib/appearance';
 
 export function TypographyPanel({
   bodyFont,
@@ -18,6 +19,8 @@ export function TypographyPanel({
   onCodeFont,
   editorWidth,
   onEditorWidth,
+  appearance = 'folio',
+  onAppearance,
 }: {
   bodyFont: BodyFont;
   codeFont: CodeFont;
@@ -25,6 +28,8 @@ export function TypographyPanel({
   onCodeFont: (font: CodeFont) => void;
   editorWidth: EditorWidth;
   onEditorWidth: (width: EditorWidth) => void;
+  appearance?: Appearance;
+  onAppearance?: (appearance: Appearance) => void;
 }) {
   const [open, setOpen] = useState(false);
   const wrapper = useRef<HTMLDivElement>(null);
@@ -63,13 +68,13 @@ export function TypographyPanel({
         aria-expanded={open}
         aria-controls={open ? 'typography-panel' : undefined}
         aria-haspopup="dialog"
-        title="设置正文宽度与字体"
+        title="设置视觉风格、正文宽度与字体"
         onClick={() => setOpen((value) => !value)}
       >
         <span className="statusbar-typography-mark" aria-hidden="true">
           Aa
         </span>
-        <span className="statusbar-label">排版</span>
+        <span className="statusbar-label">外观</span>
       </button>
       <Presence present={open}>
         <div
@@ -93,7 +98,10 @@ export function TypographyPanel({
         >
           <div className="typography-head">
             <div>
-              <h3 id="typography-title">排版设置</h3>
+              <span className="typography-kicker" aria-hidden="true">
+                READING &amp; APPEARANCE
+              </span>
+              <h3 id="typography-title">排版与外观</h3>
             </div>
             <button
               className="toolbar-btn toolbar-btn-icon"
@@ -104,6 +112,36 @@ export function TypographyPanel({
             </button>
           </div>
           <div className="typography-content">
+            <fieldset className="typography-group appearance-group">
+              <legend className="typography-label">视觉风格</legend>
+              <div className="appearance-options">
+                {APPEARANCES.map((style) => (
+                  <button
+                    type="button"
+                    key={style.id}
+                    className="appearance-option"
+                    aria-label={`视觉风格：${style.name}`}
+                    aria-pressed={appearance === style.id}
+                    title={style.description}
+                    disabled={!onAppearance}
+                    onClick={() => onAppearance?.(style.id)}
+                  >
+                    <span
+                      className={`appearance-preview appearance-preview-${style.id}`}
+                      aria-hidden="true"
+                    />
+                    <span className="appearance-option-name">
+                      <span>{style.name}</span>
+                      <span aria-hidden="true">{appearance === style.id ? '✓' : '↗'}</span>
+                    </span>
+                    <span className="appearance-option-label">{style.label}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="appearance-caption">
+                三种视觉语言，同一个写作空间。浅色与深色仍可独立切换。
+              </p>
+            </fieldset>
             <fieldset className="typography-group">
               <legend className="typography-label">正文宽度</legend>
               <select

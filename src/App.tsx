@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CloseConfirmModal } from './components/CloseConfirmModal';
 import { EditorTab } from './components/EditorTab';
-import { IconBrand } from './components/icons';
+import { Welcome } from './components/Welcome';
 import { MediaViewer } from './components/MediaViewer';
 import { OutlinePanel } from './components/OutlinePanel';
 import { RecentMenu } from './components/RecentMenu';
@@ -27,6 +27,7 @@ import { useTypography } from './hooks/useTypography';
 import { useExternalChanges } from './hooks/useExternalChanges';
 import { useImageDrop } from './hooks/useImageDrop';
 import { usePreferences } from './hooks/usePreferences';
+import { useAppearance } from './hooks/useAppearance';
 import { useRecovery } from './hooks/useRecovery';
 import { useWindowLifecycle } from './hooks/useWindowLifecycle';
 import type { MediaPreview } from './lib/media';
@@ -35,7 +36,7 @@ import type { SourceEditorApi } from './lib/sourceEditorApi';
 import { showMessage } from './lib/dialog';
 import { errorMessage } from './lib/errors';
 import { readOutlineWidth, writeOutlineWidth } from './lib/outlineWidth';
-import { pathKey, displayPath } from './lib/paths';
+import { pathKey } from './lib/paths';
 import { resolveDocumentLink } from './lib/documentLinks';
 import { Presence } from './lib/presence';
 import {
@@ -48,8 +49,10 @@ import { startupView } from './lib/startup';
 import { cycleTabIndex, type TabWheelDirection } from './lib/tabWheel';
 import './styles/global.css';
 import './styles/workflow.css';
+import './styles/studio.css';
 
 export default function App() {
+  const { appearance, changeAppearance } = useAppearance();
   const workspace = useWorkspace();
   const sourceApis = useRef<Record<string, SourceEditorApi>>({});
   const imageDropHandler = useRef<
@@ -456,43 +459,13 @@ export default function App() {
           {view === 'loading' ? (
             <div className="startup-placeholder" aria-hidden="true" />
           ) : view === 'welcome' ? (
-            <div className="welcome">
-              <div className="welcome-logo" aria-hidden="true">
-                <IconBrand size={72} />
-              </div>
-              <h1>开始写作</h1>
-              <div className="welcome-actions">
-                <button className="btn btn-primary" onClick={() => createDocument('blank')}>
-                  新建文档
-                </button>
-                <button className="btn" onClick={() => void handleOpen()}>
-                  打开文件
-                </button>
-              </div>
-              {openRecents.length > 0 && (
-                <div className="welcome-recents">
-                  <div className="welcome-recents-title">最近打开</div>
-                  {openRecents.slice(0, 5).map((f) => (
-                    <button
-                      key={f.path}
-                      className="welcome-recent-item"
-                      title={displayPath(f.path)}
-                      aria-label={`${f.name}，${displayPath(f.path)}`}
-                      onClick={() => void openFileFromPath(f.path)}
-                    >
-                      <span>{f.name}</span>
-                      <span className="welcome-recent-path">
-                        {displayPath(f.path).replace(/[^\\/]+$/, '')}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-              <p className="welcome-drop-hint">也可以把 Markdown 文件拖进窗口打开</p>
-              <button className="welcome-example" onClick={() => createDocument('basic')}>
-                打开示例文档
-              </button>
-            </div>
+            <Welcome
+              recents={openRecents}
+              onNew={() => createDocument('blank')}
+              onOpen={() => void handleOpen()}
+              onExample={() => createDocument('basic')}
+              onRecent={(path) => void openFileFromPath(path)}
+            />
           ) : (
             tabs.map((tab) => (
               <EditorTab
@@ -562,6 +535,8 @@ export default function App() {
         onCodeFont={changeCodeFont}
         editorWidth={editorWidth}
         onEditorWidth={changeEditorWidth}
+        appearance={appearance}
+        onAppearance={changeAppearance}
         recoveryStatus={activeId ? recoveryStates[activeId] : undefined}
         onRecovery={() => {
           setRecoveryOpen(true);

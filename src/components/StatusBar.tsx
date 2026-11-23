@@ -3,6 +3,7 @@ import { EditorZoom } from './EditorZoom';
 import type { Tab, ThemeMode } from '../lib/types';
 import { IconSun, IconMoon, IconMonitor, IconClock } from './icons';
 import type { BodyFont, CodeFont } from '../lib/editorFont';
+import type { Appearance } from '../lib/appearance';
 import type { EditorWidth } from '../lib/editorWidth';
 import { TypographyPanel } from './TypographyPanel';
 import type { RecoveryStatus } from '../lib/recovery';
@@ -24,6 +25,8 @@ interface StatusBarProps {
   onCodeFont: (font: CodeFont) => void;
   editorWidth: EditorWidth;
   onEditorWidth: (width: EditorWidth) => void;
+  appearance?: Appearance;
+  onAppearance?: (appearance: Appearance) => void;
   recoveryStatus?: RecoveryStatus;
   onRecovery?: () => void;
 }
@@ -42,6 +45,8 @@ export const StatusBar = memo(function StatusBar({
   onCodeFont,
   editorWidth,
   onEditorWidth,
+  appearance,
+  onAppearance,
   recoveryStatus,
   onRecovery,
 }: StatusBarProps) {
@@ -156,6 +161,8 @@ export const StatusBar = memo(function StatusBar({
             onCodeFont={onCodeFont}
             editorWidth={editorWidth}
             onEditorWidth={onEditorWidth}
+            appearance={appearance}
+            onAppearance={onAppearance}
           />
           {tab && <EditorZoom area={editorAreaRef} tabId={tab.id} sourceMode={sourceMode} />}
           <button
