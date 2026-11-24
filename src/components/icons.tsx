@@ -1,5 +1,4 @@
 import type { SVGProps } from 'react';
-import appIconUrl from '../assets/app-icon.svg';
 
 type IconProps = SVGProps<SVGSVGElement> & { size?: number };
 
@@ -17,10 +16,32 @@ function base(size: number | undefined, props: IconProps): SVGProps<SVGSVGElemen
   };
 }
 
-/** Shares the exact artwork used by the desktop icon and browser favicon. */
+/**
+ * Same geometry as src/assets/app-icon.svg (desktop icon and favicon), drawn inline so the
+ * tile and ink take theme colors directly. A CSS filter on the image compiled a new GPU
+ * pipeline on the first switch to dark and stalled that frame.
+ */
 export const IconBrand = (p: IconProps) => (
-  <svg {...base(p.size, p)} viewBox="0 0 32 32" fill="none" stroke="none">
-    <image href={appIconUrl} width="32" height="32" />
+  <svg {...base(p.size, p)} viewBox="0 0 512 512" stroke="none">
+    <rect className="brand-tile" width="512" height="512" rx="112" />
+    <g transform="translate(0,31)">
+      <path
+        className="brand-ink-stroke"
+        d="M86 355V167l96 116 96-116v188"
+        strokeWidth="52"
+        strokeLinejoin="miter"
+        strokeLinecap="butt"
+      />
+      <path className="brand-ink" d="M368 158h44v40h40v44h-40v40h-44v-40h-40v-44h40Z" />
+    </g>
+  </svg>
+);
+
+/** A sheet with a folded corner: the mark in front of every tab title. */
+export const IconPage = (p: IconProps) => (
+  <svg {...base(p.size, p)}>
+    <path d="M13.5 3H7.5A2.5 2.5 0 0 0 5 5.5v13A2.5 2.5 0 0 0 7.5 21h9a2.5 2.5 0 0 0 2.5-2.5V8.5Z" />
+    <path d="M13.5 3v3a2.5 2.5 0 0 0 2.5 2.5h3" />
   </svg>
 );
 

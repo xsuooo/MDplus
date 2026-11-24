@@ -52,6 +52,44 @@ describe('tab keyboard interaction', () => {
     expect(element.getAttribute('title')).toBe('E:\\桌面\\note.md');
   });
 
+  it('leads every tab with a page mark and keeps the state on the same slot', () => {
+    render(
+      <TabBar
+        bindings={DEFAULT_SHORTCUTS}
+        tabs={[
+          { ...tab, id: 'saved', title: 'saved.md', path: 'C:/notes/saved.md', isNew: false },
+          { ...tab, id: 'edited', title: 'edited.md', isNew: false, dirty: true },
+          { ...tab, id: 'changed', title: 'changed.md', isNew: false, externalChanged: true },
+        ]}
+        activeId="saved"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+        onNew={vi.fn()}
+      />,
+    );
+    const slots = screen.getAllByRole('tab').map((element) => element.querySelector('.tab-dot')!);
+    expect(slots.map((slot) => slot.querySelectorAll('svg').length)).toEqual([1, 1, 1]);
+    expect(slots.map((slot) => slot.querySelector('svg')!.getAttribute('aria-hidden'))).toEqual([
+      'true',
+      'true',
+      'true',
+    ]);
+    expect(
+      slots.map((slot) => [slot.getAttribute('data-dirty'), slot.getAttribute('data-external')]),
+    ).toEqual([
+      ['0', '0'],
+      ['1', '0'],
+      ['0', '1'],
+    ]);
+    expect(slots[2].getAttribute('title')).toBe('文件已在外部修改');
+    // The mark never becomes part of the tab's accessible name or its title text.
+    expect(screen.getAllByRole('tab').map((element) => element.textContent)).toEqual([
+      'saved.md',
+      'edited.md',
+      'changed.md',
+    ]);
+  });
+
   it.each(['Enter', ' '])('preserves %j activation on the nested close button', (key) => {
     const onSelect = vi.fn();
     const onClose = vi.fn();

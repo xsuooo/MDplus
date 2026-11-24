@@ -51,6 +51,8 @@
 
 html[data-theme='light'] {
   color-scheme: light;
+  --brand-tile: #ffffff;
+  --brand-ink: #000000;
   --bg: #eef2f5;
   --bg-elevated: #f9fbfc;
   --bg-hover: rgba(15, 23, 42, 0.055);
@@ -83,6 +85,8 @@ html[data-theme='light'] {
 
 html[data-theme='dark'] {
   color-scheme: dark;
+  --brand-tile: #1f1f1f;
+  --brand-ink: #e0e0e0;
   --bg: #121820;
   --bg-elevated: #19232d;
   --bg-hover: rgba(255, 255, 255, 0.05);
@@ -288,6 +292,19 @@ summary {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+/* The brand mark's tile and ink take theme colors as plain fills. The dark pair equals the
+   former invert(0.88) of the white tile and black ink. */
+.brand-tile {
+  fill: var(--brand-tile);
+}
+.brand-ink {
+  fill: var(--brand-ink);
+}
+.brand-ink-stroke {
+  fill: none;
+  stroke: var(--brand-ink);
 }
 
 .toolbar-brand-mark {
@@ -826,6 +843,10 @@ summary {
   color: var(--text);
   font-size: inherit;
   line-height: inherit;
+}
+/* Feedback for the pointer only. An idle button takes a new theme with the rest of the
+   document instead of running its own color animation in every code block. */
+.md-code-copy:is(:hover, :active, :focus-visible) {
   transition: var(--theme-transition);
 }
 .md-code-copy:hover {
@@ -1045,6 +1066,12 @@ summary {
 .statusbar-theme svg {
   display: block;
   flex-shrink: 0;
+}
+/* The three mode names differ in length. One fixed slot keeps the status bar still while the
+   button cycles through them. */
+.statusbar-theme-mode .statusbar-label {
+  min-width: 4em;
+  text-align: left;
 }
 .typography-control {
   display: flex;
@@ -1981,8 +2008,7 @@ body.dragging::after {
 ) {
   transition: var(--theme-transition);
 }
-.search-input::placeholder,
-.ProseMirror li::marker {
+.search-input::placeholder {
   transition: color var(--motion-theme) var(--ease-out);
 }
 

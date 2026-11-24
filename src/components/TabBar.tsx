@@ -1,7 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useRef } from 'react';
 import type { Tab } from '../lib/types';
 import { TAB_WHEEL_INITIAL, wheelStep, type TabWheelDirection } from '../lib/tabWheel';
-import { IconClose } from './icons';
+import { IconClose, IconPage } from './icons';
 import { displayPath } from '../lib/paths';
 import { formatActionShortcuts, type ShortcutBindings } from '../lib/shortcuts';
 
@@ -156,7 +156,9 @@ export const TabBar = memo(function TabBar({
               data-dirty={tab.dirty || tab.isNew ? '1' : '0'}
               data-external={tab.externalChanged ? '1' : '0'}
               title={tab.externalChanged ? '文件已在外部修改' : undefined}
-            />
+            >
+              <IconPage size={14} strokeWidth={1.6} aria-hidden="true" />
+            </span>
             <span className="tab-title">{tab.title}</span>
             <button
               className="tab-close"

@@ -18,6 +18,7 @@ export const appearanceCases = [
   'theme-quiet-dialog',
   'theme-pointer-through',
   'theme-outline-budget',
+  'theme-document-budget',
 ] as const;
 export type AppearanceCase = (typeof appearanceCases)[number];
 
@@ -124,6 +125,7 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
   const host = document.createElement('div');
   document.body.append(host);
   const root = createRoot(host);
+  let restoreMermaid = () => {};
   root.render(<App />);
   try {
     await until(() => document.querySelector('button[title="新建文档 (Ctrl+N)"]'));
@@ -223,6 +225,95 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
       );
       return `${testCase}: 400 directory rows, no per-row theme animations, document and scroll preserved`;
     }
+    if (testCase === 'theme-document-budget') {
+      const fence = '```';
+      const markdown =
+        Array.from(
+          { length: 300 },
+          (_, i) => `- item ${i} with [a link](https://example.com/${i})`,
+        ).join('\n') +
+        '\n\n' +
+        Array.from(
+          { length: 12 },
+          (_, i) => `${fence}ts\nconst value${i} = ${i};\n${fence}\n`,
+        ).join('\n');
+      click('button[aria-label="切换 Markdown 模式"]');
+      await until(() => document.querySelector('.source-editor:not([hidden]) .source-textarea'));
+      const source = document.querySelector<HTMLTextAreaElement>(
+        '.source-editor:not([hidden]) .source-textarea',
+      )!;
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
+        source,
+        markdown,
+      );
+      source.dispatchEvent(new Event('input', { bubbles: true }));
+      click('button[aria-label="切换 Markdown 模式"]');
+      await until(() => !document.querySelector('.source-editor:not([hidden])'));
+      const editor = document.querySelector<HTMLElement>('.editor-tab.active .ProseMirror')!;
+      await until(
+        () =>
+          editor.querySelectorAll('li').length === 300 &&
+          editor.querySelectorAll('.md-code-copy').length === 12,
+      );
+      await document.fonts.ready;
+      await settleAnimations();
+      const chrome = () =>
+        ['.statusbar-right', '.statusbar-actions', '.statusbar-theme-mode', '.statusbar-version']
+          .map((selector) => {
+            const box = document.querySelector(selector)!.getBoundingClientRect();
+            return `${selector}:${box.left},${box.width}`;
+          })
+          .join(' ');
+      const still = chrome();
+      let onChrome = 0;
+      for (const [label, theme] of [
+        ['浅色', 'dark'],
+        ['深色', 'light'],
+        ['跟随系统', 'light'],
+      ]) {
+        click(`button[aria-label="切换主题,当前为${label}"]`);
+        await until(
+          () =>
+            document.documentElement.dataset.theme === theme &&
+            !document.querySelector(`button[aria-label="切换主题,当前为${label}"]`),
+        );
+        await new Promise(requestAnimationFrame);
+        const running = document.getAnimations();
+        const inDocument = running.filter((animation) => {
+          const target = (animation.effect as KeyframeEffect | null)?.target;
+          return target instanceof Element && editor.contains(target);
+        });
+        check(
+          inDocument.length === 0,
+          `Theme queued ${inDocument.length} animations inside the document (list markers, code controls)`,
+        );
+        onChrome = Math.max(onChrome, running.length);
+        check(
+          chrome() === still,
+          `Theme mode after "${label}" moved the status bar: ${still} => ${chrome()}`,
+        );
+        check(
+          getComputedStyle(editor.querySelector('li')!, '::marker').color ===
+            tokenColor('--text-muted') &&
+            getComputedStyle(editor.querySelector('.md-code-copy')!).color ===
+              tokenColor('--text-muted'),
+          'List markers or code controls did not take the new theme at once',
+        );
+        if (theme === 'dark')
+          for (const logo of document.querySelectorAll('.toolbar-brand-logo svg'))
+            check(
+              getComputedStyle(logo).filter === 'none',
+              'Dark theme recolors the brand mark with a filter again',
+            );
+        await settleAnimations();
+      }
+      check(
+        getComputedStyle(document.querySelector('.brand-tile')!).fill ===
+          tokenColor('--brand-tile'),
+        'Brand tile does not follow its theme token',
+      );
+      return `${testCase}: 300 list items and 12 code blocks start no theme animation (${onChrome} on the app chrome); status bar stays put through all three modes; brand mark needs no filter`;
+    }
     if (
       [
         'theme-colors',
@@ -249,6 +340,16 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
       const holder = document.querySelector<HTMLElement>('.md-mermaid-holder')!;
       const initialBox = holder.getBoundingClientRect();
       const before = source?.value;
+      const { default: mermaid } = await import('mermaid');
+      const renderDiagram = mermaid.render;
+      let diagramRenders = 0;
+      mermaid.render = (...args: Parameters<typeof renderDiagram>) => {
+        diagramRenders++;
+        return renderDiagram(...args);
+      };
+      restoreMermaid = () => {
+        mermaid.render = renderDiagram;
+      };
       click('button[aria-label="切换主题,当前为浅色"]');
       await until(() => document.querySelector('button[aria-label="切换主题,当前为深色"]'));
       if (testCase === 'theme-rapid-toggle') {
@@ -375,7 +476,9 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
           }
         }
         await fade.finished;
+        check(diagramRenders === 0, 'Diagram layout started while the surfaces were still fading');
         await until(ready);
+        check(diagramRenders > 0, 'Theme change never re-rendered the diagram');
       }
       await settleAnimations();
       const expectedBackground = tokenColor('--editor-bg');
@@ -481,6 +584,7 @@ export async function runAppearanceRegression(testCase: AppearanceCase): Promise
     }
     return `${testCase}: real App theme control and Mermaid lifecycle passed`;
   } finally {
+    restoreMermaid();
     root.unmount();
     host.remove();
     window.matchMedia = nativeMatchMedia;
