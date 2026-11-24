@@ -289,40 +289,86 @@ html[data-theme='dark'] .toolbar-brand-logo svg {
   border-bottom-color: var(--border);
 }
 .tabbar-tabs {
-  gap: 6px;
+  gap: 4px;
   align-items: center;
 }
+/* A tab is as wide as its name, up to a limit: no dead space before or after the title.
+   Both states share one weight, so switching tabs never resizes one or moves its neighbours. */
 .tab {
   position: relative;
-  height: 34px;
+  flex: 0 0 auto;
+  min-width: 96px;
+  max-width: 280px;
+  height: 32px;
   margin-top: 0;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
-  padding-inline: 12px 6px;
-  flex-basis: clamp(168px, 14vw, 210px);
-  gap: 9px;
+  padding-inline: 10px 4px;
+  gap: 8px;
 }
 .tab.active {
   background: var(--editor-bg);
   border-color: var(--border);
-  box-shadow: 0 2px 4px rgb(0 0 0 / 2%);
+  box-shadow: var(--shadow-soft);
+  font-weight: 400;
 }
-.tab.active::after {
-  content: '';
-  position: absolute;
-  left: 12px;
-  bottom: -7px;
-  width: 24px;
-  height: 2px;
-  background: var(--accent);
+.tab-title {
+  flex: 1 1 auto;
 }
-/* Saved tabs show no mark; the slot stays reserved so titles never shift when the state changes. */
+/* Every tab leads with a page mark, in the accent color on the active tab. Unsaved or
+   changed-on-disk replaces it with a dot in the same slot, so the title never shifts. */
 .tab-dot {
-  width: 6px;
-  height: 6px;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 0;
+  color: var(--text-muted);
 }
+.tab-dot[data-dirty='1'],
+.tab-dot[data-external='1'],
 .tab.active .tab-dot[data-dirty='1'] {
+  background: none;
   box-shadow: none;
+}
+.tab-dot > svg,
+.tab-dot::before {
+  grid-area: 1 / 1;
+  transition:
+    opacity var(--motion-fast) var(--ease-out),
+    scale var(--motion-enter) var(--ease-out);
+}
+.tab-dot > svg {
+  display: block;
+  opacity: 0.7;
+}
+.tab:hover .tab-dot > svg,
+.tab.active .tab-dot > svg {
+  opacity: 1;
+}
+.tab.active .tab-dot {
+  color: var(--accent);
+}
+.tab-dot::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0;
+  scale: 0.4;
+}
+/* Outranks the hover and active rules above: the dot replaces the mark in every state. */
+.tab .tab-dot:is([data-dirty='1'], [data-external='1']) > svg {
+  opacity: 0;
+}
+.tab-dot:is([data-dirty='1'], [data-external='1'])::before {
+  opacity: 1;
+  scale: 1;
+}
+.tab-dot[data-external='1']::before {
+  background: var(--mark-strong);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mark-strong) 28%, transparent);
 }
 .tab-close {
   width: 24px;

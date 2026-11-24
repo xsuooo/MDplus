@@ -24,6 +24,14 @@ export const IconBrand = (p: IconProps) => (
   </svg>
 );
 
+/** A sheet with a folded corner: the mark in front of every tab title. */
+export const IconPage = (p: IconProps) => (
+  <svg {...base(p.size, p)}>
+    <path d="M13.5 3H7.5A2.5 2.5 0 0 0 5 5.5v13A2.5 2.5 0 0 0 7.5 21h9a2.5 2.5 0 0 0 2.5-2.5V8.5Z" />
+    <path d="M13.5 3v3a2.5 2.5 0 0 0 2.5 2.5h3" />
+  </svg>
+);
+
 export const IconOpen = (p: IconProps) => (
   <svg {...base(p.size, p)}>
     <path d="M4 19.5A2.5 2.5 0 0 1 1.5 17V7a2.5 2.5 0 0 1 2.5-2.5h4l2 2.5h8.5A2.5 2.5 0 0 1 21 9.5v7.5a2.5 2.5 0 0 1-2.5 2.5Z" />

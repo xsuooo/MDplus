@@ -9,6 +9,7 @@ export const studioCases = [
   'studio-material-contrast',
   'studio-spring-motion',
   'studio-reduced-motion',
+  'studio-tabs-fit',
   'studio-layout-1920-1080',
   'studio-layout-1440-900',
   'studio-layout-1280-800',
@@ -92,10 +93,188 @@ function contrast(foreground: string, background: string) {
   const b = luminance(background);
   return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
+function tokenColor(token: string): string {
+  const probe = document.createElement('span');
+  probe.style.color = `var(${token})`;
+  document.body.append(probe);
+  const color = getComputedStyle(probe).color;
+  probe.remove();
+  return color;
+}
+
+/** Tabs hug their titles, lead with a page mark, and never move when state changes. */
+async function runTabsFit(testCase: StudioCase): Promise<string> {
+  const files = new Map([
+    ['C:/notes/draft.md', '# Draft\n\nShort.\n'],
+    ['C:/notes/季度复盘与下一步计划_整理版.md', '# 季度复盘\n\n正文。\n'],
+    [`C:/notes/${'很长的文件名'.repeat(9)}.md`, '# Long\n\nBody.\n'],
+  ]);
+  const defaults = createNativeMocks();
+  const native = createNativeMocks({
+    settings: new Map<string, unknown>([
+      ['theme-mode', 'light'],
+      ['outline-open', false],
+      ['session-restore-enabled', false],
+    ]),
+    fallback: async (command, args) => {
+      const path = typeof args.path === 'string' ? args.path.replace(/\\/g, '/') : '';
+      if (command === 'take_startup_files') return [...files.keys()];
+      if (command === 'read_document' || command === 'document_revision') {
+        const content = files.get(path);
+        check(content !== undefined, `Missing fixture file ${path}`);
+        return command === 'read_document'
+          ? { path, content, revision: `bytes:${content}`, mtime: 1 }
+          : { path, revision: `bytes:${content}`, mtime: 1 };
+      }
+      return defaults.invoke(command, args);
+    },
+  });
+  native.install();
+  const host = document.createElement('div');
+  host.style.height = '100vh';
+  document.body.append(host);
+  const root = createRoot(host);
+  root.render(<App />);
+  try {
+    const tabs = () => [...document.querySelectorAll<HTMLElement>('[role="tab"]')];
+    await until(
+      () => tabs().length === 3 && document.querySelector('.editor-tab.active .ProseMirror'),
+    );
+    await document.fonts.ready;
+    await settle();
+    const part = (tab: HTMLElement, selector: string) =>
+      tab.querySelector<HTMLElement>(selector)!.getBoundingClientRect();
+    const textWidth = (tab: HTMLElement) => {
+      const range = document.createRange();
+      range.selectNodeContents(tab.querySelector('.tab-title')!);
+      return range.getBoundingClientRect().width;
+    };
+    const geometry = () =>
+      tabs()
+        .map((tab) => {
+          const box = tab.getBoundingClientRect();
+          return `${box.left.toFixed(2)},${box.width.toFixed(2)},${part(tab, '.tab-title').left.toFixed(2)}`;
+        })
+        .join(' | ');
+
+    const [short, medium, long] = tabs();
+    for (const tab of [short, medium]) {
+      const box = tab.getBoundingClientRect();
+      const mark = part(tab, '.tab-dot');
+      const title = part(tab, '.tab-title');
+      const close = part(tab, '.tab-close');
+      check(mark.width === 14 && mark.height === 14, 'Page mark slot is not 14px square');
+      check(
+        mark.left - box.left <= 12 && title.left - mark.right <= 9,
+        `Blank space in front of the title: ${title.left - box.left}px`,
+      );
+      check(
+        close.left - (title.left + textWidth(tab)) <= 10,
+        `Blank space after the title: ${close.left - (title.left + textWidth(tab))}px`,
+      );
+      check(box.right - close.right <= 6, 'Close button drifted from the tab edge');
+    }
+    const widths = tabs().map((tab) => tab.getBoundingClientRect().width);
+    check(
+      widths[0] < widths[1] && widths[1] < widths[2],
+      `Tab widths do not follow their titles: ${widths}`,
+    );
+    check(widths[0] >= 96 && widths[2] <= 280.5, `Tab width left its limits: ${widths}`);
+    const longTitle = long.querySelector<HTMLElement>('.tab-title')!;
+    check(
+      longTitle.scrollWidth > longTitle.clientWidth &&
+        getComputedStyle(longTitle).textOverflow === 'ellipsis',
+      'A title beyond the width limit is not ellipsized',
+    );
+    check(
+      part(long, '.tab-close').right <= long.getBoundingClientRect().right,
+      'Close button was pushed out of a truncated tab',
+    );
+
+    // Switching never resizes a tab or moves a neighbour: both states use one weight.
+    const still = geometry();
+    for (const tab of [short, medium, long, short]) {
+      tab.click();
+      await until(() => tab.getAttribute('aria-selected') === 'true');
+      await settle();
+      check(geometry() === still, `Activating a tab moved the strip: ${still} => ${geometry()}`);
+      const mark = tab.querySelector<HTMLElement>('.tab-dot')!;
+      check(
+        getComputedStyle(mark).color === tokenColor('--accent'),
+        'Active page mark is not in the accent color',
+      );
+      const idle = tabs().find((other) => other !== tab)!;
+      check(
+        getComputedStyle(idle.querySelector('.tab-dot')!).color === tokenColor('--text-muted'),
+        'Idle page mark is not muted',
+      );
+      check(
+        getComputedStyle(tab).fontWeight === getComputedStyle(idle).fontWeight,
+        'Active and idle titles use different weights',
+      );
+      check(
+        getComputedStyle(tab, '::after').content === 'none',
+        'A detached accent mark is drawn next to the active tab again',
+      );
+    }
+
+    // Editing swaps the page mark for the unsaved dot in the same slot.
+    check(
+      getComputedStyle(short.querySelector('.tab-dot svg')!).opacity === '1' &&
+        getComputedStyle(short.querySelector('.tab-dot')!, '::before').opacity === '0',
+      'A saved tab does not show its page mark',
+    );
+    click('button[aria-label="切换 Markdown 模式"]');
+    await until(() => document.querySelector('.source-editor:not([hidden]) textarea'));
+    const source = document.querySelector<HTMLTextAreaElement>(
+      '.source-editor:not([hidden]) textarea',
+    )!;
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
+      source,
+      '# Draft\n\nEdited.\n',
+    );
+    source.dispatchEvent(new Event('input', { bubbles: true }));
+    await until(() => short.querySelector('.tab-dot')?.getAttribute('data-dirty') === '1');
+    await settle();
+    check(geometry() === still, `Unsaved state moved the strip: ${still} => ${geometry()}`);
+    check(
+      getComputedStyle(short.querySelector('.tab-dot svg')!).opacity === '0' &&
+        getComputedStyle(short.querySelector('.tab-dot')!, '::before').opacity === '1',
+      'Unsaved state did not replace the page mark with its dot',
+    );
+    check(
+      getComputedStyle(short.querySelector('.tab-dot')!, '::before').backgroundColor ===
+        tokenColor('--accent'),
+      'Unsaved dot is not in the accent color',
+    );
+
+    // The three materials change radii and colors only, never the strip's geometry.
+    for (const material of APPEARANCES) {
+      await chooseMaterial(material.id, material.name);
+      click('button[aria-label="关闭排版设置"]');
+      await until(() => !document.querySelector('.typography-panel'));
+      for (const mode of ['light', 'dark'] as const) {
+        await colorMode(mode);
+        check(geometry() === still, `${material.id}/${mode} changed the tab geometry`);
+        check(
+          getComputedStyle(short.querySelector('.tab-dot')!, '::before').backgroundColor ===
+            tokenColor('--accent'),
+          `${material.id}/${mode} unsaved dot lost the accent color`,
+        );
+      }
+    }
+    return `${testCase}: tabs hug their titles (${widths.map((value) => Math.round(value)).join('/')}px), stay put across activation, unsaved state and all six material/color combinations`;
+  } finally {
+    root.unmount();
+    host.remove();
+    localStorage.removeItem(APPEARANCE_STORAGE_KEY);
+  }
+}
 
 export async function runStudioRegression(testCase: StudioCase): Promise<string> {
   localStorage.setItem(APPEARANCE_STORAGE_KEY, 'folio');
   localStorage.removeItem(EDITOR_ZOOM_STORAGE_KEY);
+  if (testCase === 'studio-tabs-fit') return runTabsFit(testCase);
   const native = createNativeMocks({
     settings: new Map<string, unknown>([
       ['theme-mode', 'light'],
