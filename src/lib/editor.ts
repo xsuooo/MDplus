@@ -232,6 +232,7 @@ export function createEditor(
                     event.target instanceof Element ? event.target.closest('a[href]') : null;
                   if (!link || !view.dom.contains(link)) return false;
                   event.preventDefault();
+                  // A plain click only places the caret, so link text stays editable.
                   if (!event.ctrlKey || event.altKey || event.shiftKey || event.metaKey)
                     return false;
                   callbacks.onDocumentLink?.(link.getAttribute('href') ?? '');

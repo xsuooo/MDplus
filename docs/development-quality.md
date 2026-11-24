@@ -19,7 +19,7 @@
 | `useSessionPersistence` + `documentSession` + `position/sessionPosition` | 会话设置、保存文稿清单、短文本位置锚点、失败条目及退出前完整会话捕获                                                               |
 | `useImageDrop` + `imageDrop`                                             | 捕获鼠标落点或选择器前的选区末尾、异步位置映射、整批导入与模式代次取消                                                             |
 | `imageOps`（入口）+ `images/`                                            | 待存图片：`cache` 身份与回收，`stash` 字节暂存与路径辅助，`lease` 固定与恢复，`migration` 保存迁移，`references` 打开／粘贴／拖入  |
-| `documentLinks` + 编辑器链接事件                                         | 以来源文稿解析相对 Markdown 路径，按编辑器焦点路由 Ctrl 操作                                                                       |
+| `documentLinks` + 编辑器链接事件                                         | 以来源文稿解析相对 Markdown 路径，把 http(s) 网址交给原生 `open_external_link`，按编辑器焦点路由 Ctrl 操作                         |
 | `replace` + `sourceEditorApi`                                            | 冻结匹配集、富文本格式保留、源码实时批量编辑及独立撤销边界                                                                         |
 | `useExternalChanges`                                                     | 字节版本轮询、外改提示、重载并发校验                                                                                               |
 | `useEditorView` + `position/editorPosition`                              | 输入、源码切换、选区／滚动位置                                                                                                     |

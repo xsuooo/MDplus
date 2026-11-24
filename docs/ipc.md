@@ -19,6 +19,7 @@
 | `cache_recovery_image`、`write_recovery_snapshot`                               | 恢复 ID、图片键、图片类型和容量均校验；请求包含在途 `retainedKeys`，返回附件回收回执；仅操作应用恢复目录                                            |
 | `cache_recovery_document_image`                                                 | 图片 stash 已满时，把仍以文稿旁文件为准的图片直接复制进恢复目录；读取边界同 `read_image_file`，文件的 SHA-256 必须等于请求中的 `digest`，否则不写入 |
 | `list_recovery_snapshots`、`read_recovery_snapshot`、`delete_recovery_snapshot` | 仅访问合法恢复 ID；拒绝目录逃逸与重解析点；不删除独立 session stash 中仍可 Undo 的图片                                                              |
+| `open_external_link`                                                            | 只把 `http://`／`https://` 网址交给系统默认浏览器；原生重新校验协议、主机、长度（2048）和字符，拒绝文件路径及其他协议，不接受任何附加参数           |
 
 已移除 `read_file`、`write_file`、`file_mtime`、`create_directory`、`save_binary_file` 等旧入口。内部恢复写入辅助函数不暴露给 WebView。
 

@@ -23,4 +23,5 @@ pub const COMMANDS: &[&str] = &[
     "list_recovery_snapshots",
     "read_recovery_snapshot",
     "delete_recovery_snapshot",
+    "open_external_link",
 ];

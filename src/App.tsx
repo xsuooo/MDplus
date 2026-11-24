@@ -37,7 +37,7 @@ import { showMessage } from './lib/dialog';
 import { errorMessage } from './lib/errors';
 import { readOutlineWidth, writeOutlineWidth } from './lib/outlineWidth';
 import { pathKey } from './lib/paths';
-import { resolveDocumentLink } from './lib/documentLinks';
+import { externalLinkUrl, openExternalLink, resolveDocumentLink } from './lib/documentLinks';
 import { Presence } from './lib/presence';
 import {
   createShortcutIndex,
@@ -136,6 +136,11 @@ export default function App() {
       const tab = workspace.tabsRef.current.find((candidate) => candidate.id === tabId);
       if (!tab) return;
       try {
+        // Web addresses leave the app; only relative Markdown links open as tabs.
+        if (externalLinkUrl(href)) {
+          await openExternalLink(href);
+          return;
+        }
         const link = await resolveDocumentLink(href, tab.path);
         const opened = await openFileFromPath(link.path);
         if (opened && link.hasFragment)

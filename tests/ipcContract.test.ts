@@ -40,6 +40,7 @@ describe('IPC allowlist and contract synchronization', () => {
       'settings.rs',
       'image_stash.rs',
       'image_import.rs',
+      'external_link.rs',
     ]
       .map((file) => read(`../src-tauri/src/${file}`))
       .join('\n');

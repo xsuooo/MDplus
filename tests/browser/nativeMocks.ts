@@ -588,6 +588,9 @@ export function createNativeMocks(options: NativeMockOptions = {}) {
       }
       case 'read_image_file':
         return documentImage(args);
+      case 'open_external_link':
+        check(/^https?:\/\/[^\s/?#]/i.test(string(args.url, 'url')), 'invalid external link');
+        return;
       case 'plugin:path|dirname':
         return directory(string(args.path, 'path'));
       case 'plugin:path|join': {

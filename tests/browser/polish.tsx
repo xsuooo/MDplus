@@ -131,7 +131,7 @@ export async function runPolishRegression(testCase: PolishCase): Promise<string>
             { length: 40 },
             (_, index) => `## Heading ${index}\n\n${('paragraph ' + index + ' ').repeat(60)}\n`,
           ).join('\n')
-        : '[Target](./target%20note.md) [Alias](./sub/../target%20note.md) [Missing](./missing.md) [Anchor](./target%20note.md#title)\n';
+        : '[Target](./target%20note.md) [Alias](./sub/../target%20note.md) [Missing](./missing.md) [Anchor](./target%20note.md#title) [Web](https://example.com/docs?q=1)\n';
   const files = new Map([
     [sourcePath, markdown],
     [targetPath, '# Target\n\nOriginal target.\n'],
@@ -496,6 +496,22 @@ export async function runPolishRegression(testCase: PolishCase): Promise<string>
         );
       } else {
         const initialUrl = location.href;
+        const browserOpens = () =>
+          native.calls.filter((call) => call.command === 'open_external_link');
+        clickLink('Web', false);
+        await frame();
+        check(!browserOpens().length, 'plain click opened the web link');
+        clickLink('Web');
+        await until(() => browserOpens().length === 1, 'Ctrl+click opened the web link');
+        await enterLink('Web');
+        await until(() => browserOpens().length === 2, 'Ctrl+Enter opened the web link');
+        check(
+          browserOpens().every((call) => call.args.url === 'https://example.com/docs?q=1') &&
+            !messages.length &&
+            location.href === initialUrl &&
+            document.querySelectorAll('[role="tab"]').length === 1,
+          'web link was misrouted, reported an error or navigated the app',
+        );
         clickLink('Target', false);
         await frame();
         check(

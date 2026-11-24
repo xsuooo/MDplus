@@ -42,6 +42,7 @@
     "allow-read-recovery-snapshot",
     "allow-delete-recovery-snapshot",
     "allow-load-settings",
-    "allow-save-settings"
+    "allow-save-settings",
+    "allow-open-external-link"
   ]
 }

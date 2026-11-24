@@ -1,6 +1,7 @@
 // MDPlus - Tauri backend commands
 mod config;
 mod encoding;
+mod external_link;
 #[cfg(test)]
 mod image_asset_tests;
 mod image_assets;
@@ -469,7 +470,8 @@ pub fn run() {
             recovery::write_recovery_snapshot,
             recovery::list_recovery_snapshots,
             recovery::read_recovery_snapshot,
-            recovery::delete_recovery_snapshot
+            recovery::delete_recovery_snapshot,
+            external_link::open_external_link
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
