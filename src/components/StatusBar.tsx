@@ -168,7 +168,7 @@ export const StatusBar = memo(function StatusBar({
           />
           {tab && <EditorZoom area={editorAreaRef} tabId={tab.id} sourceMode={sourceMode} />}
           <button
-            className="statusbar-theme"
+            className="statusbar-theme statusbar-theme-mode"
             onClick={() => onThemeMode(next)}
             title={`切换主题,当前为${themeLabel}`}
             aria-label={`切换主题,当前为${themeLabel}`}

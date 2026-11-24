@@ -8,6 +8,7 @@ import { NodeSelection } from '@milkdown/prose/state';
 import type { MediaPreview } from './media';
 import { renderDiagramMedia } from './diagramRender';
 import { normalizeBodyFont } from './editorFont';
+import { afterThemeFade } from './themeFade';
 
 /** 当前存活视图的重渲染器集合,用于主题切换时让已渲染图表跟随重绘 */
 const activeRenderers = new Set<() => Promise<void>>();
@@ -229,6 +230,10 @@ const mermaidView =
           if (holder.firstElementChild !== displayedPreview || holder.childElementCount !== 1)
             holder.replaceChildren(displayedPreview);
         } else holder.replaceChildren();
+        // Mermaid lays out synchronously for a long time. After a theme change the surfaces
+        // finish their color fade first; the current diagram stays in place meanwhile.
+        await afterThemeFade();
+        if (isDestroyed || token !== renderToken) return;
         const nextMedia = await renderDiagramMedia(code, theme, font, {
           signal: controller.signal,
           reuse: true,

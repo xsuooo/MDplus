@@ -38,9 +38,6 @@
   width: 100%;
   height: 100%;
 }
-html[data-theme='dark'] .welcome-logo svg {
-  filter: invert(0.88);
-}
 
 .welcome h1 {
   margin: 0;

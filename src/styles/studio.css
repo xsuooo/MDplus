@@ -222,9 +222,6 @@ html[data-appearance='prism'][data-theme='dark'] {
   margin-left: 1px;
   font-weight: 400;
 }
-html[data-theme='dark'] .toolbar-brand-logo svg {
-  filter: invert(0.88);
-}
 .toolbar-file-actions {
   gap: 3px;
 }

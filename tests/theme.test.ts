@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const refresh = vi.hoisted(() => vi.fn());
+const beginFade = vi.hoisted(() => vi.fn());
 vi.mock('../src/lib/mermaid', () => ({ refreshMermaidTheme: refresh }));
+vi.mock('../src/lib/themeFade', () => ({ beginThemeFade: beginFade }));
 
 function deferred() {
   let resolve!: () => void;
@@ -19,6 +21,7 @@ function fixture(initialTheme?: string) {
 
 beforeEach(() => {
   refresh.mockReset().mockResolvedValue(undefined);
+  beginFade.mockReset();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -38,6 +41,20 @@ describe('nonblocking theme updates', () => {
     const { applyTheme } = await import('../src/lib/theme');
     applyTheme(theme);
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('announces the color fade before diagrams refresh, and only for a real change', async () => {
+    const root = fixture('light');
+    const { applyTheme } = await import('../src/lib/theme');
+    const order: string[] = [];
+    beginFade.mockImplementation(() => order.push(`fade:${root.dataset.theme}`));
+    refresh.mockImplementation(() => {
+      order.push('refresh');
+      return Promise.resolve();
+    });
+    applyTheme('dark');
+    applyTheme('dark');
+    expect(order).toEqual(['fade:dark', 'refresh']);
   });
 
   it('does not wait for slow diagrams before applying another theme', async () => {
