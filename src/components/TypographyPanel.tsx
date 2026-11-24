@@ -98,9 +98,6 @@ export function TypographyPanel({
         >
           <div className="typography-head">
             <div>
-              <span className="typography-kicker" aria-hidden="true">
-                READING &amp; APPEARANCE
-              </span>
               <h3 id="typography-title">排版与外观</h3>
             </div>
             <button

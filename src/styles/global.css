@@ -876,83 +876,8 @@ summary {
 }
 
 /* ---------- 欢迎页 ---------- */
-.welcome {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 24px;
-  overflow-y: auto;
-}
-
-.welcome-logo {
-  width: 76px;
-  height: 76px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  color: var(--accent);
-}
-
-.welcome-logo svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-.welcome h1 {
-  margin: 12px 0 0;
-  font-size: 26px;
-  color: var(--text-strong);
-}
-
-.welcome-actions {
-  display: flex;
-  gap: 10px;
-}
-
-.welcome-recents {
-  margin-top: 32px;
-  width: min(420px, 90%);
-}
-
-.welcome-recents-title {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-bottom: 8px;
-  text-align: center;
-}
-
-.welcome-recent-item {
-  display: block;
-  width: 100%;
-  padding: 8px 14px;
-  margin-bottom: 4px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  color: var(--text);
-  background: transparent;
-  text-align: left;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 /* Parent paths distinguish documents with the same filename. */
-.welcome-recent-path {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-.welcome-recent-item:hover {
-  background: var(--bg-hover);
-}
 
 /* ---------- 按钮 ---------- */
 .btn {
@@ -2022,12 +1947,6 @@ body.dragging::after {
   .recovery-status-error,
   .recovery-entry,
   .recovery-entry p,
-  .welcome h1,
-  .welcome-logo,
-  .welcome-recents,
-  .welcome-recents-title,
-  .welcome-recent-item,
-  .welcome-drop-hint,
   .modal h3,
   .modal p,
   .search-case,
@@ -2309,86 +2228,6 @@ body.dragging::after {
 
 .outline-item {
   min-height: 32px;
-}
-
-.welcome {
-  align-items: center;
-  justify-content: center;
-  padding: 36px 24px 48px;
-  gap: 7px;
-  animation: none;
-}
-
-.welcome-logo {
-  width: 76px;
-  height: 76px;
-  background: transparent;
-  box-shadow: none;
-  color: var(--accent);
-}
-
-.welcome-logo svg {
-  width: 100%;
-  height: 100%;
-}
-
-.welcome h1 {
-  margin: 16px 0 0;
-  font-size: 28px;
-  letter-spacing: -0.01em;
-}
-
-.welcome-actions {
-  margin-top: 20px;
-}
-
-.welcome-actions .btn {
-  min-width: 112px;
-  height: 38px;
-}
-
-.welcome-recents {
-  width: min(440px, 100%);
-  margin-top: 28px;
-  padding-top: 18px;
-  border-top: 1px solid var(--border);
-}
-
-.welcome-recents-title {
-  margin-bottom: 6px;
-  text-align: left;
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.welcome-recent-item {
-  padding: 9px 12px;
-  margin-bottom: 2px;
-  border: 1px solid transparent;
-}
-
-.welcome-recent-item:hover {
-  border-color: var(--border);
-}
-
-.welcome-drop-hint {
-  margin: 22px 0 0;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.welcome-example {
-  min-height: 32px;
-  padding: 4px 10px;
-  border-radius: var(--radius-sm);
-  color: var(--accent-text);
-  font-size: var(--ui-meta-size);
-}
-
-.welcome-example:hover {
-  background: var(--accent-soft);
 }
 
 .error-state > p,
@@ -2686,20 +2525,6 @@ body.dragging::after {
 
   .statusbar-right {
     gap: 8px;
-  }
-
-  .welcome {
-    padding-left: 18px;
-    padding-right: 18px;
-  }
-
-  .welcome-actions {
-    width: min(320px, 100%);
-    flex-direction: column;
-  }
-
-  .welcome-actions .btn {
-    width: 100%;
   }
 
   .search-input {

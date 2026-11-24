@@ -1,0 +1,425 @@
+/* Welcome / the first line of a new document.
+   The headline and the heading mark carry the page; everything else stays quiet.
+   No text sits on a rotated, scaled or 3D layer, and nothing is set below 12px,
+   so every glyph is rasterized at full resolution. Motion is transform/opacity only. */
+
+.welcome.welcome-studio {
+  width: min(1480px, 100%);
+  height: 100%;
+  margin-inline: auto;
+  padding: clamp(20px, 5vh, 56px) clamp(24px, 5.5vw, 88px) clamp(16px, 3.5vh, 36px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden auto;
+}
+
+.welcome-composition {
+  flex: 1 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(16px, 4vw, 72px);
+  padding-block: clamp(16px, 4vh, 48px);
+}
+.welcome-copy {
+  min-width: 0;
+}
+
+.welcome-logo {
+  display: block;
+  width: 40px;
+  height: 40px;
+  margin-bottom: clamp(16px, 3.5vh, 36px);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.welcome-logo svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+html[data-theme='dark'] .welcome-logo svg {
+  filter: invert(0.88);
+}
+
+.welcome h1 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: clamp(40px, 6.6vw, 108px);
+  font-weight: var(--body-strong-weight);
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+.welcome h1 > span {
+  position: relative;
+  display: block;
+  width: max-content;
+  max-width: 100%;
+}
+/* The full-width stop leaves its right half empty; the caret sits in that space. */
+.welcome-caret {
+  position: absolute;
+  top: 0.16em;
+  bottom: 0.12em;
+  left: calc(100% - 0.44em);
+  width: max(3px, 0.06em);
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.welcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: clamp(20px, 4.5vh, 44px);
+}
+.welcome-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 52px;
+  padding: 0 22px;
+  border-radius: var(--radius);
+  font-size: 15px;
+  font-weight: var(--body-strong-weight);
+  transition:
+    background-color 160ms var(--ease-out),
+    border-color 160ms var(--ease-out),
+    color 160ms var(--ease-out),
+    box-shadow 260ms var(--ease-out),
+    transform 260ms var(--ease-spring);
+}
+.welcome-actions .btn svg {
+  flex: 0 0 auto;
+  transition: transform 260ms var(--ease-spring);
+}
+.welcome-actions .btn:hover {
+  transform: translateY(-2px);
+}
+.welcome-actions .btn:hover svg {
+  transform: scale(1.12);
+}
+.welcome-actions .btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+.welcome-actions .btn-primary:hover {
+  box-shadow: 0 14px 26px -14px color-mix(in srgb, var(--accent) 80%, transparent);
+}
+.welcome-actions .welcome-open {
+  background: transparent;
+  border-color: var(--border-strong);
+}
+.welcome-actions .welcome-open:hover {
+  background: var(--bg-hover);
+  border-color: var(--text-muted);
+}
+
+.welcome-drop-hint {
+  margin: clamp(14px, 2.6vh, 24px) 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.welcome-bottomline {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.welcome-recents {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 780px;
+}
+.welcome-recents-title {
+  margin: 0 0 6px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+.welcome-recent-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 20px;
+  margin-inline: -12px;
+}
+.welcome-recent-item {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  transition: background-color 160ms var(--ease-out);
+}
+.welcome-recent-name,
+.welcome-recent-path {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition:
+    color 160ms var(--ease-out),
+    transform 260ms var(--ease-spring);
+}
+.welcome-recent-name {
+  color: var(--text-strong);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.welcome-recent-path {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.welcome-recent-item:hover {
+  background: var(--bg-hover);
+}
+.welcome-recent-item:hover .welcome-recent-name {
+  color: var(--accent-text);
+}
+.welcome-recent-item:hover :is(.welcome-recent-name, .welcome-recent-path) {
+  transform: translateX(4px);
+}
+
+.welcome-example {
+  position: relative;
+  flex-shrink: 0;
+  min-height: 40px;
+  margin-left: auto;
+  padding: 0;
+  color: var(--text-strong);
+  font-size: 13px;
+  white-space: nowrap;
+  transition: color 160ms var(--ease-out);
+}
+.welcome-example::before,
+.welcome-example::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 8px;
+  height: 1px;
+  background: var(--border-strong);
+}
+.welcome-example::after {
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 320ms var(--ease-spring);
+}
+.welcome-example:hover {
+  color: var(--accent-text);
+}
+.welcome-example:hover::after {
+  transform: scaleX(1);
+}
+
+/* Scene / two flat shapes that follow the pointer by a few pixels. */
+.writing-scene {
+  position: relative;
+  justify-self: center;
+  width: min(100%, 460px, 50vh);
+  aspect-ratio: 1;
+  container-type: inline-size;
+  isolation: isolate;
+  user-select: none;
+}
+.scene-sheet {
+  position: absolute;
+  inset: 4% 2% 20% 26%;
+  display: grid;
+  align-content: start;
+  gap: 5.4cqw;
+  padding: 13cqw 9cqw 0 30cqw;
+  border-radius: var(--panel-radius);
+  background: var(--scene-back);
+  transform: translate3d(calc(var(--scene-x) * -10px), calc(var(--scene-y) * -8px), 0)
+    rotate(calc(var(--scene-angle) * -0.55));
+}
+.scene-line {
+  height: 1.5cqw;
+  border-radius: 1cqw;
+  background: color-mix(in srgb, var(--text-strong) 22%, transparent);
+  transform-origin: left center;
+}
+.scene-line:nth-child(2) {
+  width: 78%;
+}
+.scene-line:nth-child(3) {
+  width: 92%;
+}
+.scene-line:nth-child(4) {
+  width: 64%;
+}
+.scene-line:nth-child(5) {
+  width: 84%;
+}
+.scene-slab {
+  position: absolute;
+  inset: 22% 34% 3% 3%;
+  display: grid;
+  place-items: center;
+  border-radius: var(--panel-radius);
+  background: var(--scene-ink);
+  color: var(--scene-paper);
+  box-shadow: 0 34px 60px -30px color-mix(in srgb, var(--scene-ink) 70%, transparent);
+  transform: translate3d(calc(var(--scene-x) * 14px), calc(var(--scene-y) * 11px), 0)
+    rotate(var(--scene-angle));
+}
+.scene-glyph {
+  font-family: var(--font-body);
+  font-size: 56cqw;
+  font-weight: var(--body-strong-weight);
+  line-height: 1;
+}
+.scene-in-motion :is(.scene-sheet, .scene-slab) {
+  will-change: transform;
+}
+
+/* One entrance, started when the window is shown. The page, its logo and the headline box
+   never move; only their contents ease in, so first-show layout stays stable. */
+@keyframes welcome-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 0.3em, 0);
+  }
+}
+@keyframes welcome-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes welcome-settle {
+  from {
+    opacity: 0;
+    scale: 0.92;
+  }
+}
+@keyframes welcome-write {
+  from {
+    scale: 0 1;
+  }
+}
+@keyframes welcome-caret {
+  from {
+    opacity: 0.12;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .app[data-starting='false'] .welcome-logo {
+    animation: welcome-fade 600ms var(--ease-out) backwards;
+  }
+  .app[data-starting='false'] .welcome h1 > span {
+    animation: welcome-rise 780ms var(--ease-spring) backwards;
+  }
+  .app[data-starting='false'] .welcome h1 > span:nth-child(2) {
+    animation-delay: 90ms;
+  }
+  .app[data-starting='false'] .welcome-actions {
+    animation: welcome-rise 780ms 180ms var(--ease-spring) backwards;
+  }
+  .app[data-starting='false'] :is(.welcome-drop-hint, .welcome-bottomline) {
+    animation: welcome-fade 700ms 320ms var(--ease-out) backwards;
+  }
+  .app[data-starting='false'] .scene-sheet {
+    animation: welcome-settle 900ms 120ms var(--ease-spring) backwards;
+  }
+  .app[data-starting='false'] .scene-slab {
+    animation: welcome-settle 900ms 220ms var(--ease-spring) backwards;
+  }
+  .app[data-starting='false'] .scene-line {
+    animation: welcome-write 700ms var(--ease-spring) backwards;
+  }
+  .app[data-starting='false'] .scene-line:nth-child(1) {
+    animation-delay: 520ms;
+  }
+  .app[data-starting='false'] .scene-line:nth-child(2) {
+    animation-delay: 600ms;
+  }
+  .app[data-starting='false'] .scene-line:nth-child(3) {
+    animation-delay: 680ms;
+  }
+  .app[data-starting='false'] .scene-line:nth-child(4) {
+    animation-delay: 760ms;
+  }
+  .app[data-starting='false'] .scene-line:nth-child(5) {
+    animation-delay: 840ms;
+  }
+  /* The caret breathes three times, then rests. */
+  .app[data-starting='false'] .welcome-caret {
+    animation: welcome-caret 620ms 900ms ease-in-out 5 alternate backwards;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .welcome-actions .btn,
+  .welcome-actions .btn svg,
+  .welcome-recent-name,
+  .welcome-recent-path,
+  .welcome-example::after {
+    transition: none;
+  }
+  .welcome-actions .btn:hover,
+  .welcome-actions .btn:hover svg,
+  .welcome-actions .btn:active:not(:disabled),
+  .welcome-recent-item:hover :is(.welcome-recent-name, .welcome-recent-path) {
+    transform: none;
+  }
+  .scene-sheet {
+    transform: rotate(calc(var(--scene-angle) * -0.55));
+  }
+  .scene-slab {
+    transform: rotate(var(--scene-angle));
+  }
+}
+
+@media (max-width: 900px) {
+  .welcome-recent-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 700px) {
+  .welcome-composition {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .writing-scene {
+    display: none;
+  }
+  .welcome-bottomline {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .welcome-example {
+    align-self: flex-end;
+  }
+}
+@media (max-width: 520px) {
+  .welcome.welcome-studio {
+    padding-inline: 20px;
+  }
+  .welcome-logo {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+  }
+  .welcome-actions {
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+  .welcome-actions .btn {
+    min-width: 0;
+    height: 46px;
+    padding: 0 14px;
+    gap: 8px;
+    font-size: 14px;
+  }
+}

@@ -142,9 +142,6 @@ export const Toolbar = memo(function Toolbar(props: ToolbarProps) {
           <span className="toolbar-brand-mark">
             MD<span className="toolbar-brand-plus">Plus</span>
           </span>
-          <span className="toolbar-brand-caption" aria-hidden="true">
-            THE WRITING ROOM
-          </span>
         </span>
       </div>
 

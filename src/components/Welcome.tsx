@@ -3,40 +3,21 @@ import { displayPath } from '../lib/paths';
 import type { RecentFile } from '../lib/types';
 import { IconBrand, IconNew, IconOpen } from './icons';
 
+/** A ruled sheet and the Markdown heading mark; shapes only, so nothing small has to stay legible. */
 function WritingScene() {
   const scene = useSceneMotion();
   return (
     <div className="writing-scene" ref={scene} aria-hidden="true">
-      <div className="scene-grid" />
-      <div className="scene-orbit" />
-      <span className="scene-registration scene-registration-top">+</span>
-      <span className="scene-registration scene-registration-bottom">+</span>
-      <div className="scene-backplate" />
       <div className="scene-sheet">
-        <div className="scene-sheet-head">
-          <span>MDPLUS</span>
-          <span>FIELD NOTES — 01</span>
-        </div>
-        <div className="scene-type">
-          Aa<span>+</span>
-        </div>
-        <div className="scene-sheet-rule" />
-        <div className="scene-sheet-copy">
-          把想法，
-          <br />
-          写成可能。
-        </div>
-        <div className="scene-sheet-foot">
-          <span>A SPACE FOR YOUR WORDS</span>
-          <span>↗</span>
-        </div>
-        <div className="scene-glint" />
+        <span className="scene-line" />
+        <span className="scene-line" />
+        <span className="scene-line" />
+        <span className="scene-line" />
+        <span className="scene-line" />
       </div>
-      <div className="scene-note">
-        <span>纯粹书写</span>
-        <span>MARKDOWN, REIMAGINED.</span>
+      <div className="scene-slab">
+        <span className="scene-glyph">#</span>
       </div>
-      <span className="scene-coordinate">LOCAL. QUIET. YOURS.</span>
     </div>
   );
 }
@@ -56,50 +37,36 @@ export function Welcome({
 }) {
   return (
     <div className="welcome welcome-studio">
-      <div className="welcome-topline" aria-hidden="true">
-        <span>YOUR WRITING ROOM</span>
-        <span />
-      </div>
       <div className="welcome-composition">
         <section className="welcome-copy" aria-labelledby="welcome-title">
-          <div className="welcome-eyebrow">
-            <span className="welcome-logo" aria-hidden="true">
-              <IconBrand size={22} />
-            </span>
-            <span>MDPLUS / 开始写作</span>
-          </div>
+          <span className="welcome-logo" aria-hidden="true">
+            <IconBrand size={40} />
+          </span>
           <h1 id="welcome-title">
-            开始写作，
-            <br />
-            <span>或继续文稿。</span>
+            <span>开始写作，</span>
+            <span>
+              或继续文稿。
+              <i className="welcome-caret" aria-hidden="true" />
+            </span>
           </h1>
           <div className="welcome-actions">
             <button className="btn btn-primary" onClick={onNew}>
-              <IconNew size={17} aria-hidden="true" />
+              <IconNew size={18} aria-hidden="true" />
               <span>新建空白文稿</span>
-              <span className="welcome-action-arrow" aria-hidden="true">
-                ↗
-              </span>
             </button>
             <button className="btn welcome-open" onClick={onOpen}>
-              <IconOpen size={17} aria-hidden="true" />
+              <IconOpen size={18} aria-hidden="true" />
               <span>打开文件</span>
             </button>
           </div>
-          <p className="welcome-drop-hint">
-            <span className="welcome-drop-line" aria-hidden="true" />
-            也可以把 Markdown 文件拖进窗口打开
-          </p>
+          <p className="welcome-drop-hint">也可以把 Markdown 文件拖进窗口打开</p>
         </section>
         <WritingScene />
       </div>
       <div className="welcome-bottomline">
         {recents.length > 0 && (
           <section className="welcome-recents" aria-label="最近文件">
-            <div className="welcome-recents-title">
-              <span>继续写作</span>
-              <span aria-hidden="true">RECENT DOCUMENTS</span>
-            </div>
+            <h2 className="welcome-recents-title">继续写作</h2>
             <div className="welcome-recent-list">
               {recents.slice(0, 5).map((file) => (
                 <button
@@ -113,17 +80,13 @@ export function Welcome({
                   <span className="welcome-recent-path">
                     {displayPath(file.path).replace(/[^\\/]+$/, '')}
                   </span>
-                  <span className="welcome-recent-arrow" aria-hidden="true">
-                    ↗
-                  </span>
                 </button>
               ))}
             </div>
           </section>
         )}
         <button className="welcome-example" onClick={onExample}>
-          <span>打开示例文档</span>
-          <span aria-hidden="true">↗</span>
+          打开示例文档
         </button>
       </div>
     </div>

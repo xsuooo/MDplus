@@ -50,6 +50,7 @@ import { cycleTabIndex, type TabWheelDirection } from './lib/tabWheel';
 import './styles/global.css';
 import './styles/workflow.css';
 import './styles/studio.css';
+import './styles/welcome.css';
 
 export default function App() {
   const { appearance, changeAppearance } = useAppearance();
