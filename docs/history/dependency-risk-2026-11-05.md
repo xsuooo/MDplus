@@ -2,6 +2,12 @@
 
 跟踪 issue：[xsuooo/MDplus#2](https://github.com/xsuooo/MDplus/issues/2)。
 
+## 2026-11-24 状态补充
+
+「只升 tauri-utils」的最小路线已确认在 Tauri 2.11 线上不可行，维护者同日批准升级 Tauri 核心。Tauri 升到 2.12.7（tauri-utils 2.10.4、urlpattern 0.6.0）后，五个 unic 包不再出现在锁文件和 Windows 图中；url、cookie 同时升到 2026-11-20、11-23 两条新漏洞公告的修复版本。升级后的锁文件审计为 0 vulnerabilities、1 unsound、5 unmaintained。截至当日，安装版的原生验收尚未进行。
+
+剩余的 glib、proc-macro-error、zbus_names、zvariant、zvariant_derive 和新增的 chrono 都卡在上游，且不在 Windows normal/build 图中。失败证据、采用版本、检查结果、阻塞版本和缓解措施见 [Tauri 2.12 依赖升级记录](dependency-upgrade-2026-11-24.md)；下次复查日期为 2027-01-07。
+
 ## 2026-11-13 状态补充
 
 本地提交 `9a5bc5c` 已将唯一 Tokio 实例更新到 1.53.3，普通 Rust 108 项、真实符号链接 3 项和 Clippy 通过；前端 836 项及完整浏览器 269 项通过，浏览器原生 IPC 为模拟。当前采用锁文件的新审计为 0 vulnerabilities、2 unsound、9 unmaintained、1 yanked，registry errors 为 0。续跑补做 Rust 生产覆盖率，行 73.16%、函数 55.27%，原门槛通过；当前提交 CI 和最终 Windows 安装验收继续准备。
