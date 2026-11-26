@@ -102,7 +102,6 @@ function tokenColor(token: string): string {
   return color;
 }
 
-/** Tabs hug their titles, lead with a page mark, and never move when state changes. */
 async function runTabsFit(testCase: StudioCase): Promise<string> {
   const files = new Map([
     ['C:/notes/draft.md', '# Draft\n\nShort.\n'],
@@ -163,7 +162,7 @@ async function runTabsFit(testCase: StudioCase): Promise<string> {
       const mark = part(tab, '.tab-dot');
       const title = part(tab, '.tab-title');
       const close = part(tab, '.tab-close');
-      check(mark.width === 14 && mark.height === 14, 'Page mark slot is not 14px square');
+      check(mark.width === 14 && mark.height === 14, 'Bookmark and state slot is not 14px square');
       check(
         mark.left - box.left <= 12 && title.left - mark.right <= 9,
         `Blank space in front of the title: ${title.left - box.left}px`,
@@ -198,15 +197,25 @@ async function runTabsFit(testCase: StudioCase): Promise<string> {
       await until(() => tab.getAttribute('aria-selected') === 'true');
       await settle();
       check(geometry() === still, `Activating a tab moved the strip: ${still} => ${geometry()}`);
-      const mark = tab.querySelector<HTMLElement>('.tab-dot')!;
+      const sheet = getComputedStyle(tab);
+      const bar = document.querySelector<HTMLElement>('.tabbar')!;
+      const bookmark = getComputedStyle(tab.querySelector('.tab-dot')!, '::before');
       check(
-        getComputedStyle(mark).color === tokenColor('--accent'),
-        'Active page mark is not in the accent color',
+        tab.getBoundingClientRect().bottom === bar.getBoundingClientRect().bottom &&
+          sheet.borderBottomWidth === '0px' &&
+          sheet.borderBottomLeftRadius === '0px' &&
+          sheet.backgroundColor === tokenColor('--editor-bg'),
+        'The selected page must meet the editor with no gap or bottom border',
+      );
+      check(
+        bookmark.backgroundColor === tokenColor('--success') &&
+          parseFloat(bookmark.height) > parseFloat(bookmark.width),
+        'The selected Folio page has no vertical green bookmark',
       );
       const idle = tabs().find((other) => other !== tab)!;
       check(
-        getComputedStyle(idle.querySelector('.tab-dot')!).color === tokenColor('--text-muted'),
-        'Idle page mark is not muted',
+        getComputedStyle(idle.querySelector('.tab-dot')!, '::before').content === 'none',
+        'An idle page shows the selection bookmark',
       );
       check(
         getComputedStyle(tab).fontWeight === getComputedStyle(idle).fontWeight,
@@ -218,12 +227,19 @@ async function runTabsFit(testCase: StudioCase): Promise<string> {
       );
     }
 
-    // Editing swaps the page mark for the unsaved dot in the same slot.
+    const shortSlot = short.querySelector<HTMLElement>('.tab-dot')!;
     check(
-      getComputedStyle(short.querySelector('.tab-dot svg')!).opacity === '1' &&
-        getComputedStyle(short.querySelector('.tab-dot')!, '::before').opacity === '0',
-      'A saved tab does not show its page mark',
+      getComputedStyle(shortSlot, '::after').content === 'none',
+      'A saved file must not display a modification indicator',
     );
+    const closeButton = short.querySelector<HTMLButtonElement>('.tab-close')!;
+    if (matchMedia('(hover: hover)').matches) {
+      check(getComputedStyle(closeButton).opacity === '0', 'A resting tab keeps its close visible');
+      closeButton.focus();
+      await settle();
+      check(getComputedStyle(closeButton).opacity === '1', 'The focused close button is invisible');
+      closeButton.blur();
+    }
     click('button[aria-label="切换 Markdown 模式"]');
     await until(() => document.querySelector('.source-editor:not([hidden]) textarea'));
     const source = document.querySelector<HTMLTextAreaElement>(
@@ -238,14 +254,9 @@ async function runTabsFit(testCase: StudioCase): Promise<string> {
     await settle();
     check(geometry() === still, `Unsaved state moved the strip: ${still} => ${geometry()}`);
     check(
-      getComputedStyle(short.querySelector('.tab-dot svg')!).opacity === '0' &&
-        getComputedStyle(short.querySelector('.tab-dot')!, '::before').opacity === '1',
-      'Unsaved state did not replace the page mark with its dot',
-    );
-    check(
-      getComputedStyle(short.querySelector('.tab-dot')!, '::before').backgroundColor ===
-        tokenColor('--accent'),
-      'Unsaved dot is not in the accent color',
+      getComputedStyle(shortSlot, '::before').content !== 'none' &&
+        getComputedStyle(shortSlot, '::after').borderRadius === '50%',
+      'A selected dirty file must show both its bookmark and a round state dot',
     );
 
     // The three materials change radii and colors only, never the strip's geometry.
@@ -257,12 +268,21 @@ async function runTabsFit(testCase: StudioCase): Promise<string> {
         await colorMode(mode);
         check(geometry() === still, `${material.id}/${mode} changed the tab geometry`);
         check(
-          getComputedStyle(short.querySelector('.tab-dot')!, '::before').backgroundColor ===
-            tokenColor('--accent'),
-          `${material.id}/${mode} unsaved dot lost the accent color`,
+          getComputedStyle(shortSlot, '::after').backgroundColor ===
+            tokenColor(material.id === 'folio' ? '--success' : '--accent') &&
+            getComputedStyle(short).backgroundColor === tokenColor('--editor-bg'),
+          `${material.id}/${mode} lost the paper or mark color`,
         );
       }
     }
+    for (const tab of [long, medium]) {
+      tab.querySelector<HTMLButtonElement>('.tab-close')!.click();
+      await until(() => !tab.isConnected);
+    }
+    const gap =
+      document.querySelector('.tabbar-new')!.getBoundingClientRect().left -
+      short.getBoundingClientRect().right;
+    check(gap >= 0 && gap <= 10, `New tab button floats away from the only file: ${gap}px`);
     return `${testCase}: tabs hug their titles (${widths.map((value) => Math.round(value)).join('/')}px), stay put across activation, unsaved state and all six material/color combinations`;
   } finally {
     root.unmount();

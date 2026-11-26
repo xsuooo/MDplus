@@ -282,90 +282,87 @@ html[data-appearance='prism'][data-theme='dark'] {
 }
 
 .tabbar {
-  padding-inline: 24px;
-  border-bottom-color: var(--border);
+  --tab-ink: var(--accent);
+  padding-inline: 16px;
+  border-bottom: 0;
+  background-color: color-mix(in srgb, var(--bg) 92%, var(--tab-ink));
+  box-shadow: inset 0 -1px var(--border-strong);
+}
+html[data-appearance='folio'] .tabbar {
+  --tab-ink: var(--success);
+}
+html[data-theme='dark'] .tabbar {
+  background-color: color-mix(in srgb, var(--bg) 85%, black);
 }
 .tabbar-tabs {
-  gap: 4px;
-  align-items: center;
+  gap: 3px;
+  align-items: flex-end;
 }
-/* A tab is as wide as its name, up to a limit: no dead space before or after the title.
-   Both states share one weight, so switching tabs never resizes one or moves its neighbours. */
 .tab {
   position: relative;
   flex: 0 0 auto;
   min-width: 96px;
   max-width: 280px;
-  height: 32px;
+  height: 34px;
   margin-top: 0;
-  border-radius: var(--radius-sm);
+  border-radius: 9px 9px 0 0;
   border: 1px solid transparent;
-  padding-inline: 10px 4px;
-  gap: 8px;
+  border-bottom: 0;
+  padding-inline: 8px 4px;
+  gap: 5px;
+  font-weight: 500;
 }
 .tab.active {
   background: var(--editor-bg);
-  border-color: var(--border);
-  box-shadow: var(--shadow-soft);
-  font-weight: 400;
+  border-color: var(--border-strong);
 }
 .tab-title {
   flex: 1 1 auto;
 }
-/* Every tab leads with a page mark, in the accent color on the active tab. Unsaved or
-   changed-on-disk replaces it with a dot in the same slot, so the title never shifts. */
+.tab-extension {
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
 .tab-dot {
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
   width: 14px;
   height: 14px;
-  border-radius: 0;
-  color: var(--text-muted);
 }
-.tab-dot[data-dirty='1'],
-.tab-dot[data-external='1'],
-.tab.active .tab-dot[data-dirty='1'] {
-  background: none;
-  box-shadow: none;
-}
-.tab-dot > svg,
-.tab-dot::before {
-  grid-area: 1 / 1;
-  transition:
-    opacity var(--motion-fast) var(--ease-out),
-    scale var(--motion-enter) var(--ease-out);
-}
-.tab-dot > svg {
-  display: block;
-  opacity: 0.7;
-}
-.tab:hover .tab-dot > svg,
-.tab.active .tab-dot > svg {
-  opacity: 1;
-}
-.tab.active .tab-dot {
-  color: var(--accent);
-}
-.tab-dot::before {
+.tab.active .tab-dot::before {
   content: '';
-  width: 7px;
-  height: 7px;
+  width: 4px;
+  height: 12px;
+  margin-inline-end: auto;
+  border-radius: 3px;
+  background: var(--tab-ink);
+}
+.tab-dot:is([data-dirty='1'], [data-external='1'])::after {
+  content: '';
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: var(--accent);
-  opacity: 0;
-  scale: 0.4;
+  background: var(--tab-ink);
 }
-/* Outranks the hover and active rules above: the dot replaces the mark in every state. */
-.tab .tab-dot:is([data-dirty='1'], [data-external='1']) > svg {
-  opacity: 0;
+.tab-dot[data-external='1']::after {
+  border: 1px solid color-mix(in srgb, var(--mark-strong) 46%, var(--text));
+  border-radius: 0;
+  background: transparent;
+  rotate: 45deg;
 }
-.tab-dot:is([data-dirty='1'], [data-external='1'])::before {
-  opacity: 1;
-  scale: 1;
-}
-.tab-dot[data-external='1']::before {
-  background: var(--mark-strong);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mark-strong) 28%, transparent);
+@media (forced-colors: active) {
+  .tab.active {
+    border-color: Highlight;
+  }
+  .tab.active .tab-dot::before,
+  .tab-dot[data-dirty='1']:not([data-external='1'])::after {
+    background: Highlight;
+    forced-color-adjust: none;
+  }
+  .tab-dot[data-external='1']::after {
+    border-color: CanvasText;
+  }
 }
 .tab-close {
   width: 24px;
@@ -375,8 +372,8 @@ html[data-appearance='prism'][data-theme='dark'] {
 .tabbar-new {
   width: 32px;
   height: 32px;
-  margin-left: 10px;
-  color: var(--text);
+  margin-left: 6px;
+  color: var(--text-muted);
   font-weight: 400;
 }
 

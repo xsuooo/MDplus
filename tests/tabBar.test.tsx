@@ -52,7 +52,7 @@ describe('tab keyboard interaction', () => {
     expect(element.getAttribute('title')).toBe('E:\\桌面\\note.md');
   });
 
-  it('leads every tab with a page mark and keeps the state on the same slot', () => {
+  it('keeps the decorative state slot separate from the accessible file name', () => {
     render(
       <TabBar
         bindings={DEFAULT_SHORTCUTS}
@@ -68,12 +68,7 @@ describe('tab keyboard interaction', () => {
       />,
     );
     const slots = screen.getAllByRole('tab').map((element) => element.querySelector('.tab-dot')!);
-    expect(slots.map((slot) => slot.querySelectorAll('svg').length)).toEqual([1, 1, 1]);
-    expect(slots.map((slot) => slot.querySelector('svg')!.getAttribute('aria-hidden'))).toEqual([
-      'true',
-      'true',
-      'true',
-    ]);
+    expect(slots.map((slot) => slot.getAttribute('aria-hidden'))).toEqual(['true', 'true', 'true']);
     expect(
       slots.map((slot) => [slot.getAttribute('data-dirty'), slot.getAttribute('data-external')]),
     ).toEqual([
@@ -82,12 +77,34 @@ describe('tab keyboard interaction', () => {
       ['0', '1'],
     ]);
     expect(slots[2].getAttribute('title')).toBe('文件已在外部修改');
-    // The mark never becomes part of the tab's accessible name or its title text.
+    expect(screen.getByRole('tab', { name: 'edited.md,未保存' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'changed.md,文件已在其他应用中修改' })).toBeTruthy();
     expect(screen.getAllByRole('tab').map((element) => element.textContent)).toEqual([
       'saved.md',
       'edited.md',
       'changed.md',
     ]);
+  });
+
+  it.each<[string, string | undefined]>([
+    ['想法.第二稿.MD', '.MD'],
+    ['notes.markdown', '.markdown'],
+    ['未命名 1', undefined],
+    ['notes.md.txt', undefined],
+  ])('preserves %s while styling only its Markdown extension', (title, extension) => {
+    render(
+      <TabBar
+        bindings={DEFAULT_SHORTCUTS}
+        tabs={[{ ...tab, title, isNew: false }]}
+        activeId={tab.id}
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+        onNew={vi.fn()}
+      />,
+    );
+    const element = screen.getByRole('tab', { name: title });
+    expect(element.textContent).toBe(title);
+    expect(element.querySelector('.tab-extension')?.textContent).toBe(extension);
   });
 
   it.each(['Enter', ' '])('preserves %j activation on the nested close button', (key) => {

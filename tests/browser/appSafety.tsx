@@ -990,6 +990,13 @@ export async function runAppSafetyRegression(testCase: SafetyCase): Promise<stri
       'background revision marker',
       35000,
     );
+    const marker = getComputedStyle(document.querySelector('[role="tab"] .tab-dot')!, '::after');
+    check(
+      marker.rotate === '45deg' &&
+        marker.borderTopStyle === 'solid' &&
+        marker.backgroundColor === 'rgba(0, 0, 0, 0)',
+      'External changes must have an outlined diamond distinct from the unsaved dot',
+    );
     check(
       confirms === 0 && text().includes('other document'),
       'Background polling interrupted the active document',

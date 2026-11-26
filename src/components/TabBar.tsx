@@ -1,7 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useRef } from 'react';
 import type { Tab } from '../lib/types';
 import { TAB_WHEEL_INITIAL, wheelStep, type TabWheelDirection } from '../lib/tabWheel';
-import { IconClose, IconPage } from './icons';
+import { IconClose } from './icons';
 import { displayPath } from '../lib/paths';
 import { formatActionShortcuts, type ShortcutBindings } from '../lib/shortcuts';
 
@@ -13,6 +13,16 @@ interface TabBarProps {
   onClose: (id: string) => void;
   onNew: () => void;
   onWheelSwitch?: (direction: TabWheelDirection) => void;
+}
+
+function TabTitle({ title }: { title: string }) {
+  const [name, extension] = title.split(/(\.(?:md|markdown))$/i);
+  return (
+    <span className="tab-title">
+      {name}
+      {extension && <span className="tab-extension">{extension}</span>}
+    </span>
+  );
 }
 
 export const TabBar = memo(function TabBar({
@@ -156,10 +166,9 @@ export const TabBar = memo(function TabBar({
               data-dirty={tab.dirty || tab.isNew ? '1' : '0'}
               data-external={tab.externalChanged ? '1' : '0'}
               title={tab.externalChanged ? '文件已在外部修改' : undefined}
-            >
-              <IconPage size={14} strokeWidth={1.6} aria-hidden="true" />
-            </span>
-            <span className="tab-title">{tab.title}</span>
+              aria-hidden="true"
+            />
+            <TabTitle title={tab.title} />
             <button
               className="tab-close"
               onClick={(e) => {
@@ -169,7 +178,7 @@ export const TabBar = memo(function TabBar({
               title={`关闭 ${tab.title}`}
               aria-label={`关闭 ${tab.title}`}
             >
-              <IconClose size={16} strokeWidth={2} aria-hidden="true" />
+              <IconClose size={13} strokeWidth={1.7} aria-hidden="true" />
             </button>
           </div>
         ))}
